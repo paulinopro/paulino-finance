@@ -1,5 +1,5 @@
 /**
- * Comprueba que los PNG en public/icons/ coincidan con sizes en manifest.webmanifest.
+ * Comprueba que los PNG listados en manifest.webmanifest existan y coincidan en tamaño.
  * Uso: node scripts/validate-pwa-icons.js
  */
 const fs = require('fs');

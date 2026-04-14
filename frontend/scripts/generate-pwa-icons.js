@@ -3,10 +3,11 @@
  *
  * 1. Coloca tu icono (PNG, idealmente cuadrado y ≥512px, mejor 1024px) en:
  *    public/pwa-icon-source.png
- *    (puedes copiarlo desde tu archivo definitivo, p. ej. el que usas en build/icons).
+ *    (puedes copiarlo desde tu archivo definitivo, p. ej. el que usas en build/pwa-icons).
  * 2. Ejecuta: npm run generate-icons
  *
- * Escribe en public/icons/* y public/apple-touch-icon.png (CRA los copia a build/ al hacer npm run build).
+ * Escribe en public/pwa-icons/* y public/apple-touch-icon.png (CRA los copia a build/ al hacer npm run build).
+ * Nota: evitamos la carpeta /icons/ en la URL; algunos nginx/Plesk reservan o rompen ese prefijo.
  */
 const fs = require('fs');
 const path = require('path');
@@ -31,7 +32,7 @@ async function main() {
       [
         'No existe public/pwa-icon-source.png',
         'Copia ahí tu icono definitivo (PNG cuadrado, recomendado 1024×1024).',
-        'Ejemplo: copia el PNG que ya tengas en build/icons (p. ej. icon-512.png) y renómbralo a pwa-icon-source.png.',
+        'Ejemplo: copia el PNG que ya tengas en build/pwa-icons (p. ej. icon-512.png) y renómbralo a pwa-icon-source.png.',
       ].join('\n')
     );
     process.exit(1);
@@ -39,8 +40,7 @@ async function main() {
 
   const master = await Jimp.read(SOURCE);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const iconsDir = path.join(publicDir, 'icons');
-  await fs.promises.mkdir(iconsDir, { recursive: true });
+  await fs.promises.mkdir(path.join(publicDir, 'pwa-icons'), { recursive: true });
 
   const written = [];
   for (const icon of manifest.icons) {
