@@ -2,6 +2,13 @@ const { GenerateSW } = require('workbox-webpack-plugin');
 
 const publicUrl = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
+/** RegExp serializado en el SW; no usar variables dentro de funciones match (no existen en el SW). */
+function pwaIconsRuntimePattern() {
+  const pathPart = `${publicUrl}/pwa-icons/`.replace(/\/+/g, '/');
+  const escaped = pathPart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escaped}[^?]+\\.png$`, 'i');
+}
+
 /**
  * No añadimos PNG/manifest de public/ a additionalManifestEntries: Workbox precachea en el
  * install y un 404 en producción rompe todo el SW (bad-precaching-response). Los iconos se
@@ -35,9 +42,7 @@ module.exports = {
                 handler: 'NetworkOnly',
               },
               {
-                urlPattern: ({ url }) =>
-                  url.pathname.startsWith(`${publicUrl || ''}/pwa-icons/`.replace(/\/+/g, '/')) &&
-                  url.pathname.endsWith('.png'),
+                urlPattern: pwaIconsRuntimePattern(),
                 handler: 'StaleWhileRevalidate',
                 options: {
                   cacheName: 'pwa-icons',
