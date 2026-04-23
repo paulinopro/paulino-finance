@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { SubscriptionProvider } from './context/SubscriptionContext';
@@ -14,7 +14,8 @@ const Register = React.lazy(() => import('./pages/Register'));
 const ForgotPassword = React.lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = React.lazy(() => import('./pages/ResetPassword'));
 const Layout = React.lazy(() => import('./components/Layout'));
-const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const AdminLayout = React.lazy(() => import('./components/AdminLayout'));
+const RootIndex = React.lazy(() => import('./components/RootIndex'));
 const Cards = React.lazy(() => import('./pages/Cards'));
 const Loans = React.lazy(() => import('./pages/Loans'));
 const Income = React.lazy(() => import('./pages/Income'));
@@ -35,7 +36,10 @@ const Vehicles = React.lazy(() => import('./pages/Vehicles'));
 const NotificationHistory = React.lazy(() => import('./pages/NotificationHistory'));
 const Categories = React.lazy(() => import('./pages/Categories'));
 const Admin = React.lazy(() => import('./pages/Admin'));
+const AdminUserDetail = React.lazy(() => import('./pages/AdminUserDetail'));
 const AdminSubscriptionPlans = React.lazy(() => import('./pages/AdminSubscriptionPlans'));
+const AdminAudit = React.lazy(() => import('./pages/AdminAudit'));
+const AdminStatus = React.lazy(() => import('./pages/AdminStatus'));
 const Subscription = React.lazy(() => import('./pages/Subscription'));
 
 function RouteFallback() {
@@ -46,13 +50,26 @@ function RouteFallback() {
   );
 }
 
+function ProtectedShell() {
+  return (
+    <ProtectedRoute>
+      <Outlet />
+    </ProtectedRoute>
+  );
+}
+
 function App() {
   const isNarrow = useMediaQuery('(max-width: 639px)');
 
   return (
     <AuthProvider>
       <SubscriptionProvider>
-        <Router>
+        <Router
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <Toaster
             position={isNarrow ? 'top-center' : 'top-right'}
             containerClassName="!max-w-[min(100vw-1.5rem,24rem)]"
@@ -73,51 +90,44 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <Layout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<Dashboard />} />
-                <Route path="cards" element={<Cards />} />
-                <Route path="loans" element={<Loans />} />
-                <Route path="income" element={<Income />} />
-                <Route path="expenses" element={<Expenses />} />
-                <Route path="accounts" element={<Accounts />} />
-                <Route path="reports" element={<Reports />} />
-                <Route path="calendar" element={<Calendar />} />
-                <Route path="profile" element={<Profile />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="templates" element={<NotificationTemplates />} />
-                <Route path="accounts-payable" element={<AccountsPayable />} />
-                <Route path="accounts-receivable" element={<AccountsReceivable />} />
-                <Route path="budgets" element={<Budgets />} />
-                <Route path="financial-goals" element={<FinancialGoals />} />
-                <Route path="cash-flow" element={<CashFlow />} />
-                <Route path="projections" element={<Projections />} />
-                <Route path="vehicles" element={<Vehicles />} />
-                <Route path="notifications/history" element={<NotificationHistory />} />
-                <Route path="categories" element={<Categories />} />
-                <Route path="subscription" element={<Subscription />} />
+              <Route element={<ProtectedShell />}>
                 <Route
                   path="admin"
                   element={
                     <AdminRoute>
-                      <Admin />
+                      <AdminLayout />
                     </AdminRoute>
                   }
-                />
-                <Route
-                  path="admin/subscriptions"
-                  element={
-                    <AdminRoute>
-                      <AdminSubscriptionPlans />
-                    </AdminRoute>
-                  }
-                />
+                >
+                  <Route index element={<Admin />} />
+                  <Route path="users/:userId" element={<AdminUserDetail />} />
+                  <Route path="audit" element={<AdminAudit />} />
+                  <Route path="system" element={<AdminStatus />} />
+                  <Route path="subscriptions" element={<AdminSubscriptionPlans />} />
+                </Route>
+                <Route path="/" element={<Layout />}>
+                  <Route index element={<RootIndex />} />
+                  <Route path="cards" element={<Cards />} />
+                  <Route path="loans" element={<Loans />} />
+                  <Route path="income" element={<Income />} />
+                  <Route path="expenses" element={<Expenses />} />
+                  <Route path="accounts" element={<Accounts />} />
+                  <Route path="reports" element={<Reports />} />
+                  <Route path="calendar" element={<Calendar />} />
+                  <Route path="profile" element={<Profile />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="templates" element={<NotificationTemplates />} />
+                  <Route path="accounts-payable" element={<AccountsPayable />} />
+                  <Route path="accounts-receivable" element={<AccountsReceivable />} />
+                  <Route path="budgets" element={<Budgets />} />
+                  <Route path="financial-goals" element={<FinancialGoals />} />
+                  <Route path="cash-flow" element={<CashFlow />} />
+                  <Route path="projections" element={<Projections />} />
+                  <Route path="vehicles" element={<Vehicles />} />
+                  <Route path="notifications/history" element={<NotificationHistory />} />
+                  <Route path="categories" element={<Categories />} />
+                  <Route path="subscription" element={<Subscription />} />
+                </Route>
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

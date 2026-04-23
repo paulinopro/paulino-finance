@@ -13,6 +13,7 @@ router.use((0, requireSubscriptionModule_1.requireSubscriptionModule)('income'))
 router.get('/', incomeController_1.getIncome);
 router.get('/:id', incomeController_1.getIncomeItem);
 router.post('/', incomeController_1.createIncome);
+router.patch('/:id/receipt-status', incomeController_1.updateIncomeReceiptStatus);
 router.put('/:id', incomeController_1.updateIncome);
 router.delete('/:id', incomeController_1.deleteIncome);
 exports.default = router;

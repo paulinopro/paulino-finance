@@ -5,10 +5,10 @@ const database_1 = require("../config/database");
 const getAccounts = async (req, res) => {
     try {
         const userId = req.userId;
-        const { search, bank } = req.query;
+        const { search, bank, kind } = req.query;
         let queryText = `
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
-              currency_type, created_at, updated_at
+              currency_type, account_kind, created_at, updated_at
        FROM bank_accounts
        WHERE user_id = $1
     `;
@@ -24,6 +24,11 @@ const getAccounts = async (req, res) => {
             params.push(`%${bank}%`);
             paramIndex++;
         }
+        if (kind && (kind === 'bank' || kind === 'cash' || kind === 'wallet')) {
+            queryText += ` AND account_kind = $${paramIndex}`;
+            params.push(kind);
+            paramIndex++;
+        }
         queryText += ` ORDER BY created_at DESC`;
         const result = await (0, database_1.query)(queryText, params);
         const accounts = result.rows.map((row) => ({
@@ -34,6 +39,7 @@ const getAccounts = async (req, res) => {
             balanceDop: parseFloat(row.balance_dop || 0),
             balanceUsd: parseFloat(row.balance_usd || 0),
             currencyType: row.currency_type,
+            accountKind: row.account_kind || 'bank',
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         }));
@@ -50,6 +56,19 @@ const getAccounts = async (req, res) => {
             }
             return sum;
         }, 0);
+        const isCashLike = (k) => k === 'cash' || k === 'wallet';
+        const totalBankDop = accounts
+            .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
+            .reduce((s, a) => s + a.balanceDop, 0);
+        const totalBankUsd = accounts
+            .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
+            .reduce((s, a) => s + a.balanceUsd, 0);
+        const totalCashDop = accounts
+            .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
+            .reduce((s, a) => s + a.balanceDop, 0);
+        const totalCashUsd = accounts
+            .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
+            .reduce((s, a) => s + a.balanceUsd, 0);
         res.json({
             success: true,
             accounts,
@@ -57,6 +76,10 @@ const getAccounts = async (req, res) => {
                 totalBalanceDop,
                 totalBalanceUsd,
                 totalAccounts: accounts.length,
+                totalBankDop,
+                totalBankUsd,
+                totalCashDop,
+                totalCashUsd,
             },
         });
     }
@@ -102,15 +125,16 @@ exports.getAccount = getAccount;
 const createAccount = async (req, res) => {
     try {
         const userId = req.userId;
-        const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType } = req.body;
+        const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } = req.body;
         if (!bankName || !accountType || !currencyType) {
             return res.status(400).json({ message: 'Missing required fields' });
         }
+        const kind = accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : 'bank';
         const result = await (0, database_1.query)(`INSERT INTO bank_accounts 
-       (user_id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (user_id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type, account_kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
-                 currency_type, created_at, updated_at`, [
+                 currency_type, account_kind, created_at, updated_at`, [
             userId,
             bankName,
             accountType,
@@ -118,6 +142,7 @@ const createAccount = async (req, res) => {
             balanceDop || 0,
             balanceUsd || 0,
             currencyType,
+            kind,
         ]);
         const row = result.rows[0];
         res.status(201).json({
@@ -131,6 +156,7 @@ const createAccount = async (req, res) => {
                 balanceDop: parseFloat(row.balance_dop || 0),
                 balanceUsd: parseFloat(row.balance_usd || 0),
                 currencyType: row.currency_type,
+                accountKind: row.account_kind || 'bank',
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -146,11 +172,12 @@ const updateAccount = async (req, res) => {
     try {
         const userId = req.userId;
         const accountId = parseInt(req.params.id);
-        const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType } = req.body;
+        const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } = req.body;
         const checkResult = await (0, database_1.query)('SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({ message: 'Account not found' });
         }
+        const kindUpdate = accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : null;
         const result = await (0, database_1.query)(`UPDATE bank_accounts
        SET bank_name = COALESCE($1, bank_name),
            account_type = COALESCE($2, account_type),
@@ -158,16 +185,18 @@ const updateAccount = async (req, res) => {
            balance_dop = COALESCE($4, balance_dop),
            balance_usd = COALESCE($5, balance_usd),
            currency_type = COALESCE($6, currency_type),
+           account_kind = COALESCE($7, account_kind),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 AND user_id = $8
+       WHERE id = $8 AND user_id = $9
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
-                 currency_type, created_at, updated_at`, [
+                 currency_type, account_kind, created_at, updated_at`, [
             bankName,
             accountType,
             accountNumber,
             balanceDop,
             balanceUsd,
             currencyType,
+            kindUpdate,
             accountId,
             userId,
         ]);
@@ -183,6 +212,7 @@ const updateAccount = async (req, res) => {
                 balanceDop: parseFloat(row.balance_dop || 0),
                 balanceUsd: parseFloat(row.balance_usd || 0),
                 currencyType: row.currency_type,
+                accountKind: row.account_kind || 'bank',
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { getSubscriptionDetailsForUser } from '../services/subscriptionService';
+import { getSubscriptionDetailsForUser, getSubscriptionPaymentHistoryForUser } from '../services/subscriptionService';
 import { query } from '../config/database';
 import { createPaypalSubscriptionApproval } from '../services/paypalService';
 
@@ -10,6 +10,16 @@ export const getMySubscription = async (req: AuthRequest, res: Response) => {
     res.json(details);
   } catch (e: any) {
     console.error('getMySubscription', e);
+    res.status(500).json({ message: 'Error' });
+  }
+};
+
+export const getMyPaymentHistory = async (req: AuthRequest, res: Response) => {
+  try {
+    const payments = await getSubscriptionPaymentHistoryForUser(req.userId!);
+    res.json({ payments });
+  } catch (e: any) {
+    console.error('getMyPaymentHistory', e);
     res.status(500).json({ message: 'Error' });
   }
 };

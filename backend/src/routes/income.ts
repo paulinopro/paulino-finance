@@ -5,6 +5,7 @@ import {
   createIncome,
   updateIncome,
   deleteIncome,
+  updateIncomeReceiptStatus,
 } from '../controllers/incomeController';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
@@ -17,6 +18,7 @@ router.use(requireSubscriptionModule('income'));
 router.get('/', getIncome);
 router.get('/:id', getIncomeItem);
 router.post('/', createIncome);
+router.patch('/:id/receipt-status', updateIncomeReceiptStatus);
 router.put('/:id', updateIncome);
 router.delete('/:id', deleteIncome);
 

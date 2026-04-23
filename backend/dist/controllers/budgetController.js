@@ -36,9 +36,17 @@ const getBudgets = async (req, res) => {
            AND currency = $2
            AND (category = $3 OR $3 IS NULL)
            AND (
-             (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $4 ${budget.period_type === 'MONTHLY' ? 'AND EXTRACT(MONTH FROM date) = $5' : ''})
-             OR (expense_type = 'RECURRING_MONTHLY' AND $6 = 'MONTHLY')
-             OR (expense_type = 'ANNUAL' AND EXTRACT(YEAR FROM date) = $4)
+             (recurrence_type = 'non_recurrent' AND EXTRACT(YEAR FROM date) = $4 ${budget.period_type === 'MONTHLY' ? 'AND EXTRACT(MONTH FROM date) = $5' : ''})
+             OR (
+               recurrence_type = 'recurrent'
+               AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
+               AND $6 = 'MONTHLY'
+             )
+             OR (
+               recurrence_type = 'recurrent'
+               AND LOWER(TRIM(COALESCE(frequency, ''))) = 'annual'
+               AND EXTRACT(YEAR FROM date) = $4
+             )
            )`, budget.period_type === 'MONTHLY'
                 ? [userId, budget.currency, budget.category, budget.period_year, budget.period_month, budget.period_type]
                 : [userId, budget.currency, budget.category, budget.period_year, budget.period_type]);

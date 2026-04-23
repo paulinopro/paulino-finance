@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
@@ -33,13 +33,18 @@ import {
   Wallet as WalletIcon,
   Shield,
   UserCircle,
-  Layers,
+  Wrench,
 } from 'lucide-react';
-import { Notification } from '../types';
+import type { AppNotification } from '../types';
 import toast from 'react-hot-toast';
 import OfflineBanner from './OfflineBanner';
+import TablePagination from './TablePagination';
 import MobileTabBar from './MobileTabBar';
+import SystemNotificationBody from './SystemNotificationBody';
+import { useForegroundPushNotifications } from '../hooks/useForegroundPushNotifications';
+import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useMobileTabBarVisible } from '../hooks/useMobileTabBarVisible';
+import { allowSuperAdminClientView } from '../constants/superAdminClientView';
 
 const SIDEBAR_COLLAPSED_KEY = 'paulino-sidebar-collapsed';
 
@@ -50,11 +55,12 @@ interface MenuItem {
   children?: MenuItem[];
   /** Clave de módulo de suscripción; si falta, el ítem no se filtra por plan */
   module?: string;
+  /** Resaltado activo (p. ej. /admin y /admin/users/:id) */
+  isActivePath?: (pathname: string) => boolean;
 }
 
 function pathToModule(pathname: string): string | null {
   if (pathname === '/' || pathname === '') return 'dashboard';
-  if (pathname.startsWith('/admin')) return null;
   if (pathname.startsWith('/subscription')) return null;
   const first = pathname.split('/').filter(Boolean)[0];
   const map: Record<string, string> = {
@@ -114,27 +120,56 @@ const Layout: React.FC = () => {
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
   );
   const [expandedMenus, setExpandedMenus] = useState<{ [key: string]: boolean }>({});
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationPage, setNotificationPage] = useState(1);
   const [notificationTotalPages, setNotificationTotalPages] = useState(1);
+  const [publicMaintenanceMode, setPublicMaintenanceMode] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const response = await api.get('/notifications', {
+        params: {
+          unreadOnly: true,
+          page: notificationPage,
+          limit: 10, // 10 notifications per page in header
+        },
+      });
+      setNotifications(response.data.notifications || []);
+      setUnreadCount(response.data.pagination?.total || 0);
+      setNotificationTotalPages(response.data.pagination?.totalPages || 1);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [notificationPage]);
+
   const { user, logout, impersonatedBy, stopImpersonation } = useAuth();
-  const { hasModule, loading: subLoading, loadError: subscriptionLoadError, refetch: refetchSubscription } =
-    useSubscription();
+  const {
+    hasModule,
+    subscription,
+    loading: subLoading,
+    loadError: subscriptionLoadError,
+    refetch: refetchSubscription,
+  } = useSubscription();
   const location = useLocation();
   const navigate = useNavigate();
   const showMobileTabBar = useMobileTabBarVisible();
 
+  useForegroundPushNotifications(notifications, user?.id);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    void syncPushSubscriptionWithServer();
+  }, [user?.id]);
+
   const menuItems: MenuItem[] = useMemo(
     () => [
       ...(user?.isSuperAdmin && impersonatedBy == null
-        ? ([
-          { path: '/admin', label: 'Administración', icon: Shield },
-          { path: '/admin/subscriptions', label: 'Planes de suscripción', icon: Layers },
-        ] as MenuItem[])
+        ? ([{ path: '/admin', label: 'Consola de administración', icon: Shield }] as MenuItem[])
         : []),
       { path: '/', label: 'Resumen', icon: LayoutDashboard, module: 'dashboard' },
       {
@@ -156,7 +191,7 @@ const Layout: React.FC = () => {
         children: [
           { path: '/calendar', label: 'Calendario', icon: CalendarIcon, module: 'calendar' },
           { path: '/budgets', label: 'Presupuestos', icon: FileText, module: 'budgets' },
-          { path: '/financial-goals', label: 'Metas Financieras', icon: Target, module: 'financial_goals' },
+          { path: '/financial-goals', label: 'Metas', icon: Target, module: 'financial_goals' },
         ],
       },
       {
@@ -203,15 +238,50 @@ const Layout: React.FC = () => {
   );
 
   useEffect(() => {
-    if (subLoading || !user) return;
-    if (subscriptionLoadError) return;
+    if (!user?.isSuperAdmin || impersonatedBy != null) return;
+    if (allowSuperAdminClientView()) return;
     const p = location.pathname;
-    if (p.startsWith('/admin') || p.startsWith('/subscription')) return;
+    if (p === '/profile' || p.startsWith('/subscription')) return;
+    navigate('/admin', { replace: true });
+  }, [user?.isSuperAdmin, impersonatedBy, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (subLoading) return;
+    if (subscriptionLoadError) return;
+    // Sin cuerpo de /subscription/me no evaluar acceso (evita toast falso al refrescar).
+    if (subscription == null) return;
+    const p = location.pathname;
+    if (p.startsWith('/subscription')) return;
     const mod = pathToModule(p);
-    if (mod && !hasModule(mod)) {
-      navigate('/subscription', { replace: true });
+    if (!mod || hasModule(mod)) return;
+
+    const hasAssignedPlan = Boolean(
+      user.isSuperAdmin ||
+        user.hasUserSubscriptionRecord === true ||
+        subscription?.isSuperAdmin ||
+        subscription?.plan != null ||
+        (subscription != null && subscription.status !== 'none')
+    );
+    if (hasAssignedPlan) {
+      // Suscripción vencida: hay fila/plan pero sin acceso a módulos — mensaje y destino correctos
+      if (subscription?.status === 'expired') {
+        if (!p.startsWith('/subscription')) {
+          toast.error('Tu suscripción no está vigente. Renueva o elige un plan para continuar.');
+          navigate('/subscription', { replace: true });
+        }
+        return;
+      }
+      if (p !== '/') {
+        toast.error(
+          'Tu plan actual no incluye esta sección. Puedes cambiar de plan en Planes y suscripción.'
+        );
+        navigate('/', { replace: true });
+      }
+      return;
     }
-  }, [location.pathname, subLoading, subscriptionLoadError, user, hasModule, navigate]);
+    navigate('/subscription', { replace: true });
+  }, [location.pathname, subLoading, subscriptionLoadError, user, subscription, hasModule, navigate]);
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
@@ -224,7 +294,7 @@ const Layout: React.FC = () => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, [notificationPage]);
+  }, [fetchNotifications]);
 
   useEffect(() => {
     if (showNotifications) {
@@ -255,23 +325,6 @@ const Layout: React.FC = () => {
     };
   }, [showNotifications]);
 
-  const fetchNotifications = async () => {
-    try {
-      const response = await api.get('/notifications', {
-        params: {
-          unreadOnly: true,
-          page: notificationPage,
-          limit: 10, // 10 notifications per page in header
-        },
-      });
-      setNotifications(response.data.notifications || []);
-      setUnreadCount(response.data.pagination?.total || 0);
-      setNotificationTotalPages(response.data.pagination?.totalPages || 1);
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    }
-  };
-
   const markAsRead = async (id: number) => {
     try {
       await api.put(`/notifications/${id}/read`);
@@ -298,11 +351,14 @@ const Layout: React.FC = () => {
   };
 
   const isMenuActive = (item: MenuItem): boolean => {
+    if (item.isActivePath) {
+      return item.isActivePath(location.pathname);
+    }
     if (item.path) {
       return location.pathname === item.path;
     }
     if (item.children) {
-      return item.children.some((child) => child.path === location.pathname);
+      return item.children.some((child) => isMenuActive(child));
     }
     return false;
   };
@@ -394,17 +450,26 @@ const Layout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-dark-900 flex w-full max-w-[100vw] overflow-x-hidden">
+    <div
+      className="min-h-screen min-h-[100dvh] flex w-full max-w-[100vw] overflow-x-hidden bg-dark-900"
+    >
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] max-w-[85vw] sm:w-64 bg-dark-800 border-r border-dark-700 transform transition-transform duration-300 ease-in-out pt-[env(safe-area-inset-top,0px)] ${sidebarVisible ? 'translate-x-0' : '-translate-x-full'
-          }`}
+        className={`fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] max-w-[85vw] sm:w-64 transform transition-transform duration-300 ease-in-out pt-[env(safe-area-inset-top,0px)] bg-dark-800 border-r border-dark-700 ${
+          sidebarVisible ? 'translate-x-0' : '-translate-x-full'
+        }`}
       >
         <div className="flex flex-col h-full min-h-0">
-          <div className="flex items-center justify-between gap-2 p-4 sm:p-6 border-b border-dark-700 shrink-0">
-            <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent truncate">
+          <div
+            className="flex items-center justify-between gap-2 p-4 sm:p-6 border-b shrink-0 border-dark-700"
+          >
+            <div className="min-w-0">
+            <h1
+              className="text-lg sm:text-2xl font-bold truncate bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent"
+            >
               Paulino Finance
             </h1>
+            </div>
             <button
               type="button"
               onClick={closeMobileDrawer}
@@ -419,7 +484,9 @@ const Layout: React.FC = () => {
             {filteredMenuItems.map((item) => renderMenuItem(item))}
           </nav>
 
-          <div className="p-3 sm:p-4 border-t border-dark-700 pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-4 shrink-0">
+          <div
+            className="p-3 sm:p-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-4 shrink-0 border-dark-700"
+          >
             <Link
               to="/profile"
               title="Mi perfil"
@@ -466,20 +533,24 @@ const Layout: React.FC = () => {
           }`}
       >
         {/* Top bar */}
-        <header className="sticky top-0 z-30 bg-dark-800/95 backdrop-blur-sm border-b border-dark-700 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 min-h-[2.75rem] sm:min-h-[3rem] pt-[max(0.5rem,env(safe-area-inset-top))]">
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] -ml-1 p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80 shrink-0"
-            aria-label={sidebarVisible ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
-            aria-expanded={sidebarVisible}
-          >
-            {sidebarVisible ? (
-              <PanelLeftClose size={22} aria-hidden />
-            ) : (
-              <PanelLeftOpen size={22} aria-hidden />
-            )}
-          </button>
+        <header
+          className="sticky top-0 z-30 backdrop-blur-sm px-3 sm:px-4 py-2 flex items-center justify-between gap-2 min-h-[2.75rem] sm:min-h-[3rem] pt-[max(0.5rem,env(safe-area-inset-top))] bg-dark-800/95 border-b border-dark-700"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] -ml-1 p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80 shrink-0"
+              aria-label={sidebarVisible ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
+              aria-expanded={sidebarVisible}
+            >
+              {sidebarVisible ? (
+                <PanelLeftClose size={22} aria-hidden />
+              ) : (
+                <PanelLeftOpen size={22} aria-hidden />
+              )}
+            </button>
+          </div>
           <div className="flex-1 lg:flex-none" aria-hidden="true" />
           <div className="flex items-center justify-end gap-1.5 sm:gap-3 shrink-0">
             <div className="relative">
@@ -533,8 +604,13 @@ const Layout: React.FC = () => {
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <p className="text-white font-medium text-sm">{notification.title}</p>
-                              <p className="text-dark-400 text-xs mt-1">{notification.message}</p>
+                              <p className="text-white font-medium text-sm leading-snug">{notification.title}</p>
+                              <SystemNotificationBody
+                                variant="compact"
+                                title={notification.title}
+                                message={notification.message}
+                                className="mt-2 max-h-[min(12rem,40vh)] overflow-y-auto overscroll-contain pr-0.5"
+                              />
                               <p className="text-dark-500 text-xs mt-1">
                                 {new Date(notification.createdAt).toLocaleDateString('es-DO', {
                                   year: 'numeric',
@@ -553,27 +629,15 @@ const Layout: React.FC = () => {
                       ))
                     )}
                   </div>
-                  {notificationTotalPages > 1 && (
-                    <div className="p-3 border-t border-dark-700 flex items-center justify-between">
-                      <button
-                        onClick={() => setNotificationPage((prev) => Math.max(1, prev - 1))}
-                        disabled={notificationPage === 1}
-                        className="px-3 py-1 text-sm bg-dark-700 text-white rounded hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        Anterior
-                      </button>
-                      <span className="text-xs text-dark-400">
-                        Página {notificationPage} de {notificationTotalPages}
-                      </span>
-                      <button
-                        onClick={() => setNotificationPage((prev) => Math.min(notificationTotalPages, prev + 1))}
-                        disabled={notificationPage === notificationTotalPages}
-                        className="px-3 py-1 text-sm bg-dark-700 text-white rounded hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        Siguiente
-                      </button>
-                    </div>
-                  )}
+                  <TablePagination
+                    variant="compact"
+                    currentPage={notificationPage}
+                    totalPages={notificationTotalPages}
+                    totalItems={unreadCount}
+                    itemsPerPage={10}
+                    onPageChange={setNotificationPage}
+                    itemLabel="notificaciones"
+                  />
                   <div className="p-4 border-t border-dark-700">
                     <Link
                       to="/notifications/history"
@@ -590,6 +654,16 @@ const Layout: React.FC = () => {
         </header>
 
         <OfflineBanner />
+
+        {publicMaintenanceMode && !user?.isSuperAdmin && (
+          <div className="bg-amber-900/35 border-b border-amber-700/50 px-3 sm:px-4 py-2.5 flex items-start gap-2 text-sm text-amber-100/95">
+            <Wrench className="w-4 h-4 shrink-0 mt-0.5 text-amber-400/90" aria-hidden />
+            <p>
+              La plataforma está en <span className="font-medium">modo mantenimiento</span>: solo lectura en
+              datos (ingresos, gastos, etc.). Inicio de sesión y consultas siguen disponibles.
+            </p>
+          </div>
+        )}
 
         {subscriptionLoadError && user && !user.isSuperAdmin && (
           <div className="bg-red-900/30 border-b border-red-700/45 px-3 sm:px-4 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">

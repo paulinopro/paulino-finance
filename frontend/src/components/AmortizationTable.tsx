@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import api from '../services/api';
-import { AmortizationScheduleItem, LoanAmortizationSummary, LoanPayment } from '../types';
+import { AmortizationScheduleItem, BankAccount, LoanAmortizationSummary, LoanPayment } from '../types';
 import { X, CheckCircle, Clock, AlertCircle, Calendar, Edit, Trash2, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { formatDateInTimezone } from '../utils/dateUtils';
+import { formatDateInTimezone, todayYmdLocal } from '../utils/dateUtils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
+import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 
 interface AmortizationTableProps {
   loanId: number;
@@ -29,25 +30,33 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
   const [selectedInstallment, setSelectedInstallment] = useState<AmortizationScheduleItem | null>(null);
   const [editingPayment, setEditingPayment] = useState<LoanPayment | null>(null);
   const [paymentData, setPaymentData] = useState({
-    paymentDate: new Date().toISOString().split('T')[0],
+    paymentDate: todayYmdLocal(),
     amount: '',
     paymentType: 'COMPLETE' as 'COMPLETE' | 'PARTIAL' | 'ADVANCE' | 'INTEREST',
     notes: '',
     installmentNumber: undefined as number | undefined,
+    bankAccountId: '',
   });
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
   useEffect(() => {
-    fetchAmortizationData();
-  }, [loanId]);
+    (async () => {
+      try {
+        const res = await api.get('/accounts');
+        setBankAccounts(res.data.accounts || []);
+      } catch {
+        setBankAccounts([]);
+      }
+    })();
+  }, []);
 
-  const fetchAmortizationData = async () => {
+  const fetchAmortizationData = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/loans/${loanId}/amortization`);
       setSummary(response.data.summary);
       setSchedule(response.data.schedule);
 
-      // Get payments for this loan
       const loanResponse = await api.get(`/loans/${loanId}`);
       setPayments(loanResponse.data.loan.payments || []);
     } catch (error: any) {
@@ -56,30 +65,53 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
     } finally {
       setLoading(false);
     }
-  };
+  }, [loanId]);
+
+  useEffect(() => {
+    fetchAmortizationData();
+  }, [fetchAmortizationData]);
+
+  const accountsForAmortPayment = useMemo(() => {
+    const c = summary?.currency;
+    if (!c) return [];
+    return bankAccounts.filter((a) => a.currencyType === 'DUAL' || a.currencyType === c);
+  }, [bankAccounts, summary?.currency]);
+
+  const bankAccountNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    bankAccounts.forEach((a) => m.set(a.id, formatBankAccountOptionLabel(a)));
+    return m;
+  }, [bankAccounts]);
 
   const handleRegisterPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInstallment) return;
 
     try {
-      const response = await api.post(`/loans/${loanId}/payment`, {
+      const payload: Record<string, unknown> = {
         paymentDate: paymentData.paymentDate,
         amount: parseFloat(paymentData.amount),
         paymentType: paymentData.paymentType,
         notes: paymentData.notes,
         installmentNumber: paymentData.installmentNumber !== undefined ? paymentData.installmentNumber : selectedInstallment.installmentNumber,
-      });
+      };
+      if (paymentData.bankAccountId) {
+        payload.bankAccountId = parseInt(paymentData.bankAccountId, 10);
+      } else {
+        payload.bankAccountId = null;
+      }
+      await api.post(`/loans/${loanId}/payment`, payload);
 
       toast.success('Pago registrado exitosamente');
       setShowPaymentModal(false);
       setSelectedInstallment(null);
       setPaymentData({
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: todayYmdLocal(),
         amount: '',
         paymentType: 'COMPLETE',
         notes: '',
         installmentNumber: undefined,
+        bankAccountId: '',
       });
       fetchAmortizationData();
       if (onPaymentUpdate) onPaymentUpdate();
@@ -93,23 +125,30 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
     if (!editingPayment) return;
 
     try {
-      await api.put(`/loans/payments/${editingPayment.id}`, {
+      const putPayload: Record<string, unknown> = {
         paymentDate: paymentData.paymentDate,
         amount: parseFloat(paymentData.amount),
         paymentType: paymentData.paymentType,
         notes: paymentData.notes,
         installmentNumber: paymentData.installmentNumber,
-      });
+      };
+      if (paymentData.bankAccountId) {
+        putPayload.bankAccountId = parseInt(paymentData.bankAccountId, 10);
+      } else {
+        putPayload.bankAccountId = null;
+      }
+      await api.put(`/loans/payments/${editingPayment.id}`, putPayload);
 
       toast.success('Pago actualizado exitosamente');
       setShowEditPaymentModal(false);
       setEditingPayment(null);
       setPaymentData({
-        paymentDate: new Date().toISOString().split('T')[0],
+        paymentDate: todayYmdLocal(),
         amount: '',
         paymentType: 'COMPLETE',
         notes: '',
         installmentNumber: undefined,
+        bankAccountId: '',
       });
       fetchAmortizationData();
       if (onPaymentUpdate) onPaymentUpdate();
@@ -481,11 +520,12 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                 onClick={() => {
                                   setSelectedInstallment(item);
                                   setPaymentData({
-                                    paymentDate: new Date().toISOString().split('T')[0],
+                                    paymentDate: todayYmdLocal(),
                                     amount: item.installmentNumber === 0 ? '' : item.totalDue.toString(),
                                     paymentType: 'COMPLETE',
                                     notes: '',
                                     installmentNumber: item.installmentNumber,
+                                    bankAccountId: '',
                                   });
                                   setShowPaymentModal(true);
                                 }}
@@ -508,6 +548,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                       paymentType: p.paymentType || 'COMPLETE',
                                       notes: p.notes || '',
                                       installmentNumber: p.installmentNumber,
+                                      bankAccountId: p.bankAccountId != null ? String(p.bankAccountId) : '',
                                     });
                                     setShowEditPaymentModal(true);
                                   }}
@@ -552,6 +593,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                       <th className="text-right py-3 px-4 text-dark-400 font-medium">Cargo</th>
                       <th className="text-right py-3 px-4 text-dark-400 font-medium">Mora</th>
                       <th className="text-right py-3 px-4 text-dark-400 font-medium">Saldo Después</th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Origen</th>
                       <th className="text-center py-3 px-4 text-dark-400 font-medium">Acciones</th>
                     </tr>
                   </thead>
@@ -579,6 +621,13 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                         <td data-label="Saldo después" className="py-3 px-4 text-right md:text-right">
                           <span className="table-stack-value text-white">{formatCurrency(payment.outstandingBalance || 0)}</span>
                         </td>
+                        <td data-label="Origen" className="py-3 px-4 text-left md:text-left max-w-[12rem]">
+                          <span className="table-stack-value text-dark-300 text-sm break-words">
+                            {payment.bankAccountId != null
+                              ? bankAccountNameById.get(payment.bankAccountId) ?? `Cuenta #${payment.bankAccountId}`
+                              : '—'}
+                          </span>
+                        </td>
                         <td data-label="Acciones" className="py-3 px-4">
                           <span className="table-stack-value">
                           <div className="flex items-center justify-end gap-2">
@@ -591,6 +640,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                   paymentType: payment.paymentType || 'COMPLETE',
                                   notes: payment.notes || '',
                                   installmentNumber: payment.installmentNumber,
+                                  bankAccountId: payment.bankAccountId != null ? String(payment.bankAccountId) : '',
                                 });
                                 setShowEditPaymentModal(true);
                               }}
@@ -672,6 +722,25 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   <option value="ADVANCE">Anticipado</option>
                   <option value="INTEREST">Intereses</option>
                 </select>
+              </div>
+              <div>
+                <label className="label">Cuenta origen (opcional)</label>
+                <select
+                  value={paymentData.bankAccountId}
+                  onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
+                  className="input w-full"
+                >
+                  <option value="">Sin vincular saldo</option>
+                  {accountsForAmortPayment.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
+                      {formatBankAccountOptionLabel(a)}
+                    </option>
+                  ))}
+                </select>
+                {summary && (
+                  <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {summary.currency}</p>
+                )}
               </div>
               <div>
                 <label className="label">Notas (opcional)</label>
@@ -758,6 +827,25 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   <option value="ADVANCE">Anticipado</option>
                   <option value="INTEREST">Intereses</option>
                 </select>
+              </div>
+              <div>
+                <label className="label">Cuenta origen (opcional)</label>
+                <select
+                  value={paymentData.bankAccountId}
+                  onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
+                  className="input w-full"
+                >
+                  <option value="">Sin vincular saldo</option>
+                  {accountsForAmortPayment.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
+                      {formatBankAccountOptionLabel(a)}
+                    </option>
+                  ))}
+                </select>
+                {summary && (
+                  <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {summary.currency}</p>
+                )}
               </div>
               <div>
                 <label className="label">Notas (opcional)</label>

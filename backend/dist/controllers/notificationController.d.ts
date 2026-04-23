@@ -6,5 +6,8 @@ export declare const getNotificationSettings: (req: AuthRequest, res: Response) 
 export declare const updateNotificationSettings: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const markAllAsRead: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const deleteNotification: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const getPushVapidPublicKey: (_req: AuthRequest, res: Response) => Promise<void>;
+export declare const subscribePush: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+export declare const unsubscribePush: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const testNotification: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 //# sourceMappingURL=notificationController.d.ts.map

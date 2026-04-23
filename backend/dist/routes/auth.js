@@ -54,6 +54,7 @@ const resetPasswordLimiter = (0, express_rate_limit_1.default)({
     legacyHeaders: false,
 });
 router.get('/registration-status', authController_1.getRegistrationStatus);
+router.get('/public-config', authController_1.getPublicConfig);
 router.post('/register', registerLimiter, authController_1.register);
 router.post('/login', loginLimiter, authController_1.login);
 router.post('/forgot-password', forgotPasswordLimiter, authController_1.forgotPassword);

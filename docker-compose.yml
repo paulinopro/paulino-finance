@@ -36,6 +36,30 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:support@localhost}
+      # PayPal: Compose sustituye desde el .env de la RAÍZ del repo (no llegan solo con dotenv dentro del contenedor)
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_API_BASE: ${PAYPAL_API_BASE:-https://api-m.sandbox.paypal.com}
+      PAYPAL_RETURN_URL: ${PAYPAL_RETURN_URL:-}
+      PAYPAL_CANCEL_URL: ${PAYPAL_CANCEL_URL:-}
+      PAYPAL_WEBHOOK_ID: ${PAYPAL_WEBHOOK_ID:-}
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-}
+      # Enlaces absolutos (auth: recuperación de contraseña, etc.). Misma URL pública que usa el navegador.
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      # Orígenes CORS (coma-separados). En dev con front en otro puerto: p. ej. http://localhost:3000
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Revisión desplegada (GET /admin/health → deployRef). Opcional.
+      RELEASE: ${RELEASE:-}
+      GIT_COMMIT: ${GIT_COMMIT:-}
+      VERCEL_GIT_COMMIT_SHA: ${VERCEL_GIT_COMMIT_SHA:-}
+      RAILWAY_GIT_COMMIT_SHA: ${RAILWAY_GIT_COMMIT_SHA:-}
+      COMMIT_SHA: ${COMMIT_SHA:-}
+      # Tasa DOP/USD por defecto (nuevos usuarios y fallback si falta en BD); prioridad: users.exchange_rate_dop_usd
+      EXCHANGE_RATE_DOP_USD: ${EXCHANGE_RATE_DOP_USD:-}
     ports:
       - "${BACKEND_PORT:-5000}:5000"
     volumes:
@@ -46,7 +70,9 @@ services:
         condition: service_healthy
     networks:
       - paulino-network
-    command: sh -c "test -d node_modules/.bin || npm install; exec npm run dev"
+    # npm install en cada arranque: el volumen anónimo /app/node_modules no refleja nuevas deps del host
+    # (p. ej. web-push) si solo existía node_modules/.bin de una imagen antigua.
+    command: sh -c "npm install && exec npm run dev"
 
   frontend:
     build:
@@ -56,6 +82,7 @@ services:
     environment:
       REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:5000/api}
       REACT_APP_ENABLE_PWA: ${REACT_APP_ENABLE_PWA:-true}
+      REACT_APP_ENABLE_PUSH_SYNC: ${REACT_APP_ENABLE_PUSH_SYNC:-}
       CHOKIDAR_USEPOLLING: true
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

@@ -10,7 +10,8 @@ type CreateApprovalResult =
 
 let cachedToken: { token: string; expires: number } | null = null;
 
-async function getAccessToken(): Promise<string | null> {
+/** OAuth2 client_credentials; reutilizable por otros servicios PayPal (catálogo, planes, etc.). */
+export async function getAccessToken(): Promise<string | null> {
   const id = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_CLIENT_SECRET;
   const base = process.env.PAYPAL_API_BASE || 'https://api-m.sandbox.paypal.com';

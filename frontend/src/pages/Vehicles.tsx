@@ -1,11 +1,27 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
-import { Plus, Edit, Trash2, Search, X, Car, Wrench, DollarSign, Calendar } from 'lucide-react';
+import { BankAccount, ExpenseCategory } from '../types';
+import { Plus, Edit, Trash2, Search, X, Car, Wrench } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import {
+  LIST_CARD_SHELL,
+  listCardAccentSubtle,
+  listCardAccentNeutral,
+  listCardBtnEdit,
+  listCardBtnDanger,
+} from '../utils/listCard';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import TablePagination from '../components/TablePagination';
+import PageHeader from '../components/PageHeader';
+import { todayYmdLocal, formatDateDdMmYyyy } from '../utils/dateUtils';
+import { CATEGORY_CHART_COLORS } from '../constants/chartColors';
+import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 
 interface Vehicle {
   id: number;
@@ -26,19 +42,24 @@ interface Vehicle {
 
 interface VehicleExpense {
   id: number;
-  expenseType: string;
+  spendKind: string;
   description: string;
   amount: number;
   currency: string;
   date: string;
   mileageAtExpense?: number;
   category?: string;
+  categoryId?: number | null;
+  categoryName?: string | null;
+  bankAccountId?: number | null;
+  linkedExpenseId?: number | null;
   notes?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 const Vehicles: React.FC = () => {
+  const { user } = useAuth();
   const vehicleModalRef = useRef<HTMLDivElement>(null);
   const expenseModalRef = useRef<HTMLDivElement>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -63,18 +84,34 @@ const Vehicles: React.FC = () => {
     notes: '',
   });
   const [expenseFormData, setExpenseFormData] = useState({
-    expenseType: '',
+    spendKind: '',
     description: '',
     amount: '',
     currency: 'DOP',
-    date: new Date().toISOString().split('T')[0],
+    date: todayYmdLocal(),
     mileageAtExpense: '',
-    category: '',
+    categoryId: '',
     notes: '',
+    bankAccountId: '',
   });
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
   useEffect(() => {
     fetchVehicles();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [catRes, accRes] = await Promise.all([api.get('/categories'), api.get('/accounts')]);
+        setExpenseCategories(catRes.data.categories || []);
+        setBankAccounts(accRes.data.accounts || []);
+      } catch {
+        setExpenseCategories([]);
+        setBankAccounts([]);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -133,19 +170,33 @@ const Vehicles: React.FC = () => {
   const handleExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedVehicle) return;
+    if (!expenseFormData.categoryId) {
+      toast.error('Selecciona una categoría');
+      return;
+    }
 
     try {
-      const data = {
-        ...expenseFormData,
+      const payload: Record<string, unknown> = {
+        spendKind: expenseFormData.spendKind,
+        description: expenseFormData.description,
         amount: parseFloat(expenseFormData.amount),
+        currency: expenseFormData.currency,
+        date: expenseFormData.date,
         mileageAtExpense: expenseFormData.mileageAtExpense ? parseFloat(expenseFormData.mileageAtExpense) : null,
+        notes: expenseFormData.notes || null,
+        categoryId: parseInt(expenseFormData.categoryId, 10),
       };
+      if (expenseFormData.bankAccountId) {
+        payload.bankAccountId = parseInt(expenseFormData.bankAccountId, 10);
+      } else {
+        payload.bankAccountId = null;
+      }
 
       if (editingExpense) {
-        await api.put(`/vehicles/${selectedVehicle.id}/expenses/${editingExpense.id}`, data);
+        await api.put(`/vehicles/${selectedVehicle.id}/expenses/${editingExpense.id}`, payload);
         toast.success('Gasto actualizado');
       } else {
-        await api.post(`/vehicles/${selectedVehicle.id}/expenses`, data);
+        await api.post(`/vehicles/${selectedVehicle.id}/expenses`, payload);
         toast.success('Gasto agregado');
       }
 
@@ -211,14 +262,15 @@ const Vehicles: React.FC = () => {
 
   const resetExpenseForm = () => {
     setExpenseFormData({
-      expenseType: '',
+      spendKind: '',
       description: '',
       amount: '',
       currency: 'DOP',
-      date: new Date().toISOString().split('T')[0],
+      date: todayYmdLocal(),
       mileageAtExpense: '',
-      category: '',
+      categoryId: '',
       notes: '',
+      bankAccountId: '',
     });
     setEditingExpense(null);
   };
@@ -243,14 +295,15 @@ const Vehicles: React.FC = () => {
   const openEditExpense = (expense: VehicleExpense) => {
     setEditingExpense(expense);
     setExpenseFormData({
-      expenseType: expense.expenseType,
+      spendKind: expense.spendKind,
       description: expense.description,
       amount: expense.amount.toString(),
       currency: expense.currency,
-      date: expense.date,
+      date: expense.date.slice(0, 10),
       mileageAtExpense: expense.mileageAtExpense?.toString() || '',
-      category: expense.category || '',
+      categoryId: expense.categoryId != null ? String(expense.categoryId) : '',
       notes: expense.notes || '',
+      bankAccountId: expense.bankAccountId != null ? String(expense.bankAccountId) : '',
     });
     setShowExpenseModal(true);
   };
@@ -260,7 +313,21 @@ const Vehicles: React.FC = () => {
     vehicle.licensePlate?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const expenseTypes = [
+  const [vehicleListPage, setVehicleListPage] = useState(1);
+  useEffect(() => {
+    setVehicleListPage(1);
+  }, [searchTerm]);
+  const vehicleTotalPages = Math.max(1, Math.ceil(filteredVehicles.length / TABLE_PAGE_SIZE));
+  const vehiclePageSafe = Math.min(vehicleListPage, vehicleTotalPages);
+  useEffect(() => {
+    setVehicleListPage((p) => Math.min(p, vehicleTotalPages));
+  }, [vehicleTotalPages]);
+  const pagedVehicles = useMemo(() => {
+    const start = (vehiclePageSafe - 1) * TABLE_PAGE_SIZE;
+    return filteredVehicles.slice(start, start + TABLE_PAGE_SIZE);
+  }, [filteredVehicles, vehiclePageSafe]);
+
+  const spendKindPresets = [
     'Mantenimiento',
     'Reparación',
     'Combustible',
@@ -271,15 +338,36 @@ const Vehicles: React.FC = () => {
     'Otro',
   ];
 
-  const expensesByType = expenses.reduce((acc, expense) => {
-    acc[expense.expenseType] = (acc[expense.expenseType] || 0) + expense.amount;
-    return acc;
-  }, {} as { [key: string]: number });
+  const exchangeRate =
+    user?.exchangeRateDopUsd && user.exchangeRateDopUsd > 0 ? user.exchangeRateDopUsd : 58;
 
-  const expensesChartData = Object.entries(expensesByType).map(([name, value]) => ({
-    name,
-    value: Math.round(value),
-  }));
+  const vehicleTypeChartSorted = useMemo(() => {
+    const map: Record<string, number> = {};
+    expenses.forEach((ex) => {
+      const v = ex.currency === 'USD' ? ex.amount * exchangeRate : ex.amount;
+      const key = (ex.spendKind && String(ex.spendKind).trim()) || 'Sin tipo';
+      map[key] = (map[key] || 0) + v;
+    });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value: Math.round(value) }))
+      .sort((a, b) => b.value - a.value);
+  }, [expenses, exchangeRate]);
+
+  const vehicleTypeChartTotal = useMemo(
+    () => vehicleTypeChartSorted.reduce((s, d) => s + d.value, 0),
+    [vehicleTypeChartSorted]
+  );
+
+  const bankAccountNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    bankAccounts.forEach((a) => m.set(a.id, formatBankAccountOptionLabel(a)));
+    return m;
+  }, [bankAccounts]);
+
+  const accountsForVehicleExpense = useMemo(() => {
+    const c = expenseFormData.currency as 'DOP' | 'USD';
+    return bankAccounts.filter((a) => a.currencyType === 'DUAL' || a.currencyType === c);
+  }, [bankAccounts, expenseFormData.currency]);
 
   useEscapeKey(showExpenseModal, () => {
     setShowExpenseModal(false);
@@ -302,26 +390,26 @@ const Vehicles: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="page-title">Vehículos</h1>
-          <p className="text-dark-400 text-sm sm:text-base">Gestiona tus vehículos y sus gastos</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            resetVehicleForm();
-            setShowVehicleModal(true);
-          }}
-          className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-        >
-          <Plus size={20} />
-          Nuevo Vehículo
-        </button>
-      </div>
+      <PageHeader
+        title="Vehículos"
+        subtitle="Gestiona tus vehículos y sus gastos"
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              resetVehicleForm();
+              setShowVehicleModal(true);
+            }}
+            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
+          >
+            <Plus size={20} />
+            Nuevo Vehículo
+          </button>
+        }
+      />
 
       {/* Search */}
-      <div className="card">
+      <div className="card-view">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
           <input
@@ -334,72 +422,111 @@ const Vehicles: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
         {/* Vehicles List */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className="space-y-4 lg:col-span-1">
           {filteredVehicles.length === 0 ? (
-            <div className="card text-center py-12">
+            <div className="card-view text-center py-12 sm:py-16">
               <Car className="mx-auto text-dark-400 mb-4" size={48} />
               <p className="text-dark-400">No hay vehículos</p>
             </div>
           ) : (
-            filteredVehicles.map((vehicle) => (
-              <motion.div
+            <>
+            {pagedVehicles.map((vehicle) => (
+              <motion.article
                 key={vehicle.id}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`card cursor-pointer transition-all ${
-                  selectedVehicle?.id === vehicle.id ? 'ring-2 ring-primary-500' : ''
-                }`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedVehicle(vehicle);
+                  }
+                }}
+                className={[
+                  LIST_CARD_SHELL,
+                  selectedVehicle?.id === vehicle.id ? 'border-l-primary-500 ring-1 ring-primary-500/40' : listCardAccentSubtle(),
+                  'cursor-pointer',
+                ].join(' ')}
                 onClick={() => setSelectedVehicle(vehicle)}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Car className="text-primary-400" size={20} />
-                      <h3 className="text-lg font-semibold text-white">
-                        {vehicle.make} {vehicle.model}
-                      </h3>
+                <div className="flex flex-row gap-3 justify-between items-start">
+                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                        <Car className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                        Vehículo
+                      </span>
+                      {vehicle.year && (
+                        <span className="text-xs text-dark-500 sm:text-sm">{vehicle.year}</span>
+                      )}
                     </div>
-                    {vehicle.year && (
-                      <p className="text-sm text-dark-400 mb-1">Año: {vehicle.year}</p>
-                    )}
+                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">
+                      {vehicle.make} {vehicle.model}
+                    </h3>
                     {vehicle.licensePlate && (
-                      <p className="text-sm text-dark-400 mb-1">Placa: {vehicle.licensePlate}</p>
+                      <span className="inline-flex max-w-full truncate rounded-md bg-primary-600/15 px-2 py-0.5 text-xs font-medium text-primary-200 ring-1 ring-primary-500/25">
+                        {vehicle.licensePlate}
+                      </span>
                     )}
-                    <p className="text-sm text-dark-400 mb-2">Kilometraje: {vehicle.mileage.toLocaleString('es-DO')} km</p>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-dark-400">Gastos totales:</p>
-                      <p className="text-sm font-semibold text-red-400">
-                        ${vehicle.totalExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
-                      </p>
-                    </div>
                   </div>
-                  <div className="flex items-center gap-2 ml-4">
+                  <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         openEditVehicle(vehicle);
                       }}
-                      className="p-2 text-primary-400 hover:bg-primary-400/10 rounded-lg transition-colors"
+                      className={listCardBtnEdit}
                       title="Editar"
+                      aria-label="Editar vehículo"
                     >
-                      <Edit size={18} />
+                      <Edit className="h-5 w-5" />
                     </button>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteVehicle(vehicle.id);
                       }}
-                      className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                      className={listCardBtnDanger}
                       title="Eliminar"
+                      aria-label="Eliminar vehículo"
                     >
-                      <Trash2 size={18} />
+                      <Trash2 className="h-5 w-5" />
                     </button>
                   </div>
                 </div>
-              </motion.div>
-            ))
+                <div className="mt-4 flex flex-col gap-2 border-t border-dark-700/80 pt-4">
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Kilometraje</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                        {vehicle.mileage.toLocaleString('es-DO')} km
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Gastos totales</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
+                        ${vehicle.totalExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </motion.article>
+            ))}
+            <TablePagination
+              currentPage={vehiclePageSafe}
+              totalPages={vehicleTotalPages}
+              totalItems={filteredVehicles.length}
+              itemsPerPage={TABLE_PAGE_SIZE}
+              onPageChange={setVehicleListPage}
+              itemLabel="vehículos"
+              variant="card"
+            />
+            </>
           )}
         </div>
 
@@ -408,87 +535,169 @@ const Vehicles: React.FC = () => {
           {selectedVehicle ? (
             <div className="space-y-6">
               {/* Vehicle Info */}
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-white">
-                    {selectedVehicle.make} {selectedVehicle.model}
-                  </h2>
+              <div className={[LIST_CARD_SHELL, listCardAccentNeutral()].join(' ')}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 space-y-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                      <Car className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                      Detalle
+                    </span>
+                    <h2 className="text-balance text-xl font-bold text-white sm:text-2xl">
+                      {selectedVehicle.make} {selectedVehicle.model}
+                    </h2>
+                  </div>
                   <button
+                    type="button"
                     onClick={() => {
                       resetExpenseForm();
                       setShowExpenseModal(true);
                     }}
-                    className="btn-primary flex items-center gap-2"
+                    className="btn-primary inline-flex shrink-0 items-center gap-2 self-start"
                   >
                     <Plus size={18} />
                     Agregar Gasto
                   </button>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="mt-4 grid grid-cols-1 gap-2 border-t border-dark-700/80 pt-4 xs:grid-cols-2 md:grid-cols-4 sm:gap-3">
                   {selectedVehicle.year && (
-                    <div>
-                      <p className="text-dark-400">Año</p>
-                      <p className="text-white font-medium">{selectedVehicle.year}</p>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Año</p>
+                      <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{selectedVehicle.year}</p>
                     </div>
                   )}
                   {selectedVehicle.licensePlate && (
-                    <div>
-                      <p className="text-dark-400">Placa</p>
-                      <p className="text-white font-medium">{selectedVehicle.licensePlate}</p>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Placa</p>
+                      <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{selectedVehicle.licensePlate}</p>
                     </div>
                   )}
-                  <div>
-                    <p className="text-dark-400">Kilometraje</p>
-                    <p className="text-white font-medium">{selectedVehicle.mileage.toLocaleString('es-DO')} km</p>
+                  <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Kilometraje</p>
+                    <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                      {selectedVehicle.mileage.toLocaleString('es-DO')} km
+                    </p>
                   </div>
                   {selectedVehicle.purchasePrice && (
-                    <div>
-                      <p className="text-dark-400">Precio de Compra</p>
-                      <p className="text-white font-medium">
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Precio de compra</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         ${selectedVehicle.purchasePrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        {selectedVehicle.currency}
+                        <span className="text-xs font-normal text-dark-400">{selectedVehicle.currency}</span>
                       </p>
                     </div>
                   )}
                 </div>
                 {selectedVehicle.notes && (
-                  <div className="mt-4">
-                    <p className="text-dark-400 text-sm">Notas: {selectedVehicle.notes}</p>
-                  </div>
+                  <p className="mt-4 rounded-xl border border-dark-600/50 bg-dark-900/20 px-3 py-2 text-sm text-dark-300">
+                    <span className="text-dark-500">Notas:</span> {selectedVehicle.notes}
+                  </p>
                 )}
               </div>
 
-              {/* Expenses Chart */}
-              {expenses.length > 0 && (
-                <div className="card">
-                  <h3 className="text-lg font-semibold text-white mb-4">Gastos por Tipo</h3>
-                  <div className="chart-box h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={expensesChartData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {expensesChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={['#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#f43f5e', '#fb923c'][index % 8]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
+              {/* Gastos por tipo — mismo estilo que Resumen > Gastos por Categoría */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="dashboard-panel"
+              >
+                <h2 className="dashboard-panel-title">Gastos por tipo</h2>
+                <p className="text-xs text-dark-500 -mt-2 mb-4">
+                  Montos expresados en DOP (USD convertidos con tu tasa de perfil).
+                </p>
+                {vehicleTypeChartSorted.length > 0 ? (
+                  <div className="flex min-h-0 flex-col gap-5 lg:flex-row lg:items-stretch lg:gap-6">
+                    <div className="chart-box mx-auto h-[220px] w-full max-w-[320px] shrink-0 xs:h-[240px] sm:h-[260px] lg:mx-0 lg:h-[280px] lg:max-w-[min(100%,360px)]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={vehicleTypeChartSorted}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius="48%"
+                            outerRadius="78%"
+                            paddingAngle={2}
+                            dataKey="value"
+                            nameKey="name"
+                            stroke="#0f172a"
+                            strokeWidth={2}
+                          >
+                            {vehicleTypeChartSorted.map((_, index) => (
+                              <Cell
+                                key={`veh-type-${index}`}
+                                fill={CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            content={({ active, payload }) => {
+                              if (!active || !payload?.length) return null;
+                              const p = payload[0].payload as { name: string; value: number };
+                              const pct =
+                                vehicleTypeChartTotal > 0
+                                  ? ((p.value / vehicleTypeChartTotal) * 100).toFixed(1)
+                                  : '0';
+                              return (
+                                <div className="rounded-lg border border-dark-600 bg-dark-800 px-3 py-2 shadow-lg">
+                                  <p className="font-medium text-white">{p.name}</p>
+                                  <p className="text-sm tabular-nums text-dark-300">
+                                    ${p.value.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                                    <span className="text-dark-500"> · {pct}%</span>
+                                  </p>
+                                </div>
+                              );
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-dark-600/40 bg-dark-900/45 p-3 ring-1 ring-white/5 sm:p-4 lg:max-h-[280px]">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-dark-500">
+                        Distribución
+                      </p>
+                      <ul className="grid grid-cols-1 gap-2.5 text-sm sm:grid-cols-2 sm:gap-x-4">
+                        {vehicleTypeChartSorted.map((row, index) => {
+                          const pct =
+                            vehicleTypeChartTotal > 0 ? (row.value / vehicleTypeChartTotal) * 100 : 0;
+                          const fill = CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length];
+                          return (
+                            <li key={row.name} className="flex min-w-0 items-start gap-2.5">
+                              <span
+                                className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-white/10"
+                                style={{ backgroundColor: fill }}
+                                aria-hidden
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-medium text-white" title={row.name}>
+                                  {row.name}
+                                </p>
+                                <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                                  <span className="tabular-nums text-xs text-dark-400">
+                                    ${row.value.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                                  </span>
+                                  <span className="shrink-0 tabular-nums text-xs font-semibold text-primary-300">
+                                    {pct.toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="flex items-center justify-center h-64 text-dark-400">
+                    {expenses.length === 0
+                      ? 'No hay datos de gastos disponibles'
+                      : 'No hay datos suficientes para graficar'}
+                  </div>
+                )}
+              </motion.div>
 
               {/* Expenses List */}
-              <div className="card">
-                <h3 className="text-lg font-semibold text-white mb-4">Historial de Gastos</h3>
+              <div className={[LIST_CARD_SHELL, listCardAccentNeutral()].join(' ')}>
+                <h3 className="mb-4 text-lg font-bold text-white">Historial de gastos</h3>
                 {expenses.length === 0 ? (
                   <div className="text-center py-8 text-dark-400">
                     <Wrench className="mx-auto mb-4" size={48} />
@@ -504,11 +713,11 @@ const Vehicles: React.FC = () => {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <span className="px-2 py-1 bg-primary-600/20 text-primary-400 rounded text-xs">
-                              {expense.expenseType}
+                              {expense.spendKind}
                             </span>
-                            {expense.category && (
+                            {(expense.categoryName || expense.category) && (
                               <span className="px-2 py-1 bg-dark-600 text-dark-300 rounded text-xs">
-                                {expense.category}
+                                {expense.categoryName || expense.category}
                               </span>
                             )}
                           </div>
@@ -517,29 +726,56 @@ const Vehicles: React.FC = () => {
                             <span>
                               ${expense.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {expense.currency}
                             </span>
-                            <span>{new Date(expense.date).toLocaleDateString('es-DO')}</span>
+                            <span>{formatDateDdMmYyyy(expense.date)}</span>
                             {expense.mileageAtExpense && (
                               <span>{expense.mileageAtExpense.toLocaleString('es-DO')} km</span>
                             )}
                           </div>
+                          {(expense.bankAccountId != null || expense.linkedExpenseId != null) && (
+                            <p className="text-xs text-dark-500 mt-1 space-y-0.5">
+                              {expense.bankAccountId != null && (
+                                <span className="block">
+                                  Origen:{' '}
+                                  <span className="text-dark-300">
+                                    {bankAccountNameById.get(expense.bankAccountId) ?? `Cuenta #${expense.bankAccountId}`}
+                                  </span>
+                                </span>
+                              )}
+                              {expense.linkedExpenseId != null && (
+                                <span className="block">
+                                  <Link
+                                    to="/expenses"
+                                    className="text-primary-400 hover:text-primary-300 hover:underline"
+                                  >
+                                    Ver en Gastos
+                                  </Link>
+                                  <span className="text-dark-600"> · #{expense.linkedExpenseId}</span>
+                                </span>
+                              )}
+                            </p>
+                          )}
                           {expense.notes && (
                             <p className="text-xs text-dark-400 mt-2">Notas: {expense.notes}</p>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 ml-4">
+                        <div className="ml-4 flex items-center gap-0.5">
                           <button
+                            type="button"
                             onClick={() => openEditExpense(expense)}
-                            className="p-2 text-primary-400 hover:bg-primary-400/10 rounded-lg transition-colors"
+                            className={listCardBtnEdit}
                             title="Editar"
+                            aria-label="Editar gasto"
                           >
-                            <Edit size={18} />
+                            <Edit className="h-5 w-5" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleDeleteExpense(expense.id)}
-                            className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                            className={listCardBtnDanger}
                             title="Eliminar"
+                            aria-label="Eliminar gasto"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 className="h-5 w-5" />
                           </button>
                         </div>
                       </div>
@@ -549,7 +785,7 @@ const Vehicles: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="card text-center py-12">
+            <div className="card-view text-center py-12 sm:py-16">
               <Car className="mx-auto text-dark-400 mb-4" size={64} />
               <p className="text-dark-400">Selecciona un vehículo para ver sus detalles y gastos</p>
             </div>
@@ -758,16 +994,23 @@ const Vehicles: React.FC = () => {
             </div>
 
             <form onSubmit={handleExpenseSubmit} className="space-y-4">
+              <p className="text-xs text-dark-500 rounded-lg border border-dark-600/60 bg-dark-900/40 px-3 py-2">
+                El gasto se registra aquí y en el módulo{' '}
+                <Link to="/expenses" className="text-primary-400 hover:underline">
+                  Gastos
+                </Link>{' '}
+                para un solo seguimiento de saldos y categorías.
+              </p>
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Tipo de Gasto *</label>
+                <label className="label">Tipo de gasto *</label>
                 <select
-                  value={expenseFormData.expenseType}
-                  onChange={(e) => setExpenseFormData({ ...expenseFormData, expenseType: e.target.value })}
-                  className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  value={expenseFormData.spendKind}
+                  onChange={(e) => setExpenseFormData({ ...expenseFormData, spendKind: e.target.value })}
+                  className="input w-full"
                   required
                 >
                   <option value="">Seleccionar...</option>
-                  {expenseTypes.map((type) => (
+                  {spendKindPresets.map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>
@@ -776,34 +1019,55 @@ const Vehicles: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Descripción *</label>
+                <label className="label">Descripción *</label>
                 <input
                   type="text"
                   value={expenseFormData.description}
                   onChange={(e) => setExpenseFormData({ ...expenseFormData, description: e.target.value })}
-                  className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="input w-full"
                   required
                 />
               </div>
 
+              <div>
+                <label className="label">Categoría *</label>
+                <select
+                  value={expenseFormData.categoryId}
+                  onChange={(e) => setExpenseFormData({ ...expenseFormData, categoryId: e.target.value })}
+                  className="input w-full"
+                  required
+                >
+                  <option value="">
+                    {expenseCategories.length === 0 ? 'Sin categorías — créalas en Categorías' : 'Seleccionar categoría...'}
+                  </option>
+                  {expenseCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Monto *</label>
+                  <label className="label">Monto *</label>
                   <input
                     type="number"
                     step="0.01"
                     value={expenseFormData.amount}
                     onChange={(e) => setExpenseFormData({ ...expenseFormData, amount: e.target.value })}
-                    className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="input w-full"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Moneda *</label>
+                  <label className="label">Moneda *</label>
                   <select
                     value={expenseFormData.currency}
-                    onChange={(e) => setExpenseFormData({ ...expenseFormData, currency: e.target.value })}
-                    className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    onChange={(e) =>
+                      setExpenseFormData({ ...expenseFormData, currency: e.target.value, bankAccountId: '' })
+                    }
+                    className="input w-full"
                   >
                     <option value="DOP">DOP</option>
                     <option value="USD">USD</option>
@@ -813,44 +1077,52 @@ const Vehicles: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Fecha *</label>
+                  <label className="label">Fecha *</label>
                   <input
                     type="date"
                     value={expenseFormData.date}
                     onChange={(e) => setExpenseFormData({ ...expenseFormData, date: e.target.value })}
-                    className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="input w-full"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Kilometraje</label>
+                  <label className="label">Kilometraje</label>
                   <input
                     type="number"
                     step="0.01"
                     value={expenseFormData.mileageAtExpense}
                     onChange={(e) => setExpenseFormData({ ...expenseFormData, mileageAtExpense: e.target.value })}
-                    className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="input w-full"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Categoría</label>
-                <input
-                  type="text"
-                  value={expenseFormData.category}
-                  onChange={(e) => setExpenseFormData({ ...expenseFormData, category: e.target.value })}
-                  className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+                <label className="label">Cuenta origen (opcional)</label>
+                <select
+                  value={expenseFormData.bankAccountId}
+                  onChange={(e) => setExpenseFormData({ ...expenseFormData, bankAccountId: e.target.value })}
+                  className="input w-full"
+                >
+                  <option value="">Sin vincular saldo</option>
+                  {accountsForVehicleExpense.map((a: BankAccount) => (
+                    <option key={a.id} value={a.id}>
+                      {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
+                      {formatBankAccountOptionLabel(a)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-dark-500 mt-1">Descontará el saldo de la cuenta en la moneda del gasto.</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Notas</label>
+                <label className="label">Notas</label>
                 <textarea
                   value={expenseFormData.notes}
                   onChange={(e) => setExpenseFormData({ ...expenseFormData, notes: e.target.value })}
                   rows={3}
-                  className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="input w-full"
                 />
               </div>
 

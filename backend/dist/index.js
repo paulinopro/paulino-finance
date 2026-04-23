@@ -7,9 +7,12 @@ const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const express_1 = __importDefault(require("express"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = require("fs");
 const database_1 = require("./config/database");
 const paypalWebhookController_1 = require("./controllers/paypalWebhookController");
 const errorHandler_1 = require("./middleware/errorHandler");
+const maintenanceMode_1 = require("./middleware/maintenanceMode");
 const auth_1 = __importDefault(require("./routes/auth"));
 const cards_1 = __importDefault(require("./routes/cards"));
 const loans_1 = __importDefault(require("./routes/loans"));
@@ -32,7 +35,16 @@ const vehicles_1 = __importDefault(require("./routes/vehicles"));
 const admin_1 = __importDefault(require("./routes/admin"));
 const subscription_1 = __importDefault(require("./routes/subscription"));
 const notificationService_1 = require("./services/notificationService");
-// Load environment variables
+const webPushService_1 = require("./services/webPushService");
+// Carga .env: raíz del repo (monorepo) y luego backend/.env (sobrescribe)
+const rootEnv = path_1.default.resolve(__dirname, '../../.env');
+const backendEnv = path_1.default.resolve(__dirname, '../.env');
+if ((0, fs_1.existsSync)(rootEnv)) {
+    dotenv_1.default.config({ path: rootEnv });
+}
+if ((0, fs_1.existsSync)(backendEnv)) {
+    dotenv_1.default.config({ path: backendEnv, override: true });
+}
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
@@ -55,6 +67,7 @@ app.use((0, cors_1.default)(corsOptions));
 app.post('/api/webhooks/paypal', express_1.default.raw({ type: 'application/json' }), paypalWebhookController_1.paypalWebhook);
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
+app.use('/api', maintenanceMode_1.maintenanceApiGuard);
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Paulino Finance API is running' });
@@ -87,6 +100,7 @@ app.use(errorHandler_1.errorHandler);
 (0, database_1.initializeDatabase)()
     .then(() => {
     console.log('Database initialized successfully');
+    (0, webPushService_1.initWebPush)();
     // Start notification scheduler
     (0, notificationService_1.startNotificationScheduler)();
     console.log('Notification scheduler started');

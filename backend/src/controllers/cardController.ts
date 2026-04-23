@@ -1,6 +1,15 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { applyBalanceDelta } from '../services/accountBalance';
+import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+
+function optionalBankAccountId(body: Record<string, unknown>): number | null {
+  const v = body.bankAccountId;
+  if (v == null || v === '') return null;
+  const n = parseInt(String(v), 10);
+  return Number.isNaN(n) ? null : n;
+}
 
 export const getCards = async (req: AuthRequest, res: Response) => {
   try {
@@ -81,7 +90,7 @@ export const getCards = async (req: AuthRequest, res: Response) => {
 
     // Get exchange rate for total calculation
     const userResult = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
     const total = totalDebtDop + (totalDebtUsd * exchangeRate);
 
     res.json({
@@ -329,5 +338,208 @@ export const deleteCard = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Delete card error:', error);
     res.status(500).json({ message: 'Error deleting card', error: error.message });
+  }
+};
+
+export const listCardPayments = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const cardId = parseInt(req.params.id);
+    const lim = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
+
+    const check = await query(
+      'SELECT id FROM credit_cards WHERE id = $1 AND user_id = $2',
+      [cardId, userId]
+    );
+    if (check.rows.length === 0) {
+      return res.status(404).json({ message: 'Card not found' });
+    }
+
+    const r = await query(
+      `SELECT id, amount, currency, payment_date, bank_account_id, notes, created_at
+       FROM credit_card_payments
+       WHERE credit_card_id = $1 AND user_id = $2
+       ORDER BY payment_date DESC, id DESC
+       LIMIT $3`,
+      [cardId, userId, lim]
+    );
+
+    res.json({
+      success: true,
+      payments: r.rows.map((row) => ({
+        id: row.id,
+        amount: parseFloat(row.amount),
+        currency: row.currency,
+        paymentDate: row.payment_date,
+        bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        notes: row.notes,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error: any) {
+    console.error('List card payments error:', error);
+    res.status(500).json({ message: 'Error listing payments', error: error.message });
+  }
+};
+
+export const recordCardPayment = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const cardId = parseInt(req.params.id);
+    const { amount, currency, paymentDate, notes } = req.body;
+    const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
+
+    const amt = parseFloat(String(amount));
+    if (!amount || isNaN(amt) || amt <= 0) {
+      return res.status(400).json({ message: 'amount must be greater than zero' });
+    }
+    if (currency !== 'DOP' && currency !== 'USD') {
+      return res.status(400).json({ message: 'currency must be DOP or USD' });
+    }
+    const dateStr = paymentDate || new Date().toISOString().slice(0, 10);
+
+    const cardResult = await query(
+      `SELECT id, current_debt_dop, current_debt_usd, currency_type
+       FROM credit_cards WHERE id = $1 AND user_id = $2`,
+      [cardId, userId]
+    );
+    if (cardResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Card not found' });
+    }
+
+    const c = cardResult.rows[0];
+    const ct = c.currency_type as string;
+    if (ct === 'DOP' && currency !== 'DOP') {
+      return res.status(400).json({ message: 'This card only tracks DOP debt' });
+    }
+    if (ct === 'USD' && currency !== 'USD') {
+      return res.status(400).json({ message: 'This card only tracks USD debt' });
+    }
+    if (ct === 'DUAL' && currency !== 'DOP' && currency !== 'USD') {
+      return res.status(400).json({ message: 'currency must be DOP or USD' });
+    }
+
+    const debtDop = parseFloat(c.current_debt_dop || 0);
+    const debtUsd = parseFloat(c.current_debt_usd || 0);
+    const currentDebt = currency === 'DOP' ? debtDop : debtUsd;
+    const payApply = Math.min(amt, currentDebt);
+    if (payApply <= 0) {
+      return res.status(400).json({ message: 'No debt to pay in this currency' });
+    }
+
+    const ins = await query(
+      `INSERT INTO credit_card_payments (user_id, credit_card_id, amount, currency, payment_date, bank_account_id, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, created_at`,
+      [userId, cardId, payApply, currency, dateStr, bankAccountId, notes ?? null]
+    );
+
+    if (currency === 'DOP') {
+      await query(
+        `UPDATE credit_cards SET current_debt_dop = GREATEST(0, current_debt_dop - $1::numeric), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND user_id = $3`,
+        [payApply, cardId, userId]
+      );
+    } else {
+      await query(
+        `UPDATE credit_cards SET current_debt_usd = GREATEST(0, current_debt_usd - $1::numeric), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND user_id = $3`,
+        [payApply, cardId, userId]
+      );
+    }
+
+    if (bankAccountId) {
+      try {
+        await applyBalanceDelta(userId, bankAccountId, currency, -payApply);
+      } catch (e: any) {
+        await query('DELETE FROM credit_card_payments WHERE id = $1', [ins.rows[0].id]);
+        if (currency === 'DOP') {
+          await query(
+            `UPDATE credit_cards SET current_debt_dop = current_debt_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3`,
+            [payApply, cardId, userId]
+          );
+        } else {
+          await query(
+            `UPDATE credit_cards SET current_debt_usd = current_debt_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3`,
+            [payApply, cardId, userId]
+          );
+        }
+        if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
+          return res.status(400).json({
+            message:
+              e.message === 'CURRENCY_MISMATCH'
+                ? 'La moneda no coincide con la cuenta seleccionada'
+                : 'Cuenta no encontrada',
+          });
+        }
+        throw e;
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Payment recorded',
+      payment: {
+        id: ins.rows[0].id,
+        amount: payApply,
+        currency,
+        paymentDate: dateStr,
+        bankAccountId,
+        createdAt: ins.rows[0].created_at,
+      },
+    });
+  } catch (error: any) {
+    console.error('Record card payment error:', error);
+    res.status(500).json({ message: 'Error recording payment', error: error.message });
+  }
+};
+
+export const deleteCardPayment = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const paymentId = parseInt(req.params.paymentId);
+
+    const pr = await query(
+      `SELECT id, credit_card_id, amount, currency, bank_account_id
+       FROM credit_card_payments WHERE id = $1 AND user_id = $2`,
+      [paymentId, userId]
+    );
+    if (pr.rows.length === 0) {
+      return res.status(404).json({ message: 'Payment not found' });
+    }
+
+    const p = pr.rows[0];
+    const cardId = p.credit_card_id;
+    const payApply = parseFloat(p.amount);
+    const currency = p.currency as string;
+
+    if (p.bank_account_id) {
+      try {
+        await applyBalanceDelta(userId, p.bank_account_id, currency, payApply);
+      } catch (e: any) {
+        console.error('Revert card payment balance:', e);
+      }
+    }
+
+    if (currency === 'DOP') {
+      await query(
+        `UPDATE credit_cards SET current_debt_dop = current_debt_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND user_id = $3`,
+        [payApply, cardId, userId]
+      );
+    } else {
+      await query(
+        `UPDATE credit_cards SET current_debt_usd = current_debt_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND user_id = $3`,
+        [payApply, cardId, userId]
+      );
+    }
+
+    await query('DELETE FROM credit_card_payments WHERE id = $1', [paymentId]);
+
+    res.json({ success: true, message: 'Payment removed' });
+  } catch (error: any) {
+    console.error('Delete card payment error:', error);
+    res.status(500).json({ message: 'Error deleting payment', error: error.message });
   }
 };

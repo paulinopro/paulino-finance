@@ -1,13 +1,31 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import api from '../services/api';
-import { Loan, LoanPayment } from '../types';
-import { Plus, Edit, Trash2, Receipt, DollarSign, Search, X, Table, Clock, List } from 'lucide-react';
+import { BankAccount, Loan, LoanPayment } from '../types';
+import { Plus, Edit, Trash2, Receipt, DollarSign, Search, X, Table, List } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AmortizationTable from '../components/AmortizationTable';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import TablePagination from '../components/TablePagination';
+import PageHeader from '../components/PageHeader';
+import {
+  LIST_CARD_SHELL,
+  listCardAccentFromPercent,
+  listCardAccentLoan,
+  listCardBtnEdit,
+  listCardBtnDanger,
+  listCardProgressColor,
+} from '../utils/listCard';
+import { todayYmdLocal } from '../utils/dateUtils';
+import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+
+function loanListAccent(loan: Loan): string {
+  if (loan.status === 'PAID') return listCardAccentLoan('PAID');
+  if (loan.status === 'DEFAULTED') return listCardAccentLoan('DEFAULTED');
+  return listCardAccentFromPercent(Math.min(100, loan.progress || 0));
+}
 
 const Loans: React.FC = () => {
   const loanFormModalRef = useRef<HTMLDivElement>(null);
@@ -44,21 +62,19 @@ const Loans: React.FC = () => {
     status: 'ACTIVE' as 'ACTIVE' | 'PAID' | 'DEFAULTED',
   });
   const [paymentData, setPaymentData] = useState({
-    paymentDate: new Date().toISOString().split('T')[0],
+    paymentDate: todayYmdLocal(),
     amount: '',
     notes: '',
+    bankAccountId: '',
   });
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
-  useEffect(() => {
-    fetchLoans();
-  }, []);
-
-  const fetchLoans = async () => {
+  const fetchLoans = useCallback(async () => {
     try {
       const params: any = {};
       if (searchTerm) params.search = searchTerm;
       if (bankFilter) params.bank = bankFilter;
-      
+
       const response = await api.get('/loans', { params });
       setLoans(response.data.loans);
       setSummary(response.data.summary || { totalRemaining: 0, totalInstallment: 0, totalLoans: 0 });
@@ -67,11 +83,48 @@ const Loans: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchTerm, bankFilter]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get('/accounts');
+        setBankAccounts(res.data.accounts || []);
+      } catch {
+        setBankAccounts([]);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     fetchLoans();
+  }, [fetchLoans]);
+
+  const [loanListPage, setLoanListPage] = useState(1);
+  useEffect(() => {
+    setLoanListPage(1);
   }, [searchTerm, bankFilter]);
+  const loanTotalPages = Math.max(1, Math.ceil(loans.length / TABLE_PAGE_SIZE));
+  const loanPageSafe = Math.min(loanListPage, loanTotalPages);
+  useEffect(() => {
+    setLoanListPage((p) => Math.min(p, loanTotalPages));
+  }, [loanTotalPages]);
+  const pagedLoans = useMemo(() => {
+    const start = (loanPageSafe - 1) * TABLE_PAGE_SIZE;
+    return loans.slice(start, start + TABLE_PAGE_SIZE);
+  }, [loans, loanPageSafe]);
+
+  const accountsForLoanPayment = useMemo(() => {
+    if (!selectedLoan) return [];
+    const c = selectedLoan.currency;
+    return bankAccounts.filter((a: BankAccount) => a.currencyType === 'DUAL' || a.currencyType === c);
+  }, [bankAccounts, selectedLoan]);
+
+  const bankAccountNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    bankAccounts.forEach((a) => m.set(a.id, formatBankAccountOptionLabel(a)));
+    return m;
+  }, [bankAccounts]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,14 +171,20 @@ const Loans: React.FC = () => {
     if (!selectedLoan) return;
 
     try {
-      await api.post(`/loans/${selectedLoan.id}/payment`, {
+      const payload: Record<string, unknown> = {
         paymentDate: paymentData.paymentDate,
         amount: parseFloat(paymentData.amount),
         notes: paymentData.notes,
-      });
+      };
+      if (paymentData.bankAccountId) {
+        payload.bankAccountId = parseInt(paymentData.bankAccountId, 10);
+      } else {
+        payload.bankAccountId = null;
+      }
+      await api.post(`/loans/${selectedLoan.id}/payment`, payload);
       toast.success('Pago registrado');
       setShowPaymentModal(false);
-      setPaymentData({ paymentDate: new Date().toISOString().split('T')[0], amount: '', notes: '' });
+      setPaymentData({ paymentDate: todayYmdLocal(), amount: '', notes: '', bankAccountId: '' });
       fetchLoans();
       if (selectedLoan) {
         const loanRes = await api.get(`/loans/${selectedLoan.id}`);
@@ -139,7 +198,8 @@ const Loans: React.FC = () => {
   const handleDeletePayment = async (paymentId: number) => {
     if (!window.confirm('¿Estás seguro de eliminar este pago?')) return;
     try {
-      await api.delete(`/loans/payments/${paymentId}`);
+      if (!selectedLoan) return;
+      await api.delete(`/loans/${selectedLoan.id}/payments/${paymentId}`);
       toast.success('Pago eliminado');
       if (selectedLoan) {
         const loanRes = await api.get(`/loans/${selectedLoan.id}`);
@@ -254,11 +314,6 @@ const Loans: React.FC = () => {
     }
   };
 
-  const formatInterestCalculationBase = (base: string | undefined): string => {
-    if (!base) return 'Mes Actual / 360';
-    return base.replace('ACTUAL_', 'Mes Actual / ').replace('30_', '30 / ').replace('_', ' / ');
-  };
-
   const resetForm = () => {
     setFormData({
       loanName: '',
@@ -364,27 +419,28 @@ const Loans: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <div className="min-w-0">
-          <h1 className="page-title">Préstamos</h1>
-          <p className="text-dark-400 text-sm sm:text-base">Gestiona tus préstamos activos</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-          className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-        >
-          <Plus size={20} />
-          <span>Agregar Préstamo</span>
-        </button>
-      </div>
+      <PageHeader
+        className="mb-4"
+        title="Préstamos"
+        subtitle="Gestiona tus préstamos activos"
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
+          >
+            <Plus size={20} />
+            <span>Agregar Préstamo</span>
+          </button>
+        }
+      />
 
       {/* Summary */}
       {summary && (
-        <div className="card">
+        <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <p className="text-dark-400 text-sm mb-1">Restante Total</p>
@@ -403,7 +459,7 @@ const Loans: React.FC = () => {
       )}
 
       {/* Filters */}
-      <div className="card">
+      <div className="card-view">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
@@ -439,54 +495,168 @@ const Loans: React.FC = () => {
       </div>
 
       {loans.length === 0 ? (
-        <div className="card text-center py-12">
+        <div className="card-view text-center py-12 sm:py-16">
           <Receipt className="w-16 h-16 text-dark-600 mx-auto mb-4" />
           <p className="text-dark-400 mb-4">No tienes préstamos registrados</p>
           <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Préstamo</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {loans.map((loan) => (
-            <motion.div key={loan.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="card">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">{loan.loanName}</h3>
-                  {loan.bankName && <p className="text-sm text-dark-400">{loan.bankName}</p>}
-                  <p className={`text-sm font-medium ${getStatusColor(loan.status)}`}>Estado: {getStatusText(loan.status)}</p>
+        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 xl:gap-6">
+          {pagedLoans.map((loan) => {
+            const prog = Math.min(100, loan.progress || 0);
+            return (
+              <motion.article
+                key={loan.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={[LIST_CARD_SHELL, loanListAccent(loan)].join(' ')}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                  <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                        <Receipt className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                        Préstamo
+                      </span>
+                      <span className={`text-xs font-medium sm:text-sm ${getStatusColor(loan.status)}`}>{getStatusText(loan.status)}</span>
+                    </div>
+                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{loan.loanName}</h3>
+                    {loan.bankName && <p className="text-sm text-dark-400">{loan.bankName}</p>}
+                  </div>
+                  <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLoan(loan);
+                        setShowAmortizationTable(true);
+                      }}
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-violet-400 transition-colors hover:bg-violet-500/15"
+                      title="Tabla de Amortización"
+                      aria-label="Tabla de amortización"
+                    >
+                      <Table className="h-[18px] w-[18px]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewDetails(loan)}
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
+                      title="Ver Detalles"
+                      aria-label="Ver detalles"
+                    >
+                      <Receipt className="h-[18px] w-[18px]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewPaymentHistory(loan)}
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
+                      title="Historial de Pagos"
+                      aria-label="Historial de pagos"
+                    >
+                      <List className="h-[18px] w-[18px]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLoan(loan);
+                        setPaymentData({
+                          paymentDate: todayYmdLocal(),
+                          amount: loan.installmentAmount.toString(),
+                          notes: '',
+                          bankAccountId: '',
+                        });
+                        setShowPaymentModal(true);
+                      }}
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
+                      title="Registrar Pago"
+                      aria-label="Registrar pago"
+                    >
+                      <DollarSign className="h-[18px] w-[18px]" />
+                    </button>
+                    <button type="button" onClick={() => handleEdit(loan)} className={listCardBtnEdit} title="Editar" aria-label="Editar préstamo">
+                      <Edit className="h-5 w-5" />
+                    </button>
+                    <button type="button" onClick={() => handleDelete(loan.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar préstamo">
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
-                      <div className="flex space-x-2">
-                        <button onClick={() => { setSelectedLoan(loan); setShowAmortizationTable(true); }} className="p-2 text-purple-400 hover:text-purple-300" title="Tabla de Amortización">
-                          <Table size={18} />
-                        </button>
-                        <button onClick={() => handleViewDetails(loan)} className="p-2 text-blue-400 hover:text-blue-300" title="Ver Detalles">
-                          <Receipt size={18} />
-                        </button>
-                        <button onClick={() => handleViewPaymentHistory(loan)} className="p-2 text-yellow-400 hover:text-yellow-300" title="Historial de Pagos">
-                          <List size={18} />
-                        </button>
-                        <button onClick={() => { setSelectedLoan(loan); setPaymentData({ ...paymentData, amount: loan.installmentAmount.toString() }); setShowPaymentModal(true); }} className="p-2 text-green-400 hover:text-green-300" title="Registrar Pago">
-                          <DollarSign size={18} />
-                        </button>
-                        <button onClick={() => handleEdit(loan)} className="p-2 text-primary-400 hover:text-primary-300">
-                          <Edit size={18} />
-                        </button>
-                        <button onClick={() => handleDelete(loan.id)} className="p-2 text-red-400 hover:text-red-300">
-                          <Trash2 size={18} />
-                        </button>
+
+                <div className="mt-4 flex flex-col gap-4 border-t border-dark-700/80 pt-4">
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-2 sm:gap-3">
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Monto total</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                        {loan.totalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Tasa</p>
+                      <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">
+                        {loan.interestRate}% <span className="text-xs font-normal text-dark-400">{loan.interestRateType === 'ANNUAL' ? 'Anual' : 'Mensual'}</span>
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuotas</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                        {loan.paidInstallments}/{loan.totalInstallments}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuota</p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                        {loan.installmentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                      </p>
+                    </div>
+                    {loan.remainingBalance !== undefined && (
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3 xs:col-span-2">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
+                          {loan.remainingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                          <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                        </p>
                       </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between"><span className="text-dark-400">Monto Total:</span><span className="text-white font-medium">{loan.totalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}</span></div>
-                <div className="flex justify-between"><span className="text-dark-400">Tasa:</span><span className="text-white">{loan.interestRate}% {loan.interestRateType === 'ANNUAL' ? 'Anual' : 'Mensual'}</span></div>
-                <div className="flex justify-between"><span className="text-dark-400">Cuotas:</span><span className="text-white">{loan.paidInstallments}/{loan.totalInstallments}</span></div>
-                <div className="flex justify-between"><span className="text-dark-400">Cuota:</span><span className="text-white">{loan.installmentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}</span></div>
-                {loan.remainingBalance !== undefined && <div className="flex justify-between"><span className="text-dark-400">Restante:</span><span className="text-red-400 font-medium">{loan.remainingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}</span></div>}
-                <div className="w-full bg-dark-600 rounded-full h-2 mt-4">
-                  <div className="bg-primary-600 h-2 rounded-full" style={{ width: `${loan.progress || 0}%` }} />
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex justify-between gap-2 text-xs text-dark-400">
+                      <span>Progreso de amortización</span>
+                      <span className="tabular-nums text-dark-300">{prog.toFixed(0)}%</span>
+                    </div>
+                    <div
+                      className="h-2.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-dark-600/80 sm:h-3"
+                      role="progressbar"
+                      aria-valuenow={Math.round(prog)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-500 ease-out"
+                        style={{
+                          width: `${prog}%`,
+                          backgroundColor: listCardProgressColor(prog),
+                          boxShadow: `0 0 12px ${listCardProgressColor(prog)}55`,
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </motion.div>
-          ))}
+              </motion.article>
+            );
+          })}
+        </div>
+        <TablePagination
+          currentPage={loanPageSafe}
+          totalPages={loanTotalPages}
+          totalItems={loans.length}
+          itemsPerPage={TABLE_PAGE_SIZE}
+          onPageChange={setLoanListPage}
+          itemLabel="préstamos"
+          variant="card"
+        />
         </div>
       )}
 
@@ -595,6 +765,23 @@ const Loans: React.FC = () => {
             <form onSubmit={handlePayment} className="space-y-4">
               <div><label className="label">Fecha de Pago</label><input type="date" value={paymentData.paymentDate} onChange={(e) => setPaymentData({ ...paymentData, paymentDate: e.target.value })} className="input w-full" required /></div>
               <div><label className="label">Monto</label><input type="number" step="0.01" value={paymentData.amount} onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })} className="input w-full" required /></div>
+              <div>
+                <label className="label">Cuenta origen (opcional)</label>
+                <select
+                  value={paymentData.bankAccountId}
+                  onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
+                  className="input w-full"
+                >
+                  <option value="">Sin vincular saldo</option>
+                  {accountsForLoanPayment.map((a: BankAccount) => (
+                    <option key={a.id} value={a.id}>
+                      {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
+                      {formatBankAccountOptionLabel(a)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {selectedLoan.currency}</p>
+              </div>
               <div><label className="label">Notas (opcional)</label><textarea value={paymentData.notes} onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })} className="input w-full" rows={3} /></div>
               <div className="flex space-x-4 pt-4">
                 <button type="submit" className="btn-primary flex-1">Registrar</button>
@@ -763,6 +950,14 @@ const Loans: React.FC = () => {
                                     </span>
                                   )}
                                 </div>
+                                <p className="text-xs text-dark-500 mb-2">
+                                  Origen:{' '}
+                                  <span className="text-dark-300">
+                                    {payment.bankAccountId != null
+                                      ? bankAccountNameById.get(payment.bankAccountId) ?? `Cuenta #${payment.bankAccountId}`
+                                      : 'Sin cuenta vinculada'}
+                                  </span>
+                                </p>
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
                                   <div>
                                     <span className="text-dark-400 block mb-0.5">Total:</span>
@@ -817,39 +1012,16 @@ const Loans: React.FC = () => {
                           </div>
                         ))}
                       </div>
-                      {payments.length > itemsPerPage && (
-                        <div className="flex items-center justify-between pt-3 border-t border-dark-700 text-xs text-dark-300">
-                          <span>
-                            Página {currentPage} de {totalPages} ({payments.length} pagos)
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              disabled={currentPage === 1}
-                              onClick={() => setPaymentHistoryPage((prev) => Math.max(1, prev - 1))}
-                              className={`px-3 py-1.5 rounded-lg border border-dark-600 transition-colors ${
-                                currentPage === 1
-                                  ? 'text-dark-500 cursor-not-allowed opacity-50'
-                                  : 'text-white hover:bg-dark-700'
-                              }`}
-                            >
-                              Anterior
-                            </button>
-                            <button
-                              type="button"
-                              disabled={currentPage === totalPages}
-                              onClick={() => setPaymentHistoryPage((prev) => Math.min(totalPages, prev + 1))}
-                              className={`px-3 py-1.5 rounded-lg border border-dark-600 transition-colors ${
-                                currentPage === totalPages
-                                  ? 'text-dark-500 cursor-not-allowed opacity-50'
-                                  : 'text-white hover:bg-dark-700'
-                              }`}
-                            >
-                              Siguiente
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <TablePagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={payments.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setPaymentHistoryPage}
+                        itemLabel="pagos"
+                        variant="embedded"
+                        className="border-t border-dark-700 pt-3 mt-2"
+                      />
                     </>
                   ) : (
                     <div className="text-center py-12">

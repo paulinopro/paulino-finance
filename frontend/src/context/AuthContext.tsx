@@ -59,8 +59,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateUser = (updatedUser: User) => {
-    setUser(updatedUser);
-    localStorage.setItem('user', JSON.stringify(updatedUser));
+    setUser((prev) => {
+      const next = { ...(prev ?? ({} as User)), ...updatedUser };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
   };
 
   const setSession = (token: string, u: User, imp: number | null) => {

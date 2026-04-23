@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startPaypalSubscription = exports.listPublicPlans = exports.getMySubscription = void 0;
+exports.startPaypalSubscription = exports.listPublicPlans = exports.getMyPaymentHistory = exports.getMySubscription = void 0;
 const subscriptionService_1 = require("../services/subscriptionService");
 const database_1 = require("../config/database");
 const paypalService_1 = require("../services/paypalService");
@@ -15,6 +15,17 @@ const getMySubscription = async (req, res) => {
     }
 };
 exports.getMySubscription = getMySubscription;
+const getMyPaymentHistory = async (req, res) => {
+    try {
+        const payments = await (0, subscriptionService_1.getSubscriptionPaymentHistoryForUser)(req.userId);
+        res.json({ payments });
+    }
+    catch (e) {
+        console.error('getMyPaymentHistory', e);
+        res.status(500).json({ message: 'Error' });
+    }
+};
+exports.getMyPaymentHistory = getMyPaymentHistory;
 const listPublicPlans = async (_req, res) => {
     try {
         const r = await (0, database_1.query)(`SELECT id, name, slug, description, price_monthly, price_yearly, currency,

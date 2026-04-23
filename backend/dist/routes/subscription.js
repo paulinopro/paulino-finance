@@ -9,6 +9,7 @@ const subscriptionController_1 = require("../controllers/subscriptionController"
 const router = express_1.default.Router();
 router.get('/plans', subscriptionController_1.listPublicPlans);
 router.get('/me', auth_1.authenticate, subscriptionController_1.getMySubscription);
+router.get('/payments', auth_1.authenticate, subscriptionController_1.getMyPaymentHistory);
 router.post('/paypal/start', auth_1.authenticate, subscriptionController_1.startPaypalSubscription);
 exports.default = router;
 //# sourceMappingURL=subscription.js.map

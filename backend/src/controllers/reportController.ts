@@ -1,6 +1,14 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { describeExpenseScheduleEs, normalizeFrequency } from '../constants/incomeExpenseTaxonomy';
+import { renderReportPdf, Kpi } from '../utils/reportPdfLayout';
+
+async function getExchangeRateForUser(userId: number): Promise<number> {
+  const r = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
+  return resolveExchangeRateDopUsd(r.rows[0]?.exchange_rate_dop_usd);
+}
 
 // Helper function to format currency
 const formatCurrency = (amount: number, currency: string): string => {
@@ -10,343 +18,181 @@ const formatCurrency = (amount: number, currency: string): string => {
   }).format(amount);
 };
 
-// Helper function to format date
-const formatDate = (date: string | Date): string => {
-  const d = new Date(date);
-  return d.toLocaleDateString('es-DO', { year: 'numeric', month: 'long', day: 'numeric' });
-};
+// ——— PDF: layout unificado (reportPdfLayout) ———
 
-// Generate PDF for expenses report
 const generateExpensesPDF = async (
   expenses: any[],
   filters: { fromDate?: string; toDate?: string; status?: string }
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // Lazy-load pdfkit only when a PDF is actually requested
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
+  const paid = expenses.filter((e) => e.isPaid);
+  const pending = expenses.filter((e) => !e.isPaid);
+  const totalPaid = paid.reduce((sum, e) => sum + e.amount, 0);
+  const totalPending = pending.reduce((sum, e) => sum + e.amount, 0);
+  const statusExtra =
+    filters.status === 'paid' ? 'Solo pagados' : filters.status === 'pending' ? 'Solo pendientes' : undefined;
 
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
+  const kpis: Kpi[] = [
+    { label: 'Total pagado (DOP eq.)', value: formatCurrency(totalPaid, 'DOP'), kind: 'pos' },
+    { label: 'Total pendiente (DOP eq.)', value: formatCurrency(totalPending, 'DOP'), kind: 'amber' },
+    { label: 'Registros', value: String(expenses.length) },
+    { label: 'Ratio pagados', value: `${paid.length} / ${pending.length}` },
+  ];
 
-      // Header
-      doc.fontSize(20).text('Reporte de Gastos', { align: 'center' });
-      doc.moveDown();
-
-      // Filters
-      if (filters.fromDate || filters.toDate) {
-        doc.fontSize(12).text('Período:', { continued: true });
-        if (filters.fromDate) {
-          doc.text(` Desde: ${formatDate(filters.fromDate)}`, { continued: true });
-        }
-        if (filters.toDate) {
-          doc.text(` Hasta: ${formatDate(filters.toDate)}`);
-        }
-        doc.moveDown();
-      }
-
-      if (filters.status) {
-        doc.fontSize(12).text(`Estado: ${filters.status === 'paid' ? 'Pagados' : 'Pendientes'}`);
-        doc.moveDown();
-      }
-
-      // Summary
-      const paid = expenses.filter((e) => e.isPaid);
-      const pending = expenses.filter((e) => !e.isPaid);
-      const totalPaid = paid.reduce((sum, e) => sum + e.amount, 0);
-      const totalPending = pending.reduce((sum, e) => sum + e.amount, 0);
-
-      doc.fontSize(14).text('Resumen', { underline: true });
-      doc.fontSize(12);
-      doc.text(`Total Pagados: ${formatCurrency(totalPaid, 'DOP')} (${paid.length} gastos)`);
-      doc.text(`Total Pendientes: ${formatCurrency(totalPending, 'DOP')} (${pending.length} gastos)`);
-      doc.text(`Total General: ${formatCurrency(totalPaid + totalPending, 'DOP')} (${expenses.length} gastos)`);
-      doc.moveDown();
-
-      // Expenses list
-      doc.fontSize(14).text('Detalle de Gastos', { underline: true });
-      doc.moveDown();
-
-      expenses.forEach((expense, index) => {
-        if (index > 0 && index % 20 === 0) {
-          doc.addPage();
-        }
-
-        doc.fontSize(10);
-        doc.text(`${expense.description}`, { continued: true });
-        doc.text(` - ${formatCurrency(expense.amount, expense.currency)}`, {
-          align: 'right',
-        });
-        doc.fontSize(8);
-        doc.text(
-          `Tipo: ${expense.expenseType === 'RECURRING_MONTHLY' ? 'Recurrente Mensual' : expense.expenseType === 'ANNUAL' ? 'Anual' : 'No Recurrente'} | ` +
-            `Categoría: ${expense.category || 'N/A'} | ` +
-            `Estado: ${expense.isPaid ? 'Pagado' : 'Pendiente'}`,
-          { indent: 20 }
-        );
-        doc.moveDown(0.5);
-      });
-
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
+  return renderReportPdf('Reporte de gastos', 'Movimientos y sumarios del período seleccionado', (s) => {
+    s.period(filters.fromDate, filters.toDate, statusExtra);
+    s.kpis(kpis, 2);
+    s.section('Detalle de movimientos');
+    const rows = expenses.map((e) => {
+      const desc = String(e.description || '—');
+      const d = desc.length > 70 ? `${desc.slice(0, 67)}…` : desc;
+      return [d, formatCurrency(e.amount, e.currency), e.category || '—', e.isPaid ? 'Pagado' : 'Pendiente', describeExpenseScheduleEs(e)];
+    });
+    s.table(
+      ['Descripción', 'Monto', 'Categoría', 'Estado', 'Calendario'],
+      [150, 78, 72, 58, 141],
+      rows
+    );
   });
 };
 
-// Generate PDF for loans report
 const generateLoansPDF = async (
   loans: any[],
   filters: { fromDate?: string; toDate?: string; status?: string }
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
+  const active = loans.filter((l) => l.status === 'ACTIVE');
+  const paidL = loans.filter((l) => l.status === 'PAID');
+  const totalActive = active.reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
+  const totalPaid = paidL.reduce((sum, l) => sum + l.totalAmount, 0);
+  const st =
+    filters.status === 'active' ? 'Solo activos' : filters.status === 'paid' ? 'Solo pagados' : undefined;
 
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
+  const kpis: Kpi[] = [
+    { label: 'Deuda en activos (aprox.)', value: formatCurrency(totalActive, 'DOP'), kind: 'neg' },
+    { label: 'Total préstamos cerrados', value: formatCurrency(totalPaid, 'DOP') },
+    { label: 'Registros', value: String(loans.length) },
+    { label: 'Activos / pagados', value: `${active.length} / ${paidL.length}` },
+  ];
 
-      doc.fontSize(20).text('Reporte de Préstamos', { align: 'center' });
-      doc.moveDown();
-
-      if (filters.fromDate || filters.toDate) {
-        doc.fontSize(12).text('Período:', { continued: true });
-        if (filters.fromDate) {
-          doc.text(` Desde: ${formatDate(filters.fromDate)}`, { continued: true });
-        }
-        if (filters.toDate) {
-          doc.text(` Hasta: ${formatDate(filters.toDate)}`);
-        }
-        doc.moveDown();
-      }
-
-      // Summary
-      const active = loans.filter((l) => l.status === 'ACTIVE');
-      const paid = loans.filter((l) => l.status === 'PAID');
-      const totalActive = active.reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
-      const totalPaid = paid.reduce((sum, l) => sum + l.totalAmount, 0);
-
-      doc.fontSize(14).text('Resumen', { underline: true });
-      doc.fontSize(12);
-      doc.text(`Préstamos Activos: ${active.length} - Total: ${formatCurrency(totalActive, 'DOP')}`);
-      doc.text(`Préstamos Pagados: ${paid.length} - Total: ${formatCurrency(totalPaid, 'DOP')}`);
-      doc.moveDown();
-
-      doc.fontSize(14).text('Detalle de Préstamos', { underline: true });
-      doc.moveDown();
-
-      loans.forEach((loan, index) => {
-        if (index > 0 && index % 15 === 0) {
-          doc.addPage();
-        }
-
-        doc.fontSize(10);
-        doc.text(`${loan.loanName}${loan.bankName ? ` - ${loan.bankName}` : ''}`, {
-          continued: true,
-        });
-        doc.text(` ${formatCurrency(loan.totalAmount, loan.currency)}`, { align: 'right' });
-        doc.fontSize(8);
-        doc.text(
-          `Estado: ${loan.status === 'ACTIVE' ? 'Activo' : loan.status === 'PAID' ? 'Pagado' : 'En Mora'} | ` +
-            `Progreso: ${loan.progress?.toFixed(1) || 0}% | ` +
-            `Cuotas: ${loan.paidInstallments}/${loan.totalInstallments}`,
-          { indent: 20 }
-        );
-        if (loan.remainingBalance !== undefined) {
-          doc.text(`Saldo Restante: ${formatCurrency(loan.remainingBalance, loan.currency)}`, {
-            indent: 20,
-          });
-        }
-        doc.moveDown(0.5);
-      });
-
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
+  return renderReportPdf('Reporte de préstamos', 'Saldos, estados e hitos de pagos', (s) => {
+    s.period(filters.fromDate, filters.toDate, st);
+    s.kpis(kpis, 2);
+    s.section('Detalle de préstamos');
+    s.table(
+      ['Préstamo', 'Banco', 'Monto', 'Progreso', 'Estado'],
+      [150, 88, 88, 48, 125],
+      loans.map((loan) => [
+        String(loan.loanName).slice(0, 50),
+        loan.bankName || '—',
+        formatCurrency(loan.totalAmount, loan.currency),
+        `${(loan.progress ?? 0).toFixed(0)}%`,
+        loan.status === 'PAID' ? 'Pagado' : loan.status === 'ACTIVE' ? 'Activo' : 'Mora',
+      ])
+    );
   });
 };
 
-// Generate PDF for cards report
+/** Dual: un solo renglón (separador · sin salto a mitad de “+”). */
+const limLine = (c: any) => {
+  if (c.currencyType === 'DOP') return formatCurrency(c.creditLimitDop, 'DOP');
+  if (c.currencyType === 'USD') return formatCurrency(c.creditLimitUsd, 'USD');
+  return `${formatCurrency(c.creditLimitDop, 'DOP')}\u00A0·\u00A0${formatCurrency(c.creditLimitUsd, 'USD')}`;
+};
+
+const debtLine = (c: any) => {
+  if (c.currencyType === 'DOP') return formatCurrency(c.currentDebtDop, 'DOP');
+  if (c.currencyType === 'USD') return formatCurrency(c.currentDebtUsd, 'USD');
+  return `${formatCurrency(c.currentDebtDop, 'DOP')}\u00A0·\u00A0${formatCurrency(c.currentDebtUsd, 'USD')}`;
+};
+
 const generateCardsPDF = async (
   cards: any[],
-  filters: { fromDate?: string; toDate?: string }
+  filters: { fromDate?: string; toDate?: string },
+  exchangeRateDopUsd: number
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
-
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
-
-      doc.fontSize(20).text('Reporte de Tarjetas de Crédito', { align: 'center' });
-      doc.moveDown();
-
-      // Summary
-      const totalDebt = cards.reduce((sum, c) => {
-        if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-        if (c.currencyType === 'USD') return sum + c.currentDebtUsd * 55; // Assuming exchange rate
-        return sum + c.currentDebtDop + c.currentDebtUsd * 55;
-      }, 0);
-
-      const totalLimit = cards.reduce((sum, c) => {
-        if (c.currencyType === 'DOP') return sum + c.creditLimitDop;
-        if (c.currencyType === 'USD') return sum + c.creditLimitUsd * 55;
-        return sum + c.creditLimitDop + c.creditLimitUsd * 55;
-      }, 0);
-
-      doc.fontSize(14).text('Resumen', { underline: true });
-      doc.fontSize(12);
-      doc.text(`Total de Tarjetas: ${cards.length}`);
-      doc.text(`Límite Total: ${formatCurrency(totalLimit, 'DOP')}`);
-      doc.text(`Deuda Total: ${formatCurrency(totalDebt, 'DOP')}`);
-      doc.text(`Disponible: ${formatCurrency(totalLimit - totalDebt, 'DOP')}`);
-      doc.moveDown();
-
-      doc.fontSize(14).text('Detalle de Tarjetas', { underline: true });
-      doc.moveDown();
-
-      cards.forEach((card, index) => {
-        if (index > 0 && index % 15 === 0) {
-          doc.addPage();
-        }
-
-        doc.fontSize(10);
-        doc.text(`${card.cardName} - ${card.bankName}`, { continued: true });
-        doc.fontSize(8);
-        if (card.currencyType === 'DOP' || card.currencyType === 'DUAL') {
-          doc.text(
-            `Límite DOP: ${formatCurrency(card.creditLimitDop, 'DOP')} | Deuda: ${formatCurrency(card.currentDebtDop, 'DOP')}`,
-            { indent: 20 }
-          );
-        }
-        if (card.currencyType === 'USD' || card.currencyType === 'DUAL') {
-          doc.text(
-            `Límite USD: ${formatCurrency(card.creditLimitUsd, 'USD')} | Deuda: ${formatCurrency(card.currentDebtUsd, 'USD')}`,
-            { indent: 20 }
-          );
-        }
-        doc.text(`Corte: Día ${card.cutOffDay} | Vencimiento: Día ${card.paymentDueDay}`, {
-          indent: 20,
-        });
-        doc.moveDown(0.5);
-      });
-
-      doc.end();
-    } catch (error) {
-      reject(error);
+  const r = exchangeRateDopUsd;
+  const totalDebt = cards.reduce((sum, c) => {
+    if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
+    if (c.currencyType === 'USD') return sum + c.currentDebtUsd * r;
+    return sum + c.currentDebtDop + c.currentDebtUsd * r;
+  }, 0);
+  const totalLimit = cards.reduce((sum, c) => {
+    if (c.currencyType === 'DOP') return sum + c.creditLimitDop;
+    if (c.currencyType === 'USD') return sum + c.creditLimitUsd * r;
+    return sum + c.creditLimitDop + c.creditLimitUsd * r;
+  }, 0);
+  const avail = totalLimit - totalDebt;
+  const kpis: Kpi[] = [
+    { label: 'Límite total (DOP eq.)', value: formatCurrency(totalLimit, 'DOP') },
+    { label: 'Deuda total (DOP eq.)', value: formatCurrency(totalDebt, 'DOP'), kind: 'neg' },
+    { label: 'Disponible (DOP eq.)', value: formatCurrency(avail, 'DOP'), kind: 'pos' },
+    { label: 'Tarjetas', value: String(cards.length) },
+  ];
+  return renderReportPdf(
+    'Reporte de tarjetas de crédito',
+    `Límites\u00A0y\u00A0deudas — tasa USD: 1 = ${r.toFixed(2)} DOP`,
+    (s) => {
+      s.period(filters.fromDate, filters.toDate);
+      s.kpis(kpis, 2);
+      s.section('Detalle por tarjeta');
+      s.table(
+        ['Tarjeta', 'Banco', 'Límites', 'Deudas', 'Corte/pago'],
+        [94, 72, 132, 132, 70],
+        cards.map((c) => [
+          String(c.cardName).slice(0, 32),
+          c.bankName,
+          limLine(c),
+          debtLine(c),
+          `${c.cutOffDay ?? '—'}/${c.paymentDueDay ?? '—'}`,
+        ]),
+        { noWrapColumns: [2, 3] }
+      );
     }
-  });
+  );
 };
 
-// Generate PDF for accounts report
 const generateAccountsPDF = async (
   accounts: any[],
-  filters: { fromDate?: string; toDate?: string }
+  filters: { fromDate?: string; toDate?: string },
+  exchangeRateDopUsd: number
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
-
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
-
-      doc.fontSize(20).text('Reporte de Cuentas Bancarias', { align: 'center' });
-      doc.moveDown();
-
-      if (filters.fromDate || filters.toDate) {
-        doc.fontSize(12).text('Período:', { continued: true });
-        if (filters.fromDate) {
-          doc.text(` Desde: ${formatDate(filters.fromDate)}`, { continued: true });
-        }
-        if (filters.toDate) {
-          doc.text(` Hasta: ${formatDate(filters.toDate)}`);
-        }
-        doc.moveDown();
-      }
-
-      // Summary
-      const totalBalanceDop = accounts.reduce((sum, a) => {
-        if (a.currencyType === 'DOP' || a.currencyType === 'DUAL') return sum + a.balanceDop;
-        return sum;
-      }, 0);
-
-      const totalBalanceUsd = accounts.reduce((sum, a) => {
-        if (a.currencyType === 'USD' || a.currencyType === 'DUAL') return sum + a.balanceUsd;
-        return sum;
-      }, 0);
-
-      const totalBalance = accounts.reduce((sum, a) => {
-        if (a.currencyType === 'DOP') return sum + a.balanceDop;
-        if (a.currencyType === 'USD') return sum + a.balanceUsd * 55; // Assuming exchange rate
-        return sum + a.balanceDop + a.balanceUsd * 55;
-      }, 0);
-
-      doc.fontSize(14).text('Resumen', { underline: true });
-      doc.fontSize(12);
-      doc.text(`Total de Cuentas: ${accounts.length}`);
-      doc.text(`Balance Total DOP: ${formatCurrency(totalBalanceDop, 'DOP')}`);
-      doc.text(`Balance Total USD: ${formatCurrency(totalBalanceUsd, 'USD')}`);
-      doc.text(`Balance Total General: ${formatCurrency(totalBalance, 'DOP')}`);
-      doc.moveDown();
-
-      doc.fontSize(14).text('Detalle de Cuentas', { underline: true });
-      doc.moveDown();
-
-      accounts.forEach((account, index) => {
-        if (index > 0 && index % 15 === 0) {
-          doc.addPage();
-        }
-
-        doc.fontSize(10);
-        doc.text(`${account.bankName} - ${account.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente'}`, {
-          continued: true,
-        });
-        if (account.accountNumber) {
-          doc.text(` (${account.accountNumber})`, { continued: true });
-        }
-        doc.fontSize(8);
-        if (account.currencyType === 'DOP' || account.currencyType === 'DUAL') {
-          doc.text(`Balance DOP: ${formatCurrency(account.balanceDop, 'DOP')}`, { indent: 20 });
-        }
-        if (account.currencyType === 'USD' || account.currencyType === 'DUAL') {
-          doc.text(`Balance USD: ${formatCurrency(account.balanceUsd, 'USD')}`, { indent: 20 });
-        }
-        doc.moveDown(0.5);
-      });
-
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
+  const r = exchangeRateDopUsd;
+  const totalBalanceDop = accounts.reduce((sum, a) => {
+    if (a.currencyType === 'DOP' || a.currencyType === 'DUAL') return sum + a.balanceDop;
+    return sum;
+  }, 0);
+  const totalBalanceUsd = accounts.reduce((sum, a) => {
+    if (a.currencyType === 'USD' || a.currencyType === 'DUAL') return sum + a.balanceUsd;
+    return sum;
+  }, 0);
+  const totalEq = accounts.reduce((sum, a) => {
+    if (a.currencyType === 'DOP') return sum + a.balanceDop;
+    if (a.currencyType === 'USD') return sum + a.balanceUsd * r;
+    return sum + a.balanceDop + a.balanceUsd * r;
+  }, 0);
+  const kpis: Kpi[] = [
+    { label: 'Balance DOP', value: formatCurrency(totalBalanceDop, 'DOP') },
+    { label: 'Balance USD', value: formatCurrency(totalBalanceUsd, 'USD') },
+    { label: 'Total DOP eq.', value: formatCurrency(totalEq, 'DOP'), kind: 'pos' },
+    { label: 'Cuentas', value: String(accounts.length) },
+  ];
+  return renderReportPdf('Reporte de cuentas bancarias', 'Saldos en pesos y dólares', (s) => {
+    s.period(filters.fromDate, filters.toDate);
+    s.kpis(kpis, 2);
+    s.section('Detalle de cuentas');
+    s.table(
+      ['Banco', 'Tipo', 'N.º', 'DOP', 'USD'],
+      [120, 68, 78, 98, 135],
+      accounts.map((a) => [
+        a.bankName,
+        a.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente',
+        a.accountNumber || '—',
+        a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, 'DOP'),
+        a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, 'USD'),
+      ])
+    );
   });
 };
 
-// Generate comprehensive report PDF
 const generateComprehensivePDF = async (
   data: {
     expenses: any[];
@@ -354,93 +200,98 @@ const generateComprehensivePDF = async (
     cards: any[];
     accounts: any[];
   },
-  filters: { fromDate?: string; toDate?: string }
+  filters: { fromDate?: string; toDate?: string },
+  exchangeRateDopUsd: number
 ): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const PDFDocument = require('pdfkit');
-      const doc = new PDFDocument({ margin: 50 });
-      const buffers: Buffer[] = [];
+  const r = exchangeRateDopUsd;
+  const { expenses, loans, cards, accounts } = data;
+  const totalBalance = accounts.reduce((sum, a) => {
+    if (a.currencyType === 'DOP') return sum + a.balanceDop;
+    if (a.currencyType === 'USD') return sum + a.balanceUsd * r;
+    return sum + a.balanceDop + a.balanceUsd * r;
+  }, 0);
+  const totalCardDebt = cards.reduce((sum, c) => {
+    if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
+    if (c.currencyType === 'USD') return sum + c.currentDebtUsd * r;
+    return sum + c.currentDebtDop + c.currentDebtUsd * r;
+  }, 0);
+  const totalLoanDebt = loans
+    .filter((l) => l.status === 'ACTIVE')
+    .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
+  const netWorth = totalBalance - totalCardDebt - totalLoanDebt;
+  const paidE = expenses.filter((e) => e.isPaid);
+  const penE = expenses.filter((e) => !e.isPaid);
 
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
+  return renderReportPdf('Reporte financiero completo', 'Resumen ejecutivo, KPIs y tablas detalladas', (s) => {
+    s.period(filters.fromDate, filters.toDate);
+    s.kpis(
+      [
+        { label: 'Balance cuentas (DOP eq.)', value: formatCurrency(totalBalance, 'DOP'), kind: 'pos' },
+        { label: 'Deuda tarjetas (DOP eq.)', value: formatCurrency(totalCardDebt, 'DOP'), kind: 'neg' },
+        { label: 'Deuda préstamos (activos)', value: formatCurrency(totalLoanDebt, 'DOP'), kind: 'neg' },
+        { label: 'Patrimonio neto (aprox.)', value: formatCurrency(netWorth, 'DOP'), kind: netWorth >= 0 ? 'pos' : 'neg' },
+        { label: 'Gastos en período', value: formatCurrency(paidE.reduce((x, e) => x + e.amount, 0) + penE.reduce((x, e) => x + e.amount, 0), 'DOP') },
+        { label: 'Gastos pag. / pend.', value: `${paidE.length} / ${penE.length}` },
+      ],
+      2
+    );
 
-      doc.fontSize(24).text('Reporte Financiero Completo', { align: 'center' });
-      doc.moveDown();
-      doc.fontSize(10).text(`Generado el: ${formatDate(new Date())}`, { align: 'center' });
-      doc.moveDown(2);
+    s.section('Cuentas bancarias');
+    if (accounts.length) {
+      s.table(
+        ['Banco', 'Tipo', 'DOP', 'USD'],
+        [150, 90, 128, 131],
+        accounts.map((a) => [
+          a.bankName,
+          a.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente',
+          a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, 'DOP'),
+          a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, 'USD'),
+        ])
+      );
+    } else {
+      s.note('— Sin cuentas en el período.');
+    }
 
-      if (filters.fromDate || filters.toDate) {
-        doc.fontSize(12).text('Período:', { continued: true });
-        if (filters.fromDate) {
-          doc.text(` Desde: ${formatDate(filters.fromDate)}`, { continued: true });
-        }
-        if (filters.toDate) {
-          doc.text(` Hasta: ${formatDate(filters.toDate)}`);
-        }
-        doc.moveDown(2);
-      }
+    s.section('Tarjetas de crédito');
+    if (cards.length) {
+      s.table(
+        ['Tarjeta', 'Banco', 'Límites', 'Deudas'],
+        [100, 88, 156, 156],
+        cards.map((c) => [String(c.cardName).slice(0, 40), c.bankName, limLine(c), debtLine(c)]),
+        { noWrapColumns: [2, 3] }
+      );
+    } else {
+      s.note('— Sin tarjetas registradas.');
+    }
 
-      // Accounts Summary
-      doc.fontSize(18).text('Cuentas Bancarias', { underline: true });
-      doc.moveDown();
-      const totalBalance = data.accounts.reduce((sum, a) => {
-        if (a.currencyType === 'DOP') return sum + a.balanceDop;
-        if (a.currencyType === 'USD') return sum + a.balanceUsd * 55;
-        return sum + a.balanceDop + a.balanceUsd * 55;
-      }, 0);
-      doc.fontSize(12).text(`Total en Cuentas: ${formatCurrency(totalBalance, 'DOP')}`);
-      doc.fontSize(10).text(`Número de Cuentas: ${data.accounts.length}`);
-      doc.moveDown();
+    s.section('Préstamos');
+    if (loans.length) {
+      s.table(
+        ['Préstamo', 'Banco', 'Monto', 'Estado'],
+        [150, 120, 100, 129],
+        loans.map((l) => [
+          String(l.loanName).slice(0, 45),
+          l.bankName || '—',
+          formatCurrency(l.totalAmount, l.currency),
+          l.status === 'PAID' ? 'Pagado' : l.status === 'ACTIVE' ? 'Activo' : 'Mora',
+        ])
+      );
+    } else {
+      s.note('— Sin préstamos en el período.');
+    }
 
-      // Cards Summary
-      doc.fontSize(18).text('Tarjetas de Crédito', { underline: true });
-      doc.moveDown();
-      const totalCardDebt = data.cards.reduce((sum, c) => {
-        if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-        if (c.currencyType === 'USD') return sum + c.currentDebtUsd * 55;
-        return sum + c.currentDebtDop + c.currentDebtUsd * 55;
-      }, 0);
-      doc.fontSize(12).text(`Deuda Total en Tarjetas: ${formatCurrency(totalCardDebt, 'DOP')}`);
-      doc.fontSize(10).text(`Número de Tarjetas: ${data.cards.length}`);
-      doc.moveDown();
-
-      // Loans Summary
-      doc.fontSize(18).text('Préstamos', { underline: true });
-      doc.moveDown();
-      const totalLoanDebt = data.loans
-        .filter((l) => l.status === 'ACTIVE')
-        .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
-      doc.fontSize(12).text(`Deuda Total en Préstamos: ${formatCurrency(totalLoanDebt, 'DOP')}`);
-      doc.fontSize(10).text(`Préstamos Activos: ${data.loans.filter((l) => l.status === 'ACTIVE').length}`);
-      doc.moveDown();
-
-      // Expenses Summary
-      doc.fontSize(18).text('Gastos', { underline: true });
-      doc.moveDown();
-      const paidExpenses = data.expenses.filter((e) => e.isPaid);
-      const pendingExpenses = data.expenses.filter((e) => !e.isPaid);
-      const totalPaidExpenses = paidExpenses.reduce((sum, e) => sum + e.amount, 0);
-      const totalPendingExpenses = pendingExpenses.reduce((sum, e) => sum + e.amount, 0);
-      doc.fontSize(12).text(`Gastos Pagados: ${formatCurrency(totalPaidExpenses, 'DOP')} (${paidExpenses.length})`);
-      doc.fontSize(12).text(`Gastos Pendientes: ${formatCurrency(totalPendingExpenses, 'DOP')} (${pendingExpenses.length})`);
-      doc.moveDown();
-
-      // Net Worth
-      doc.fontSize(18).text('Patrimonio Neto', { underline: true });
-      doc.moveDown();
-      const netWorth = totalBalance - totalCardDebt - totalLoanDebt;
-      doc.fontSize(14).text(`Patrimonio Neto: ${formatCurrency(netWorth, 'DOP')}`, {
-        align: 'center',
-      });
-
-      doc.end();
-    } catch (error) {
-      reject(error);
+    s.section('Gastos');
+    if (expenses.length) {
+      s.table(
+        ['Descripción', 'Monto', 'Categoría', 'Estado'],
+        [200, 88, 90, 121],
+        expenses.map((e) => {
+          const d = String(e.description || '—');
+          return [d.length > 55 ? d.slice(0, 52) + '…' : d, formatCurrency(e.amount, e.currency), e.category || '—', e.isPaid ? 'Pagado' : 'Pendiente'];
+        })
+      );
+    } else {
+      s.note('— Sin gastos en el período.');
     }
   });
 };
@@ -452,8 +303,9 @@ export const getExpensesReport = async (req: AuthRequest, res: Response) => {
     const { fromDate, toDate, status, format } = req.query;
 
     let queryText = `
-      SELECT id, description, amount, currency, expense_type, category,
+      SELECT id, description, amount, currency, nature, category,
              payment_day, payment_month, date, is_paid, last_paid_month, last_paid_year,
+             recurrence_type, frequency,
              created_at, updated_at
       FROM expenses
       WHERE user_id = $1
@@ -483,7 +335,10 @@ export const getExpensesReport = async (req: AuthRequest, res: Response) => {
 
     let expenses = result.rows.map((row) => {
       let isPaid = row.is_paid;
-      if (row.expense_type === 'RECURRING_MONTHLY') {
+      if (
+        row.recurrence_type === 'recurrent' &&
+        normalizeFrequency(row.frequency) === 'monthly'
+      ) {
         if (row.last_paid_month !== currentMonth || row.last_paid_year !== currentYear) {
           isPaid = false;
         }
@@ -494,7 +349,9 @@ export const getExpensesReport = async (req: AuthRequest, res: Response) => {
         description: row.description,
         amount: parseFloat(row.amount),
         currency: row.currency,
-        expenseType: row.expense_type,
+        nature: row.nature,
+        recurrenceType: row.recurrence_type,
+        frequency: row.frequency,
         category: row.category,
         paymentDay: row.payment_day,
         paymentMonth: row.payment_month,
@@ -640,6 +497,8 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { format } = req.query;
 
+    const rate = await getExchangeRateForUser(userId);
+
     const result = await query(
       `SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
               current_debt_dop, current_debt_usd, minimum_payment_dop, minimum_payment_usd,
@@ -668,7 +527,7 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
     }));
 
     if (format === 'pdf') {
-      const pdfBuffer = await generateCardsPDF(cards, {});
+      const pdfBuffer = await generateCardsPDF(cards, {}, rate);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=reporte-tarjetas-${Date.now()}.pdf`);
@@ -681,13 +540,13 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
           total: cards.length,
           totalDebt: cards.reduce((sum, c) => {
             if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-            if (c.currencyType === 'USD') return sum + c.currentDebtUsd * 55;
-            return sum + c.currentDebtDop + c.currentDebtUsd * 55;
+            if (c.currencyType === 'USD') return sum + c.currentDebtUsd * rate;
+            return sum + c.currentDebtDop + c.currentDebtUsd * rate;
           }, 0),
           totalLimit: cards.reduce((sum, c) => {
             if (c.currencyType === 'DOP') return sum + c.creditLimitDop;
-            if (c.currencyType === 'USD') return sum + c.creditLimitUsd * 55;
-            return sum + c.creditLimitDop + c.creditLimitUsd * 55;
+            if (c.currencyType === 'USD') return sum + c.creditLimitUsd * rate;
+            return sum + c.creditLimitDop + c.creditLimitUsd * rate;
           }, 0),
         },
       });
@@ -703,6 +562,8 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const { fromDate, toDate, format } = req.query;
+
+    const rate = await getExchangeRateForUser(userId);
 
     let queryText = `
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
@@ -742,10 +603,14 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
     }));
 
     if (format === 'pdf') {
-      const pdfBuffer = await generateAccountsPDF(accounts, {
-        fromDate: fromDate as string,
-        toDate: toDate as string,
-      });
+      const pdfBuffer = await generateAccountsPDF(
+        accounts,
+        {
+          fromDate: fromDate as string,
+          toDate: toDate as string,
+        },
+        rate
+      );
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=reporte-cuentas-${Date.now()}.pdf`);
@@ -763,8 +628,8 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
 
       const totalBalance = accounts.reduce((sum, a) => {
         if (a.currencyType === 'DOP') return sum + a.balanceDop;
-        if (a.currencyType === 'USD') return sum + a.balanceUsd * 55;
-        return sum + a.balanceDop + a.balanceUsd * 55;
+        if (a.currencyType === 'USD') return sum + a.balanceUsd * rate;
+        return sum + a.balanceDop + a.balanceUsd * rate;
       }, 0);
 
       res.json({
@@ -792,11 +657,11 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
     const userId = req.userId!;
     const { fromDate, toDate, format } = req.query;
 
-    // Get all data
-    const [expensesResult, loansResult, cardsResult, accountsResult] = await Promise.all([
+    // Get all data + tasa del usuario (.env si no hay valor en BD)
+    const [expensesResult, loansResult, cardsResult, accountsResult, userRateResult] = await Promise.all([
       query(
-        `SELECT id, description, amount, currency, expense_type, category, is_paid, 
-                last_paid_month, last_paid_year, created_at
+        `SELECT id, description, amount, currency, nature, category, is_paid, 
+                last_paid_month, last_paid_year, recurrence_type, frequency, created_at
          FROM expenses WHERE user_id = $1`,
         [userId]
       ),
@@ -816,11 +681,14 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
         [userId]
       ),
       query(
-        `SELECT id, bank_name, account_type, balance_dop, balance_usd, currency_type
+        `SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type
          FROM bank_accounts WHERE user_id = $1`,
         [userId]
       ),
+      query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]),
     ]);
+
+    const rate = resolveExchangeRateDopUsd(userRateResult.rows[0]?.exchange_rate_dop_usd);
 
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
@@ -828,7 +696,10 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
 
     const expenses = expensesResult.rows.map((row) => {
       let isPaid = row.is_paid;
-      if (row.expense_type === 'RECURRING_MONTHLY') {
+      if (
+        row.recurrence_type === 'recurrent' &&
+        normalizeFrequency(row.frequency) === 'monthly'
+      ) {
         if (row.last_paid_month !== currentMonth || row.last_paid_year !== currentYear) {
           isPaid = false;
         }
@@ -838,7 +709,9 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
         description: row.description,
         amount: parseFloat(row.amount),
         currency: row.currency,
-        expenseType: row.expense_type,
+        nature: row.nature,
+        recurrenceType: row.recurrence_type,
+        frequency: row.frequency,
         category: row.category,
         isPaid,
       };
@@ -870,10 +743,29 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
       id: row.id,
       bankName: row.bank_name,
       accountType: row.account_type,
+      accountNumber: row.account_number,
       balanceDop: parseFloat(row.balance_dop || 0),
       balanceUsd: parseFloat(row.balance_usd || 0),
       currencyType: row.currency_type,
     }));
+
+    const totalBalanceForSummary = accounts.reduce((sum, a) => {
+      if (a.currencyType === 'DOP') return sum + a.balanceDop;
+      if (a.currencyType === 'USD') return sum + a.balanceUsd * rate;
+      return sum + a.balanceDop + a.balanceUsd * rate;
+    }, 0);
+
+    const totalCardDebtForSummary = cards.reduce((sum, c) => {
+      if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
+      if (c.currencyType === 'USD') return sum + c.currentDebtUsd * rate;
+      return sum + c.currentDebtDop + c.currentDebtUsd * rate;
+    }, 0);
+
+    const totalLoanDebtForSummary = loans
+      .filter((l) => l.status === 'ACTIVE')
+      .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
+
+    const netWorthComputed = totalBalanceForSummary - totalCardDebtForSummary - totalLoanDebtForSummary;
 
     if (format === 'pdf') {
       const pdfBuffer = await generateComprehensivePDF(
@@ -881,7 +773,8 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
         {
           fromDate: fromDate as string,
           toDate: toDate as string,
-        }
+        },
+        rate
       );
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -897,20 +790,10 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
           accounts,
         },
         summary: {
-          totalBalance: accounts.reduce((sum, a) => {
-            if (a.currencyType === 'DOP') return sum + a.balanceDop;
-            if (a.currencyType === 'USD') return sum + a.balanceUsd * 55;
-            return sum + a.balanceDop + a.balanceUsd * 55;
-          }, 0),
-          totalCardDebt: cards.reduce((sum, c) => {
-            if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-            if (c.currencyType === 'USD') return sum + c.currentDebtUsd * 55;
-            return sum + c.currentDebtDop + c.currentDebtUsd * 55;
-          }, 0),
-          totalLoanDebt: loans
-            .filter((l) => l.status === 'ACTIVE')
-            .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0),
-          netWorth: 0, // Will be calculated
+          totalBalance: totalBalanceForSummary,
+          totalCardDebt: totalCardDebtForSummary,
+          totalLoanDebt: totalLoanDebtForSummary,
+          netWorth: netWorthComputed,
         },
       });
     }

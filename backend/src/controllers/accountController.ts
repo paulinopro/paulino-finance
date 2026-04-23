@@ -5,11 +5,11 @@ import { AuthRequest } from '../middleware/auth';
 export const getAccounts = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { search, bank } = req.query;
+    const { search, bank, kind } = req.query;
 
     let queryText = `
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
-              currency_type, created_at, updated_at
+              currency_type, account_kind, created_at, updated_at
        FROM bank_accounts
        WHERE user_id = $1
     `;
@@ -28,6 +28,12 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       paramIndex++;
     }
 
+    if (kind && (kind === 'bank' || kind === 'cash' || kind === 'wallet')) {
+      queryText += ` AND account_kind = $${paramIndex}`;
+      params.push(kind);
+      paramIndex++;
+    }
+
     queryText += ` ORDER BY created_at DESC`;
 
     const result = await query(queryText, params);
@@ -40,6 +46,7 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       balanceDop: parseFloat(row.balance_dop || 0),
       balanceUsd: parseFloat(row.balance_usd || 0),
       currencyType: row.currency_type,
+      accountKind: row.account_kind || 'bank',
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -59,6 +66,20 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       return sum;
     }, 0);
 
+    const isCashLike = (k: string) => k === 'cash' || k === 'wallet';
+    const totalBankDop = accounts
+      .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
+      .reduce((s, a) => s + a.balanceDop, 0);
+    const totalBankUsd = accounts
+      .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
+      .reduce((s, a) => s + a.balanceUsd, 0);
+    const totalCashDop = accounts
+      .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
+      .reduce((s, a) => s + a.balanceDop, 0);
+    const totalCashUsd = accounts
+      .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
+      .reduce((s, a) => s + a.balanceUsd, 0);
+
     res.json({
       success: true,
       accounts,
@@ -66,6 +87,10 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
         totalBalanceDop,
         totalBalanceUsd,
         totalAccounts: accounts.length,
+        totalBankDop,
+        totalBankUsd,
+        totalCashDop,
+        totalCashUsd,
       },
     });
   } catch (error: any) {
@@ -115,18 +140,22 @@ export const getAccount = async (req: AuthRequest, res: Response) => {
 export const createAccount = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType } = req.body;
+    const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } =
+      req.body;
 
     if (!bankName || !accountType || !currencyType) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
+    const kind =
+      accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : 'bank';
+
     const result = await query(
       `INSERT INTO bank_accounts 
-       (user_id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (user_id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type, account_kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
-                 currency_type, created_at, updated_at`,
+                 currency_type, account_kind, created_at, updated_at`,
       [
         userId,
         bankName,
@@ -135,6 +164,7 @@ export const createAccount = async (req: AuthRequest, res: Response) => {
         balanceDop || 0,
         balanceUsd || 0,
         currencyType,
+        kind,
       ]
     );
 
@@ -150,6 +180,7 @@ export const createAccount = async (req: AuthRequest, res: Response) => {
         balanceDop: parseFloat(row.balance_dop || 0),
         balanceUsd: parseFloat(row.balance_usd || 0),
         currencyType: row.currency_type,
+        accountKind: row.account_kind || 'bank',
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -164,7 +195,8 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const accountId = parseInt(req.params.id);
-    const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType } = req.body;
+    const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } =
+      req.body;
 
     const checkResult = await query(
       'SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2',
@@ -175,6 +207,9 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Account not found' });
     }
 
+    const kindUpdate =
+      accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : null;
+
     const result = await query(
       `UPDATE bank_accounts
        SET bank_name = COALESCE($1, bank_name),
@@ -183,10 +218,11 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
            balance_dop = COALESCE($4, balance_dop),
            balance_usd = COALESCE($5, balance_usd),
            currency_type = COALESCE($6, currency_type),
+           account_kind = COALESCE($7, account_kind),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 AND user_id = $8
+       WHERE id = $8 AND user_id = $9
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
-                 currency_type, created_at, updated_at`,
+                 currency_type, account_kind, created_at, updated_at`,
       [
         bankName,
         accountType,
@@ -194,6 +230,7 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
         balanceDop,
         balanceUsd,
         currencyType,
+        kindUpdate,
         accountId,
         userId,
       ]
@@ -211,6 +248,7 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
         balanceDop: parseFloat(row.balance_dop || 0),
         balanceUsd: parseFloat(row.balance_usd || 0),
         currencyType: row.currency_type,
+        accountKind: row.account_kind || 'bank',
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },

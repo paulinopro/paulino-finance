@@ -6,6 +6,7 @@ import { AuthRequest } from '../middleware/auth';
 import { signAuthToken } from '../utils/jwt';
 import { sendPasswordResetEmail } from '../services/emailService';
 import { seedDefaultTemplatesForUser } from '../services/notificationTemplateSeed';
+import { getDefaultExchangeRateDopUsd, resolveExchangeRateDopUsd } from '../utils/exchangeRate';
 
 function hashResetToken(token: string): string {
   return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
@@ -23,6 +24,22 @@ export const getRegistrationStatus = async (_req: Request, res: Response) => {
     res.json({ registrationEnabled: enabled });
   } catch (error: any) {
     console.error('getRegistrationStatus error:', error);
+    res.status(500).json({ message: 'Error' });
+  }
+};
+
+/** Sin autenticación: banderas para la app (registro, mantenimiento). */
+export const getPublicConfig = async (_req: Request, res: Response) => {
+  try {
+    const r = await query(
+      `SELECT key, value FROM system_settings WHERE key IN ('registration_enabled', 'maintenance_mode')`
+    );
+    const map = new Map<string, string>(r.rows.map((row: { key: string; value: string }) => [row.key, row.value]));
+    const registrationEnabled = !map.has('registration_enabled') || map.get('registration_enabled') === 'true';
+    const maintenanceMode = map.get('maintenance_mode') === 'true';
+    res.json({ registrationEnabled, maintenanceMode });
+  } catch (error: any) {
+    console.error('getPublicConfig error:', error);
     res.status(500).json({ message: 'Error' });
   }
 };
@@ -55,11 +72,12 @@ export const register = async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     // Create user
+    const defaultRate = getDefaultExchangeRateDopUsd();
     const result = await query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, email, first_name, last_name, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`,
-      [email, passwordHash, firstName || null, lastName || null, isSuper]
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`,
+      [email, passwordHash, firstName || null, lastName || null, isSuper, defaultRate]
     );
 
     const user = result.rows[0];
@@ -94,11 +112,15 @@ export const register = async (req: Request, res: Response) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        cedula: user.cedula != null ? String(user.cedula) : null,
         telegramChatId: user.telegram_chat_id,
         currencyPreference: user.currency_preference || 'DOP',
-        exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd) || 55.00,
+        exchangeRateDopUsd: resolveExchangeRateDopUsd(user.exchange_rate_dop_usd),
         timezone: user.timezone || 'America/Santo_Domingo',
         isSuperAdmin: !!user.is_super_admin,
+        hasUserSubscriptionRecord: !!freePlan.rows[0],
+        subscriptionPlan: 'free',
+        subscriptionStatus: 'active',
       },
     });
   } catch (error: any) {
@@ -116,9 +138,10 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const result = await query(
-      `SELECT id, email, password_hash, first_name, last_name, telegram_chat_id, currency_preference,
-              exchange_rate_dop_usd, timezone, is_super_admin, is_active
-       FROM users WHERE email = $1`,
+      `SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.cedula, u.telegram_chat_id, u.currency_preference,
+              u.exchange_rate_dop_usd, u.timezone, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
+       FROM users u WHERE u.email = $1`,
       [email]
     );
 
@@ -152,11 +175,15 @@ export const login = async (req: Request, res: Response) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        cedula: user.cedula != null ? String(user.cedula) : null,
         telegramChatId: user.telegram_chat_id,
         currencyPreference: user.currency_preference || 'DOP',
-        exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd) || 55.00,
+        exchangeRateDopUsd: resolveExchangeRateDopUsd(user.exchange_rate_dop_usd),
         timezone: user.timezone || 'America/Santo_Domingo',
         isSuperAdmin: user.is_super_admin === true,
+        hasUserSubscriptionRecord: user.has_user_subscription_row === true,
+        subscriptionPlan: user.subscription_plan || 'free',
+        subscriptionStatus: user.subscription_status || 'active',
       },
     });
   } catch (error: any) {
@@ -170,10 +197,11 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     const userId = req.userId;
 
     const result = await query(
-      `SELECT id, email, first_name, last_name, telegram_chat_id,
-              currency_preference, exchange_rate_dop_usd, timezone, created_at,
-              is_super_admin, is_active, subscription_plan, subscription_status
-       FROM users WHERE id = $1`,
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.cedula, u.telegram_chat_id,
+              u.currency_preference, u.exchange_rate_dop_usd, u.timezone, u.created_at,
+              u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
+       FROM users u WHERE u.id = $1`,
       [userId]
     );
 
@@ -190,14 +218,16 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        cedula: user.cedula != null ? String(user.cedula) : null,
         telegramChatId: user.telegram_chat_id,
         currencyPreference: user.currency_preference,
-        exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd),
+        exchangeRateDopUsd: resolveExchangeRateDopUsd(user.exchange_rate_dop_usd),
         timezone: user.timezone || 'America/Santo_Domingo',
         isSuperAdmin: user.is_super_admin === true,
         isActive: user.is_active !== false,
         subscriptionPlan: user.subscription_plan || 'free',
         subscriptionStatus: user.subscription_status || 'active',
+        hasUserSubscriptionRecord: user.has_user_subscription_row === true,
       },
       impersonatedBy: req.impersonatedBy ?? null,
     });
@@ -210,7 +240,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 export const updateMe = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    const { firstName, lastName, telegramChatId, exchangeRateDopUsd, timezone, email } = req.body;
+    const { firstName, lastName, cedula, telegramChatId, exchangeRateDopUsd, timezone, email } = req.body;
 
     // Handle null/empty values explicitly
     // For telegramChatId: if provided (even if empty string), update it; if undefined, keep current value
@@ -249,6 +279,16 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
     if (lastName !== undefined) {
       updates.push(`last_name = $${paramIndex}`);
       values.push(lastName || null);
+      paramIndex++;
+    }
+
+    if (cedula !== undefined) {
+      const cedulaNorm =
+        cedula === null || cedula === ''
+          ? null
+          : String(cedula).trim() || null;
+      updates.push(`cedula = $${paramIndex}`);
+      values.push(cedulaNorm);
       paramIndex++;
     }
 
@@ -298,7 +338,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
       `UPDATE users
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex}
-       RETURNING id, email, first_name, last_name, telegram_chat_id,
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id,
                  currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`,
       values
     );
@@ -317,9 +357,10 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        cedula: user.cedula != null ? String(user.cedula) : null,
         telegramChatId: user.telegram_chat_id,
         currencyPreference: user.currency_preference,
-        exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd),
+        exchangeRateDopUsd: resolveExchangeRateDopUsd(user.exchange_rate_dop_usd),
         timezone: user.timezone || 'America/Santo_Domingo',
         isSuperAdmin: user.is_super_admin === true,
       },

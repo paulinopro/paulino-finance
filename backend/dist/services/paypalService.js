@@ -5,9 +5,11 @@
  * (sandbox: https://api-m.sandbox.paypal.com, live: https://api-m.paypal.com)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getAccessToken = getAccessToken;
 exports.createPaypalSubscriptionApproval = createPaypalSubscriptionApproval;
 exports.verifyPaypalWebhookSignature = verifyPaypalWebhookSignature;
 let cachedToken = null;
+/** OAuth2 client_credentials; reutilizable por otros servicios PayPal (catálogo, planes, etc.). */
 async function getAccessToken() {
     const id = process.env.PAYPAL_CLIENT_ID;
     const secret = process.env.PAYPAL_CLIENT_SECRET;

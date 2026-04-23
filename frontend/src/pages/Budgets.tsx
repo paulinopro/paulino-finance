@@ -1,11 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import api from '../services/api';
-import { Plus, Edit, Trash2, Search, X, Calendar, TrendingUp, TrendingDown } from 'lucide-react';
+import type { ExpenseCategory } from '../types';
+import { Plus, Edit, Trash2, Search, X, Calendar } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import { LIST_CARD_SHELL, listCardAccentFromPercent, listCardProgressColor } from '../utils/listCard';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import TablePagination from '../components/TablePagination';
+import PageHeader from '../components/PageHeader';
 
 interface Budget {
   id: number;
@@ -31,6 +35,7 @@ const Budgets: React.FC = () => {
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [periodFilter, setPeriodFilter] = useState('');
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     category: '',
@@ -42,22 +47,34 @@ const Budgets: React.FC = () => {
   });
 
   useEffect(() => {
-    fetchBudgets();
-  }, [periodFilter]);
+    const fetchCategories = async () => {
+      try {
+        const response = await api.get('/categories');
+        setCategories(response.data.categories || []);
+      } catch {
+        /* silencioso: el modal igual permite sin categoría */
+      }
+    };
+    fetchCategories();
+  }, []);
 
-  const fetchBudgets = async () => {
+  const fetchBudgets = useCallback(async () => {
     try {
-      const params: any = {};
+      const params: Record<string, string> = {};
       if (periodFilter) params.periodType = periodFilter;
-      
+
       const response = await api.get('/budgets', { params });
       setBudgets(response.data.budgets);
-    } catch (error: any) {
+    } catch {
       toast.error('Error al cargar presupuestos');
     } finally {
       setLoading(false);
     }
-  };
+  }, [periodFilter]);
+
+  useEffect(() => {
+    fetchBudgets();
+  }, [fetchBudgets]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,11 +153,19 @@ const Budgets: React.FC = () => {
     budget.category?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getProgressColor = (percentage: number) => {
-    if (percentage >= 100) return '#ef4444';
-    if (percentage >= 80) return '#f59e0b';
-    return '#10b981';
-  };
+  const [listPage, setListPage] = useState(1);
+  useEffect(() => {
+    setListPage(1);
+  }, [searchTerm, periodFilter]);
+  const budgetTotalPages = Math.max(1, Math.ceil(filteredBudgets.length / TABLE_PAGE_SIZE));
+  const budgetPageSafe = Math.min(listPage, budgetTotalPages);
+  useEffect(() => {
+    setListPage((p) => Math.min(p, budgetTotalPages));
+  }, [budgetTotalPages]);
+  const pagedBudgets = useMemo(() => {
+    const start = (budgetPageSafe - 1) * TABLE_PAGE_SIZE;
+    return filteredBudgets.slice(start, start + TABLE_PAGE_SIZE);
+  }, [filteredBudgets, budgetPageSafe]);
 
   const monthNames = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -156,42 +181,43 @@ const Budgets: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="page-title">Presupuestos</h1>
-          <p className="text-dark-400 text-sm sm:text-base">Gestiona tus presupuestos mensuales y anuales</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-          className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-        >
-          <Plus size={20} />
-          Nuevo Presupuesto
-        </button>
-      </div>
+    <div className="space-y-5 sm:space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <PageHeader
+        title="Presupuestos"
+        subtitle="Gestiona tus presupuestos mensuales y anuales"
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
+          >
+            <Plus size={20} />
+            Nuevo Presupuesto
+          </button>
+        }
+      />
 
       {/* Filters */}
-      <div className="card">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
+      <div className="card-view">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+          <div className="flex-1 relative min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-dark-400" aria-hidden />
             <input
-              type="text"
-              placeholder="Buscar..."
+              type="search"
+              placeholder="Buscar por nombre o categoría..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="input w-full pl-11"
+              autoComplete="off"
             />
           </div>
           <select
             value={periodFilter}
             onChange={(e) => setPeriodFilter(e.target.value)}
-            className="px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="input w-full shrink-0 sm:min-w-[11rem] sm:max-w-[14rem]"
           >
             <option value="">Todos los períodos</option>
             <option value="MONTHLY">Mensual</option>
@@ -201,94 +227,154 @@ const Budgets: React.FC = () => {
       </div>
 
       {/* Budgets List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {filteredBudgets.length === 0 ? (
-          <div className="card text-center py-12 col-span-2">
-            <p className="text-dark-400">No hay presupuestos</p>
-          </div>
-        ) : (
-          filteredBudgets.map((budget) => (
-            <motion.div
-              key={budget.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="card"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-white mb-1">{budget.name}</h3>
-                  {budget.category && (
-                    <p className="text-sm text-dark-400 mb-2">Categoría: {budget.category}</p>
-                  )}
-                  <p className="text-xs text-dark-400">
-                    {budget.periodType === 'MONTHLY'
-                      ? `${monthNames[budget.periodMonth! - 1]} ${budget.periodYear}`
-                      : `Año ${budget.periodYear}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openEditModal(budget)}
-                    className="p-2 text-primary-400 hover:bg-primary-400/10 rounded-lg transition-colors"
-                    title="Editar"
-                  >
-                    <Edit size={20} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(budget.id)}
-                    className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
-                    title="Eliminar"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </div>
-              </div>
+      {filteredBudgets.length === 0 ? (
+        <div className="card-view py-14 sm:py-16 text-center">
+          <p className="text-dark-400 text-sm sm:text-base">No hay presupuestos que coincidan.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
+          {pagedBudgets.map((budget) => {
+            const pct = Math.min(100, budget.percentage);
+            const periodLabel =
+              budget.periodType === 'MONTHLY'
+                ? `${monthNames[budget.periodMonth! - 1]} ${budget.periodYear}`
+                : `Año ${budget.periodYear}`;
 
-              <div className="space-y-3">
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm text-dark-400">Presupuesto</span>
-                    <span className="text-sm font-semibold text-white">
-                      {budget.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {budget.currency}
-                    </span>
+            return (
+              <motion.article
+                key={budget.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={[LIST_CARD_SHELL, listCardAccentFromPercent(budget.percentage)].join(' ')}
+              >
+                <div className="flex flex-row gap-3 justify-between items-start">
+                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                        <Calendar className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                        {budget.periodType === 'MONTHLY' ? 'Mensual' : 'Anual'}
+                      </span>
+                      <span className="text-xs text-dark-500 sm:text-sm">{periodLabel}</span>
+                    </div>
+                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">
+                      {budget.name}
+                    </h3>
+                    {budget.category && (
+                      <span className="inline-flex max-w-full truncate rounded-md bg-primary-600/15 px-2 py-0.5 text-xs font-medium text-primary-200 ring-1 ring-primary-500/25">
+                        {budget.category}
+                      </span>
+                    )}
                   </div>
-                  <div className="w-full bg-dark-600 rounded-full h-2">
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(budget)}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-primary-400 transition-colors hover:bg-primary-500/15 active:bg-primary-500/25"
+                      title="Editar"
+                      aria-label="Editar presupuesto"
+                    >
+                      <Edit className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(budget.id)}
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-red-400 transition-colors hover:bg-red-500/10 active:bg-red-500/20"
+                      title="Eliminar"
+                      aria-label="Eliminar presupuesto"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-4 border-t border-dark-700/80 pt-4">
+                  <div className="flex flex-col gap-3 xs:flex-row xs:items-end xs:justify-between">
+                    <div>
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Tope</p>
+                      <p className="text-base font-semibold tabular-nums text-white sm:text-lg">
+                        {budget.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        <span className="text-sm font-medium text-dark-400">{budget.currency}</span>
+                      </p>
+                    </div>
+                    <div className="flex items-baseline gap-2 self-start xs:self-auto">
+                      <span className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                        Uso
+                      </span>
+                      <span
+                        className="text-2xl font-bold tabular-nums leading-none sm:text-3xl"
+                        style={{ color: listCardProgressColor(budget.percentage) }}
+                      >
+                        {budget.percentage.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex justify-between gap-2 text-xs text-dark-400">
+                      <span>Consumo del presupuesto</span>
+                      <span className="tabular-nums text-dark-300">
+                        {pct.toFixed(0)}% / 100%
+                      </span>
+                    </div>
                     <div
-                      className="h-2 rounded-full transition-all duration-300"
-                      style={{
-                        width: `${Math.min(100, budget.percentage)}%`,
-                        backgroundColor: getProgressColor(budget.percentage),
-                      }}
-                    />
+                      className="h-2.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-dark-600/80 sm:h-3"
+                      role="progressbar"
+                      aria-valuenow={Math.round(pct)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-500 ease-out"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: listCardProgressColor(budget.percentage),
+                          boxShadow: `0 0 12px ${listCardProgressColor(budget.percentage)}55`,
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-dark-400">Gastado</p>
-                    <p className="text-red-400 font-semibold">
-                      {budget.spent.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {budget.currency}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-dark-400">Restante</p>
-                    <p className={`font-semibold ${budget.remaining >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {budget.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {budget.currency}
-                    </p>
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-2 sm:gap-3">
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                        Gastado
+                      </p>
+                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
+                        {budget.spent.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                        Restante
+                      </p>
+                      <p
+                        className={`mt-0.5 text-sm font-semibold tabular-nums sm:text-base ${
+                          budget.remaining >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        }`}
+                      >
+                        {budget.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
+                      </p>
+                    </div>
                   </div>
                 </div>
-
-                <div className="text-center">
-                  <p className="text-xs text-dark-400">Progreso</p>
-                  <p className="text-lg font-bold" style={{ color: getProgressColor(budget.percentage) }}>
-                    {budget.percentage.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          ))
-        )}
-      </div>
+              </motion.article>
+            );
+          })}
+        </div>
+        <TablePagination
+          currentPage={budgetPageSafe}
+          totalPages={budgetTotalPages}
+          totalItems={filteredBudgets.length}
+          itemsPerPage={TABLE_PAGE_SIZE}
+          onPageChange={setListPage}
+          itemLabel="presupuestos"
+          variant="card"
+        />
+        </div>
+      )}
 
       {/* Modal */}
       {showModal && (
@@ -339,13 +425,24 @@ const Budgets: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-dark-300 mb-2">Categoría</label>
-                <input
-                  type="text"
+                <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="Ej: Alimentación, Transporte, etc."
-                />
+                >
+                  <option value="">
+                    {categories.length === 0 ? 'Sin categorías (créalas en Categorías)' : 'Sin categoría'}
+                  </option>
+                  {formData.category &&
+                    !categories.some((c) => c.name === formData.category) && (
+                      <option value={formData.category}>{formData.category}</option>
+                    )}
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

@@ -146,6 +146,10 @@ const createTables = async () => {
                      WHERE table_name='users' AND column_name='password_reset_expires_at') THEN
         ALTER TABLE users ADD COLUMN password_reset_expires_at TIMESTAMP;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                     WHERE table_schema = 'public' AND table_name='users' AND column_name='cedula') THEN
+        ALTER TABLE users ADD COLUMN cedula VARCHAR(50);
+      END IF;
     END $$;
   `);
     await (0, exports.query)(`
@@ -157,6 +161,10 @@ const createTables = async () => {
   `);
     await (0, exports.query)(`
     INSERT INTO system_settings (key, value) VALUES ('registration_enabled', 'true')
+    ON CONFLICT (key) DO NOTHING
+  `);
+    await (0, exports.query)(`
+    INSERT INTO system_settings (key, value) VALUES ('maintenance_mode', 'false')
     ON CONFLICT (key) DO NOTHING
   `);
     await (0, exports.query)(`
@@ -178,6 +186,17 @@ const createTables = async () => {
     )
   `);
     await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'subscription_plans' AND column_name = 'paypal_product_id'
+      ) THEN
+        ALTER TABLE subscription_plans ADD COLUMN paypal_product_id VARCHAR(255);
+      END IF;
+    END $$
+  `);
+    await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS user_subscriptions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -195,6 +214,49 @@ const createTables = async () => {
     )
   `);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_plan_id ON user_subscriptions(plan_id)`);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS subscription_payments (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      plan_id INTEGER REFERENCES subscription_plans(id) ON DELETE SET NULL,
+      amount DECIMAL(15, 4) NOT NULL,
+      currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+      status VARCHAR(32) NOT NULL DEFAULT 'completed',
+      period_start TIMESTAMP,
+      period_end TIMESTAMP,
+      paid_at TIMESTAMP NOT NULL,
+      paypal_sale_id VARCHAR(128) UNIQUE,
+      paypal_subscription_id VARCHAR(255),
+      source VARCHAR(32) NOT NULL DEFAULT 'paypal',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_subscription_payments_user_paid ON subscription_payments(user_id, paid_at DESC)`);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'user_subscriptions' AND column_name = 'billing_interval'
+      ) THEN
+        ALTER TABLE user_subscriptions
+          ADD COLUMN billing_interval VARCHAR(20)
+            CHECK (billing_interval IS NULL OR billing_interval IN ('monthly', 'yearly'));
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+        CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id SERIAL PRIMARY KEY,
+      actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action VARCHAR(80) NOT NULL,
+      target_type VARCHAR(40),
+      target_id INTEGER,
+      details JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log(created_at DESC)`);
     // Credit Cards table
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS credit_cards (
@@ -419,8 +481,9 @@ const createTables = async () => {
       description VARCHAR(255) NOT NULL,
       amount DECIMAL(15, 2) NOT NULL,
       currency VARCHAR(3) NOT NULL DEFAULT 'DOP',
-      income_type VARCHAR(20) NOT NULL CHECK (income_type IN ('FIXED', 'VARIABLE')),
-      frequency VARCHAR(20),
+      nature VARCHAR(20) NOT NULL DEFAULT 'variable' CHECK (nature IN ('fixed', 'variable')),
+      recurrence_type VARCHAR(20) NOT NULL DEFAULT 'non_recurrent' CHECK (recurrence_type IN ('recurrent', 'non_recurrent')),
+      frequency VARCHAR(32),
       receipt_day INTEGER,
       date DATE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -435,7 +498,9 @@ const createTables = async () => {
       description VARCHAR(255) NOT NULL,
       amount DECIMAL(15, 2) NOT NULL,
       currency VARCHAR(3) NOT NULL DEFAULT 'DOP',
-      expense_type VARCHAR(20) NOT NULL CHECK (expense_type IN ('RECURRING_MONTHLY', 'NON_RECURRING', 'ANNUAL')),
+      nature VARCHAR(20) NOT NULL DEFAULT 'variable' CHECK (nature IN ('fixed', 'variable')),
+      recurrence_type VARCHAR(20) NOT NULL DEFAULT 'non_recurrent' CHECK (recurrence_type IN ('recurrent', 'non_recurrent')),
+      frequency VARCHAR(32),
       category VARCHAR(100),
       payment_day INTEGER,
       payment_month INTEGER,
@@ -473,6 +538,109 @@ const createTables = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'bank_accounts' AND column_name = 'account_kind'
+      ) THEN
+        ALTER TABLE bank_accounts ADD COLUMN account_kind VARCHAR(20) NOT NULL DEFAULT 'bank'
+          CHECK (account_kind IN ('bank', 'cash', 'wallet'));
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE income ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'is_received'
+      ) THEN
+        ALTER TABLE income ADD COLUMN is_received BOOLEAN NOT NULL DEFAULT false;
+        UPDATE income SET is_received = true WHERE bank_account_id IS NOT NULL;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS account_transfers (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+      to_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 2) NOT NULL,
+      currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
+      note TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CHECK (from_account_id <> to_account_id),
+      CHECK (amount > 0)
+    )
+  `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS cash_adjustments (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+      amount_delta DECIMAL(15, 2) NOT NULL,
+      currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
+      reason TEXT,
+      counted_total DECIMAL(15, 2),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_account_transfers_user_id ON account_transfers(user_id)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_cash_adjustments_user_id ON cash_adjustments(user_id)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_income_bank_account_id ON income(bank_account_id)`);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'frequency'
+      ) THEN
+        ALTER TABLE income ALTER COLUMN frequency TYPE VARCHAR(32);
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_expenses_bank_account_id ON expenses(bank_account_id)`);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'loan_payments' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE loan_payments ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS credit_card_payments (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      credit_card_id INTEGER NOT NULL REFERENCES credit_cards(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 2) NOT NULL CHECK (amount > 0),
+      currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
+      payment_date DATE NOT NULL,
+      bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_cc_payments_user_id ON credit_card_payments(user_id)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_cc_payments_card_id ON credit_card_payments(credit_card_id)`);
     // Notifications table
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS notifications (
@@ -535,6 +703,19 @@ const createTables = async () => {
       UNIQUE(user_id, notification_type)
     )
   `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id)`);
     // Calendar Events table - tracks payment status for financial events
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS calendar_events (
@@ -598,6 +779,32 @@ const createTables = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+    // Abonos parciales — cuentas por pagar (cada fila genera un gasto NON_RECURRING)
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS accounts_payable_payments (
+      id SERIAL PRIMARY KEY,
+      account_payable_id INTEGER NOT NULL REFERENCES accounts_payable(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 2) NOT NULL,
+      payment_date DATE NOT NULL,
+      expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_app_payments_account ON accounts_payable_payments(account_payable_id)`);
+    // Abonos parciales — cuentas por cobrar (cada fila genera un ingreso VARIABLE)
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS accounts_receivable_payments (
+      id SERIAL PRIMARY KEY,
+      account_receivable_id INTEGER NOT NULL REFERENCES accounts_receivable(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 2) NOT NULL,
+      payment_date DATE NOT NULL,
+      income_id INTEGER REFERENCES income(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_arp_payments_account ON accounts_receivable_payments(account_receivable_id)`);
     // Budgets table
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS budgets (
@@ -639,9 +846,48 @@ const createTables = async () => {
       goal_id INTEGER NOT NULL REFERENCES financial_goals(id) ON DELETE CASCADE,
       amount DECIMAL(15, 2) NOT NULL,
       note TEXT,
+      movement_date DATE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'financial_goal_movements' AND column_name = 'movement_date'
+      ) THEN
+        ALTER TABLE financial_goal_movements ADD COLUMN movement_date DATE;
+        UPDATE financial_goal_movements SET movement_date = created_at::date WHERE movement_date IS NULL;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'financial_goals' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE financial_goals
+        ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'financial_goal_movements' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE financial_goal_movements
+        ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'financial_goal_movements' AND column_name = 'source_bank_account_id'
+      ) THEN
+        ALTER TABLE financial_goal_movements
+        ADD COLUMN source_bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
   `);
     // Vehicles table
     await (0, exports.query)(`
@@ -668,7 +914,7 @@ const createTables = async () => {
       id SERIAL PRIMARY KEY,
       vehicle_id INTEGER NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      expense_type VARCHAR(50) NOT NULL,
+      spend_kind VARCHAR(50) NOT NULL,
       description VARCHAR(255) NOT NULL,
       amount DECIMAL(15, 2) NOT NULL,
       currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
@@ -692,6 +938,159 @@ const createTables = async () => {
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_vehicles_user_id ON vehicles(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_vehicle_expenses_vehicle_id ON vehicle_expenses(vehicle_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_vehicle_expenses_user_id ON vehicle_expenses(user_id)`);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vehicle_expenses' AND column_name = 'category_id'
+      ) THEN
+        ALTER TABLE vehicle_expenses ADD COLUMN category_id INTEGER REFERENCES expense_categories(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vehicle_expenses' AND column_name = 'bank_account_id'
+      ) THEN
+        ALTER TABLE vehicle_expenses ADD COLUMN bank_account_id INTEGER REFERENCES bank_accounts(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vehicle_expenses' AND column_name = 'linked_expense_id'
+      ) THEN
+        ALTER TABLE vehicle_expenses ADD COLUMN linked_expense_id INTEGER REFERENCES expenses(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_expenses_linked_expense_unique
+    ON vehicle_expenses(linked_expense_id)
+    WHERE linked_expense_id IS NOT NULL
+  `);
+    /* Ingresos/gastos: Tipo=nature (fixed|variable), Frecuencia=frequency, Naturaleza=recurrence_type (recurrent|non_recurrent).
+       Columnas: income.nature, income.recurrence_type, income.frequency; expenses.* idem. */
+    // Taxonomía nature + recurrence_type + frequency (ingresos/gastos)
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'nature'
+      ) THEN
+        ALTER TABLE income ADD COLUMN nature VARCHAR(20);
+        ALTER TABLE income ADD COLUMN recurrence_type VARCHAR(20);
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'nature'
+      ) THEN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'income_type'
+        ) THEN
+          UPDATE income SET nature = CASE WHEN income_type = 'FIXED' THEN 'fixed' ELSE 'variable' END
+            WHERE nature IS NULL;
+          UPDATE income SET recurrence_type = CASE WHEN income_type = 'FIXED' THEN 'recurrent' ELSE 'non_recurrent' END
+            WHERE recurrence_type IS NULL;
+        ELSE
+          UPDATE income SET nature = COALESCE(nature, 'variable'), recurrence_type = COALESCE(recurrence_type, 'non_recurrent')
+            WHERE nature IS NULL OR recurrence_type IS NULL;
+        END IF;
+        UPDATE income SET frequency = LOWER(TRIM(frequency)) WHERE frequency IS NOT NULL;
+        ALTER TABLE income ALTER COLUMN nature SET NOT NULL;
+        ALTER TABLE income ALTER COLUMN recurrence_type SET NOT NULL;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'income_nature_check') THEN
+          ALTER TABLE income ADD CONSTRAINT income_nature_check CHECK (nature IN ('fixed', 'variable'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'income_recurrence_type_check') THEN
+          ALTER TABLE income ADD CONSTRAINT income_recurrence_type_check CHECK (recurrence_type IN ('recurrent', 'non_recurrent'));
+        END IF;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'nature'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN nature VARCHAR(20);
+        ALTER TABLE expenses ADD COLUMN recurrence_type VARCHAR(20);
+        ALTER TABLE expenses ADD COLUMN frequency VARCHAR(32);
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'nature'
+      ) THEN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'expense_type'
+        ) THEN
+          UPDATE expenses SET nature = 'variable', recurrence_type = 'non_recurrent', frequency = NULL
+            WHERE expense_type = 'NON_RECURRING' AND nature IS NULL;
+          UPDATE expenses SET nature = 'fixed', recurrence_type = 'recurrent', frequency = 'monthly'
+            WHERE expense_type = 'RECURRING_MONTHLY' AND nature IS NULL;
+          UPDATE expenses SET nature = 'fixed', recurrence_type = 'recurrent', frequency = 'annual'
+            WHERE expense_type = 'ANNUAL' AND nature IS NULL;
+        END IF;
+        UPDATE expenses SET nature = COALESCE(nature, 'variable'), recurrence_type = COALESCE(recurrence_type, 'non_recurrent')
+          WHERE nature IS NULL OR recurrence_type IS NULL;
+        ALTER TABLE expenses ALTER COLUMN nature SET NOT NULL;
+        ALTER TABLE expenses ALTER COLUMN recurrence_type SET NOT NULL;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_nature_check') THEN
+          ALTER TABLE expenses ADD CONSTRAINT expenses_nature_check CHECK (nature IN ('fixed', 'variable'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_recurrence_type_check') THEN
+          ALTER TABLE expenses ADD CONSTRAINT expenses_recurrence_type_check CHECK (recurrence_type IN ('recurrent', 'non_recurrent'));
+        END IF;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vehicle_expenses' AND column_name = 'expense_type'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'vehicle_expenses' AND column_name = 'spend_kind'
+      ) THEN
+        ALTER TABLE vehicle_expenses RENAME COLUMN expense_type TO spend_kind;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'income_type'
+      ) THEN
+        ALTER TABLE income DROP COLUMN income_type;
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'expense_type'
+      ) THEN
+        ALTER TABLE expenses DROP COLUMN expense_type;
+      END IF;
+    END $$;
+  `);
+    /* Plantillas guardadas: variables legacy {expenseTypeLabel} → {expenseScheduleLabel} (idempotente). */
+    await (0, exports.query)(`
+    UPDATE notification_templates
+    SET
+      message_template = REPLACE(
+        REPLACE(
+          message_template,
+          '{expenseTypeLabel}',
+          '{expenseScheduleLabel}'
+        ),
+        '<b>Tipo:</b> {expenseScheduleLabel}',
+        '<b>Calendario:</b> {expenseScheduleLabel}'
+      ),
+      title_template = REPLACE(title_template, '{expenseTypeLabel}', '{expenseScheduleLabel}'),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE notification_type = 'RECURRING_EXPENSE'
+      AND (
+        message_template LIKE '%' || '{expenseTypeLabel}' || '%'
+        OR title_template LIKE '%' || '{expenseTypeLabel}' || '%'
+        OR message_template LIKE '%<b>Tipo:</b> {expenseScheduleLabel}%'
+      );
+  `);
 };
 exports.default = pool;
 //# sourceMappingURL=database.js.map

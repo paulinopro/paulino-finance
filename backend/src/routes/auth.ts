@@ -6,6 +6,7 @@ import {
   getMe,
   updateMe,
   getRegistrationStatus,
+  getPublicConfig,
   changePassword,
   forgotPassword,
   resetPasswordWithToken,
@@ -70,6 +71,7 @@ const resetPasswordLimiter = rateLimit({
 });
 
 router.get('/registration-status', getRegistrationStatus);
+router.get('/public-config', getPublicConfig);
 router.post('/register', registerLimiter, register);
 router.post('/login', loginLimiter, login);
 router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);

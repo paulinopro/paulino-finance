@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import api from '../services/api';
 import { ExpenseCategory } from '../types';
 import { Plus, Trash2, Tag, Search, Pencil, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import TablePagination from '../components/TablePagination';
+import PageHeader from '../components/PageHeader';
 
 const Categories: React.FC = () => {
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -93,6 +96,20 @@ const Categories: React.FC = () => {
     category.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const [listPage, setListPage] = useState(1);
+  useEffect(() => {
+    setListPage(1);
+  }, [searchTerm]);
+  const catTotalPages = Math.max(1, Math.ceil(filteredCategories.length / TABLE_PAGE_SIZE));
+  const catPageSafe = Math.min(listPage, catTotalPages);
+  useEffect(() => {
+    setListPage((p) => Math.min(p, catTotalPages));
+  }, [catTotalPages]);
+  const pagedCategories = useMemo(() => {
+    const start = (catPageSafe - 1) * TABLE_PAGE_SIZE;
+    return filteredCategories.slice(start, start + TABLE_PAGE_SIZE);
+  }, [filteredCategories, catPageSafe]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -103,10 +120,7 @@ const Categories: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="page-title">Categorías</h1>
-        <p className="text-dark-400 text-sm sm:text-base">Gestiona las categorías de gastos</p>
-      </div>
+      <PageHeader title="Categorías" subtitle="Gestiona las categorías de gastos" />
 
       {/* Add Category */}
       <div className="card">
@@ -145,14 +159,15 @@ const Categories: React.FC = () => {
       </div>
 
       {/* Categories List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredCategories.length === 0 ? (
-          <div className="card text-center py-12 col-span-full">
-            <Tag className="mx-auto text-dark-400 mb-4" size={48} />
-            <p className="text-dark-400">No hay categorías</p>
-          </div>
-        ) : (
-          filteredCategories.map((category) => (
+      {filteredCategories.length === 0 ? (
+        <div className="card text-center py-12">
+          <Tag className="mx-auto text-dark-400 mb-4" size={48} />
+          <p className="text-dark-400">No hay categorías</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {pagedCategories.map((category) => (
             <motion.div
               key={category.id}
               initial={{ opacity: 0, y: 20 }}
@@ -223,9 +238,19 @@ const Categories: React.FC = () => {
                 </div>
               )}
             </motion.div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+        <TablePagination
+          currentPage={catPageSafe}
+          totalPages={catTotalPages}
+          totalItems={filteredCategories.length}
+          itemsPerPage={TABLE_PAGE_SIZE}
+          onPageChange={setListPage}
+          itemLabel="categorías"
+          variant="card"
+        />
+        </div>
+      )}
     </div>
   );
 };

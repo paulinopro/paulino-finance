@@ -10,6 +10,9 @@ const requireSubscriptionModule_1 = require("../middleware/requireSubscriptionMo
 const router = express_1.default.Router();
 router.use(auth_1.authenticate);
 router.use((0, requireSubscriptionModule_1.requireSubscriptionModule)('cards'));
+router.delete('/payments/:paymentId', cardController_1.deleteCardPayment);
+router.get('/:id/payments', cardController_1.listCardPayments);
+router.post('/:id/payments', cardController_1.recordCardPayment);
 router.get('/', cardController_1.getCards);
 router.get('/:id', cardController_1.getCard);
 router.post('/', cardController_1.createCard);

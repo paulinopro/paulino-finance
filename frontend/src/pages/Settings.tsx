@@ -2,26 +2,39 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import api from '../services/api';
+import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Settings as SettingsIcon, User, Bell, DollarSign, Send, Clock } from 'lucide-react';
+import { User, Bell, DollarSign, Send } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const { user, updateUser } = useAuth();
   const [formData, setFormData] = useState({
     telegramChatId: '',
-    exchangeRateDopUsd: '55',
+    exchangeRateDopUsd: '',
     timezone: 'America/Santo_Domingo',
   });
   const [notificationSettings, setNotificationSettings] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [testingNotification, setTestingNotification] = useState(false);
+  const [browserNotifPermission, setBrowserNotifPermission] = useState<
+    NotificationPermission | 'unsupported'
+  >('unsupported');
+
+  useEffect(() => {
+    if (typeof Notification !== 'undefined') {
+      setBrowserNotifPermission(Notification.permission);
+    }
+  }, []);
 
   useEffect(() => {
     if (user) {
       setFormData({
         telegramChatId: user.telegramChatId || '',
-        exchangeRateDopUsd: user.exchangeRateDopUsd?.toString() || '55',
+        exchangeRateDopUsd:
+          user.exchangeRateDopUsd !== undefined && user.exchangeRateDopUsd !== null
+            ? String(user.exchangeRateDopUsd)
+            : '',
         timezone: user.timezone || 'America/Santo_Domingo',
       });
     }
@@ -88,9 +101,9 @@ const Settings: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="text-center sm:text-left">
         <h1 className="page-title mb-2">Configuración</h1>
-        <p className="text-dark-400 text-sm sm:text-base">
+        <p className="text-dark-400 text-sm sm:text-base max-w-prose mx-auto sm:mx-0">
           Preferencias de la app. Tu nombre y correo se editan en{' '}
           <Link to="/profile" className="text-primary-400 hover:underline">
             Mi perfil
@@ -239,6 +252,48 @@ const Settings: React.FC = () => {
                 </div>
               );
             })}
+            {browserNotifPermission !== 'unsupported' && (
+              <div className="bg-dark-700 rounded-lg p-4">
+                <h3 className="font-medium text-white mb-2">Avisos en el navegador y PWA</h3>
+                <p className="text-dark-400 text-sm mb-3">
+                  Con el permiso activo verás avisos del sistema cuando la app esté en segundo plano (mismo
+                  contenido que el historial, en texto plano). En producción, la PWA puede registrarse para
+                  recibir push del servidor (VAPID en el backend).
+                </p>
+                <p className="text-xs text-dark-500 mb-3">
+                  Estado:{' '}
+                  {browserNotifPermission === 'granted'
+                    ? 'Permitido'
+                    : browserNotifPermission === 'denied'
+                      ? 'Bloqueado (revísalo en la configuración del navegador)'
+                      : 'Pendiente'}
+                </p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (typeof Notification === 'undefined') return;
+                    const p = await Notification.requestPermission();
+                    setBrowserNotifPermission(p);
+                    if (p === 'granted') {
+                      const sync = await syncPushSubscriptionWithServer();
+                      if (sync.ok) {
+                        toast.success('Notificaciones activadas y suscripción push sincronizada');
+                      } else {
+                        toast.success('Notificaciones del navegador activadas');
+                      }
+                    } else if (p === 'denied') toast.error('Permiso denegado');
+                  }}
+                  disabled={browserNotifPermission !== 'default'}
+                  className="btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {browserNotifPermission === 'granted'
+                    ? 'Permiso concedido'
+                    : browserNotifPermission === 'denied'
+                      ? 'Permiso bloqueado'
+                      : 'Permitir avisos en el navegador'}
+                </button>
+              </div>
+            )}
             <div className="bg-dark-700 rounded-lg p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-medium text-white">Probar Notificación de Telegram</h3>

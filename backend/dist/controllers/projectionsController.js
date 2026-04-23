@@ -2,76 +2,77 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProjections = void 0;
 const database_1 = require("../config/database");
+const exchangeRate_1 = require("../utils/exchangeRate");
+const projectionsMonthlyEquivalent_1 = require("../utils/projectionsMonthlyEquivalent");
+function toDop(amount, currency, exchangeRate) {
+    return currency === 'USD' ? amount * exchangeRate : amount;
+}
 const getProjections = async (req, res) => {
     try {
         const userId = req.userId;
         const { months = '6' } = req.query;
-        const monthsToProject = parseInt(months);
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + monthsToProject);
-        // Get user's exchange rate
+        const monthsToProject = parseInt(months, 10);
+        if (Number.isNaN(monthsToProject) || monthsToProject < 1 || monthsToProject > 600) {
+            return res.status(400).json({
+                message: 'El parámetro months debe ser un entero entre 1 y 600',
+            });
+        }
         const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
-        // Get average monthly income from last 3 months
+        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
+        // Promedio mensual de ingresos/gastos únicos (últimos 3 meses), por moneda → luego DOP
         const avgIncomeResult = await (0, database_1.query)(`SELECT AVG(total) as avg_income, currency
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM income
          WHERE user_id = $1
-           AND income_type = 'VARIABLE'
+           AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
        ) subquery
        GROUP BY currency`, [userId]);
-        // Get fixed income
-        const fixedIncomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
-       FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'
-       GROUP BY currency`, [userId]);
-        // Get average monthly expenses from last 3 months
         const avgExpensesResult = await (0, database_1.query)(`SELECT AVG(total) as avg_expenses, currency
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM expenses
          WHERE user_id = $1
-           AND expense_type = 'NON_RECURRING'
+           AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
        ) subquery
        GROUP BY currency`, [userId]);
-        // Get recurring monthly expenses
-        const recurringExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
+        // Ingresos recurrentes: equivalente mensual según frequency (alineado con flujo de caja / taxonomía)
+        const recurrentIncomeRows = await (0, database_1.query)(`SELECT amount, currency, frequency
+       FROM income
+       WHERE user_id = $1 AND recurrence_type = 'recurrent'`, [userId]);
+        // Gastos recurrentes: todas las frecuencias con equivalente mensual (antes solo «monthly»)
+        const recurrentExpenseRows = await (0, database_1.query)(`SELECT amount, currency, frequency
        FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY'
-       GROUP BY currency`, [userId]);
-        // Get current balance from bank accounts
+       WHERE user_id = $1 AND recurrence_type = 'recurrent'`, [userId]);
         const accountsResult = await (0, database_1.query)(`SELECT SUM(balance_dop) as total_dop, SUM(balance_usd) as total_usd
        FROM bank_accounts
        WHERE user_id = $1`, [userId]);
         const accounts = accountsResult.rows[0];
         const currentBalance = parseFloat(accounts.total_dop || 0) + (parseFloat(accounts.total_usd || 0) * exchangeRate);
-        // Calculate average monthly income in DOP
         let avgMonthlyIncomeDop = 0;
         avgIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.avg_income || 0);
-            avgMonthlyIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+            avgMonthlyIncomeDop += toDop(amount, row.currency, exchangeRate);
         });
-        fixedIncomeResult.rows.forEach((row) => {
-            const amount = parseFloat(row.total || 0);
-            avgMonthlyIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+        recurrentIncomeRows.rows.forEach((row) => {
+            const raw = parseFloat(row.amount || 0);
+            const monthlySame = (0, projectionsMonthlyEquivalent_1.recurringAmountToMonthlySameCurrency)(raw, row.frequency);
+            avgMonthlyIncomeDop += toDop(monthlySame, row.currency, exchangeRate);
         });
-        // Calculate average monthly expenses in DOP
         let avgMonthlyExpensesDop = 0;
         avgExpensesResult.rows.forEach((row) => {
             const amount = parseFloat(row.avg_expenses || 0);
-            avgMonthlyExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+            avgMonthlyExpensesDop += toDop(amount, row.currency, exchangeRate);
         });
-        recurringExpensesResult.rows.forEach((row) => {
-            const amount = parseFloat(row.total || 0);
-            avgMonthlyExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+        recurrentExpenseRows.rows.forEach((row) => {
+            const raw = parseFloat(row.amount || 0);
+            const monthlySame = (0, projectionsMonthlyEquivalent_1.recurringAmountToMonthlySameCurrency)(raw, row.frequency);
+            avgMonthlyExpensesDop += toDop(monthlySame, row.currency, exchangeRate);
         });
-        // Generate monthly projections
         const projections = [];
         let runningBalance = currentBalance;
         for (let i = 0; i < monthsToProject; i++) {
@@ -92,7 +93,6 @@ const getProjections = async (req, res) => {
                 projectedBalance: Math.round(runningBalance),
             });
         }
-        // Calculate summary
         const totalProjectedIncome = projections.reduce((sum, p) => sum + p.projectedIncome, 0);
         const totalProjectedExpenses = projections.reduce((sum, p) => sum + p.projectedExpenses, 0);
         const totalNetFlow = totalProjectedIncome - totalProjectedExpenses;
@@ -110,6 +110,12 @@ const getProjections = async (req, res) => {
                     finalProjectedBalance,
                     avgMonthlyIncome: Math.round(avgMonthlyIncomeDop),
                     avgMonthlyExpenses: Math.round(avgMonthlyExpensesDop),
+                },
+                methodology: {
+                    punctualWindow: 'Últimos 3 meses calendario (ingresos/gastos no recurrentes): promedio del total por mes.',
+                    recurrent: 'Recurrentes: importe por período según frecuencia convertido a equivalente mensual (misma lógica que el módulo de flujo de caja).',
+                    balance: 'Saldo inicial: suma de saldos en cuentas bancarias (DOP + USD×tasa del usuario).',
+                    excluded: 'No incluye tarjetas de crédito, préstamos, cuentas por pagar/cobrar ni otros módulos; es una vista simplificada de ingresos/gastos registrados.',
                 },
             },
         });

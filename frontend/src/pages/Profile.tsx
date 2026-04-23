@@ -11,6 +11,7 @@ const Profile: React.FC = () => {
     email: '',
     firstName: '',
     lastName: '',
+    cedula: '',
   });
   const [passwords, setPasswords] = useState({
     current: '',
@@ -26,6 +27,7 @@ const Profile: React.FC = () => {
         email: user.email || '',
         firstName: user.firstName || '',
         lastName: user.lastName || '',
+        cedula: user.cedula ?? '',
       });
     }
   }, [user]);
@@ -38,6 +40,7 @@ const Profile: React.FC = () => {
         email: account.email.trim(),
         firstName: account.firstName || null,
         lastName: account.lastName || null,
+        cedula: account.cedula.trim() || null,
       });
       updateUser(response.data.user);
       toast.success('Datos de cuenta actualizados');
@@ -75,7 +78,7 @@ const Profile: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div>
+      <div className="text-center sm:text-left">
         <h1 className="page-title mb-2">Mi perfil</h1>
         <p className="text-dark-400 text-sm sm:text-base">Datos de tu cuenta y seguridad</p>
       </div>
@@ -128,6 +131,20 @@ const Profile: React.FC = () => {
                 className="input w-full"
               />
             </div>
+          </div>
+          <div>
+            <label className="label">Cédula</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="Ej. 001-0000000-0"
+              maxLength={50}
+              value={account.cedula}
+              onChange={(e) => setAccount({ ...account, cedula: e.target.value })}
+              className="input w-full"
+            />
+            <p className="text-xs text-dark-500 mt-1">Opcional. Tu documento de identidad.</p>
           </div>
           <button type="submit" disabled={savingAccount} className="btn-primary">
             {savingAccount ? 'Guardando…' : 'Guardar cambios'}

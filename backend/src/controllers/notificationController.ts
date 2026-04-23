@@ -1,6 +1,9 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import {
+  getVapidPublicKey as getVapidPublicKeyFromEnv,
+} from '../services/webPushService';
 
 export const getNotifications = async (req: AuthRequest, res: Response) => {
   try {
@@ -207,6 +210,78 @@ export const deleteNotification = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Delete notification error:', error);
     res.status(500).json({ message: 'Error deleting notification', error: error.message });
+  }
+};
+
+export const getPushVapidPublicKey = async (_req: AuthRequest, res: Response) => {
+  try {
+    const publicKey = getVapidPublicKeyFromEnv();
+    res.json({
+      success: true,
+      publicKey,
+      configured: !!publicKey,
+    });
+  } catch (error: any) {
+    console.error('VAPID public key error:', error);
+    res.status(500).json({ message: 'Error', error: error.message });
+  }
+};
+
+type PushSubscriptionBody = {
+  endpoint?: string;
+  keys?: { p256dh?: string; auth?: string };
+};
+
+export const subscribePush = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const subscription = req.body?.subscription as PushSubscriptionBody | undefined;
+    if (!subscription?.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
+      return res.status(400).json({ message: 'Suscripción push inválida' });
+    }
+
+    await query(
+      `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (endpoint) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         p256dh = EXCLUDED.p256dh,
+         auth = EXCLUDED.auth,
+         user_agent = EXCLUDED.user_agent,
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        userId,
+        subscription.endpoint,
+        subscription.keys.p256dh,
+        subscription.keys.auth,
+        (req.headers['user-agent'] as string) || null,
+      ]
+    );
+
+    res.json({ success: true, message: 'Suscripción guardada' });
+  } catch (error: any) {
+    console.error('subscribePush error:', error);
+    res.status(500).json({ message: 'Error al guardar suscripción', error: error.message });
+  }
+};
+
+export const unsubscribePush = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { endpoint } = req.body as { endpoint?: string };
+    if (!endpoint || typeof endpoint !== 'string') {
+      return res.status(400).json({ message: 'endpoint requerido' });
+    }
+
+    await query(`DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint = $2`, [
+      userId,
+      endpoint,
+    ]);
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('unsubscribePush error:', error);
+    res.status(500).json({ message: 'Error al eliminar suscripción', error: error.message });
   }
 };
 

@@ -1,7 +1,145 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { calculateRecurringDates, calculateMonthlyRecurringDates } from '../utils/dateUtils';
+import { normalizeFrequency } from '../constants/incomeExpenseTaxonomy';
+import {
+  EXPENSE_ANNUAL_ROW_IN_YEAR,
+  EXPENSE_DAILY_MATCH,
+  EXPENSE_DATE_IN_RANGE_PUNCTUAL,
+  EXPENSE_PUNCTUAL_CALENDAR_YEAR,
+  EXPENSE_RECURRING_ANNUAL,
+  EXPENSE_RECURRING_MONTHLY,
+  EXPENSE_RECURRING_OTHER_FREQ,
+  EXPENSE_STATS_MONTH_OR,
+  INCOME_DATE_IN_RANGE_PUNCTUAL,
+  INCOME_PUNCTUAL_CALENDAR_DAY,
+  INCOME_PUNCTUAL_CALENDAR_MONTH,
+  INCOME_PUNCTUAL_CALENDAR_YEAR,
+  INCOME_RECURRENT_ROWS,
+} from '../constants/recurrenceSql';
+import {
+  dateToYmdLocal,
+  getExpenseOccurrenceDatesInPeriod,
+  getFixedIncomeOccurrenceDates,
+} from '../utils/dateUtils';
+import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+
+const FIN_HEALTH_EPS = 1e-9;
+
+function mergeCategoryTotals(target: { [key: string]: number }, delta: { [key: string]: number }) {
+  for (const [k, v] of Object.entries(delta)) {
+    target[k] = (target[k] || 0) + v;
+  }
+}
+
+/** Suma por categoría y total DOP para gastos `EXPENSE_RECURRING_OTHER_FREQ` en [periodStart, periodEnd]. */
+function otherFreqExpenseTotalsInPeriod(
+  rows: Array<{
+    category: string | null;
+    amount: string;
+    currency: string;
+    frequency: string | null;
+    payment_day: unknown;
+    payment_month: unknown;
+    date: unknown;
+  }>,
+  periodStart: Date,
+  periodEnd: Date,
+  exchangeRate: number
+): { byCategory: { [key: string]: number }; totalDop: number } {
+  const byCategory: { [key: string]: number } = {};
+  let totalDop = 0;
+  for (const row of rows) {
+    const amount = parseFloat(row.amount);
+    const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+    const n = getExpenseOccurrenceDatesInPeriod(
+      {
+        frequency: row.frequency,
+        payment_day: row.payment_day as number | null | undefined,
+        payment_month: row.payment_month as number | null | undefined,
+        date: row.date,
+      },
+      periodStart,
+      periodEnd
+    ).length;
+    const add = amountDop * n;
+    if (add <= 0) continue;
+    const cat = row.category || 'Sin categoría';
+    byCategory[cat] = (byCategory[cat] || 0) + add;
+    totalDop += add;
+  }
+  return { byCategory, totalDop };
+}
+
+function isMonthlyRecurringExpenseRow(row: {
+  frequency: string | null;
+  recurrence_type: string | null;
+}): boolean {
+  return row.recurrence_type === 'recurrent' && normalizeFrequency(row.frequency) === 'monthly';
+}
+
+/**
+ * Métricas y score 0–100 coherentes cuando el ingreso del período es 0:
+ * evita dividir entre 0 (ratios en 0) y el +10 artificial por gastos bajo 70% del ingreso
+ * cuando hay gastos pero no ingreso declarado.
+ */
+export function computeFinancialHealthMetrics(
+  totalIncomeDop: number,
+  totalExpensesDop: number,
+  totalDebtsDop: number
+): {
+  savings: number;
+  savingsRate: number;
+  debtToIncomeRatio: number;
+  expenseToIncomeRatio: number;
+  healthScore: number;
+} {
+  const savings = totalIncomeDop - totalExpensesDop;
+
+  let savingsRate: number;
+  let debtToIncomeRatio: number;
+  let expenseToIncomeRatio: number;
+
+  if (totalIncomeDop > FIN_HEALTH_EPS) {
+    savingsRate = (savings / totalIncomeDop) * 100;
+    debtToIncomeRatio = (totalDebtsDop / totalIncomeDop) * 100;
+    expenseToIncomeRatio = (totalExpensesDop / totalIncomeDop) * 100;
+  } else {
+    const hasExpenses = totalExpensesDop > FIN_HEALTH_EPS;
+    const hasDebt = totalDebtsDop > FIN_HEALTH_EPS;
+    if (!hasExpenses && !hasDebt) {
+      savingsRate = 0;
+      debtToIncomeRatio = 0;
+      expenseToIncomeRatio = 0;
+    } else {
+      savingsRate = hasExpenses ? -100 : 0;
+      expenseToIncomeRatio = hasExpenses ? 100 : 0;
+      debtToIncomeRatio = hasDebt ? 100 : 0;
+    }
+  }
+
+  const hasIncome = totalIncomeDop > FIN_HEALTH_EPS;
+  const isEmptyPeriod =
+    totalIncomeDop <= FIN_HEALTH_EPS &&
+    totalExpensesDop <= FIN_HEALTH_EPS &&
+    totalDebtsDop <= FIN_HEALTH_EPS;
+
+  let healthScore = 100;
+  if (savingsRate < 0) healthScore -= 30;
+  else if (hasIncome && savingsRate < 10) healthScore -= 15;
+  else if (savingsRate >= 20) healthScore += 10;
+
+  if (debtToIncomeRatio > 40) healthScore -= 25;
+  else if (debtToIncomeRatio > 30) healthScore -= 15;
+  else if (debtToIncomeRatio < 20 && !isEmptyPeriod) healthScore += 10;
+
+  if (expenseToIncomeRatio > 90) healthScore -= 20;
+  else if (expenseToIncomeRatio < 70 && !isEmptyPeriod) healthScore += 10;
+
+  healthScore = Math.max(0, Math.min(100, healthScore));
+
+  return { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore };
+}
 
 export const getSummary = async (req: AuthRequest, res: Response) => {
   try {
@@ -12,7 +150,7 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
     // Total assets (bank accounts)
     const accountsResult = await query(
@@ -24,6 +162,24 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     const accounts = accountsResult.rows[0];
     const totalAssetsDop = parseFloat(accounts.total_dop || 0);
     const totalAssetsUsd = parseFloat(accounts.total_usd || 0);
+
+    const byKindResult = await query(
+      `SELECT
+        COALESCE(SUM(CASE WHEN account_kind = 'bank' THEN balance_dop ELSE 0 END), 0)::numeric AS bank_dop,
+        COALESCE(SUM(CASE WHEN account_kind = 'bank' THEN balance_usd ELSE 0 END), 0)::numeric AS bank_usd,
+        COALESCE(SUM(CASE WHEN account_kind IN ('cash', 'wallet') THEN balance_dop ELSE 0 END), 0)::numeric AS cash_dop,
+        COALESCE(SUM(CASE WHEN account_kind IN ('cash', 'wallet') THEN balance_usd ELSE 0 END), 0)::numeric AS cash_usd
+       FROM bank_accounts
+       WHERE user_id = $1`,
+      [userId]
+    );
+    const bk = byKindResult.rows[0];
+    const bankDop = parseFloat(bk.bank_dop || 0);
+    const bankUsd = parseFloat(bk.bank_usd || 0);
+    const cashDop = parseFloat(bk.cash_dop || 0);
+    const cashUsd = parseFloat(bk.cash_usd || 0);
+    const bankDopUnified = bankDop + bankUsd * exchangeRate;
+    const cashDopUnified = cashDop + cashUsd * exchangeRate;
 
     // Total debts (credit cards + loans)
     const cardsResult = await query(
@@ -131,6 +287,24 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     );
     const vehiclesCount = parseInt(vehiclesResult.rows[0]?.count || 0);
 
+    const bankAccountsCountResult = await query(
+      `SELECT COUNT(*)::int AS count FROM bank_accounts WHERE user_id = $1`,
+      [userId]
+    );
+    const bankAccountsCount = parseInt(bankAccountsCountResult.rows[0]?.count ?? 0, 10);
+
+    const creditCardsCountResult = await query(
+      `SELECT COUNT(*)::int AS count FROM credit_cards WHERE user_id = $1`,
+      [userId]
+    );
+    const creditCardsCount = parseInt(creditCardsCountResult.rows[0]?.count ?? 0, 10);
+
+    const loansCountResult = await query(
+      `SELECT COUNT(*)::int AS count FROM loans WHERE user_id = $1`,
+      [userId]
+    );
+    const loansCount = parseInt(loansCountResult.rows[0]?.count ?? 0, 10);
+
     res.json({
       success: true,
       summary: {
@@ -138,6 +312,18 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
           dop: totalAssetsDop,
           usd: totalAssetsUsd,
           dopUnified: totalAssetsDopUnified,
+          byKind: {
+            bank: {
+              dop: bankDop,
+              usd: bankUsd,
+              dopUnified: bankDopUnified,
+            },
+            cash: {
+              dop: cashDop,
+              usd: cashUsd,
+              dopUnified: cashDopUnified,
+            },
+          },
         },
         debts: {
           dop: totalDebtsDop,
@@ -167,6 +353,9 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
         },
         activeBudgets: activeBudgetsCount,
         activeGoals: activeGoalsCount,
+        bankAccounts: bankAccountsCount,
+        creditCards: creditCardsCount,
+        loans: loansCount,
         vehicles: vehiclesCount,
         exchangeRate,
       },
@@ -190,18 +379,18 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
-    // Expenses by category for the month
+    const monthStart = new Date(currentYear, currentMonth - 1, 1);
+    const monthEnd = new Date(currentYear, currentMonth, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+
+    // Expenses by category for the month (puntual + recurrente mensual/anual legacy + taxonomía)
     const expensesResult = await query(
       `SELECT category, SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL)
-           OR (expense_type = 'ANNUAL' AND payment_month = $2 AND EXTRACT(YEAR FROM date) = $3)
-         )
+         AND ( ${EXPENSE_STATS_MONTH_OR} )
        GROUP BY category, currency`,
       [userId, currentMonth, currentYear]
     );
@@ -214,15 +403,23 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
 
-    // Monthly income vs expenses
+    const otherFreqStats = await query(
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+       FROM expenses
+       WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
+      [userId]
+    );
+    mergeCategoryTotals(
+      expensesByCategory,
+      otherFreqExpenseTotalsInPeriod(otherFreqStats.rows, monthStart, monthEnd, exchangeRate).byCategory
+    );
+
+    // Ingreso del mes: puntual en el mes + recurrentes expandidos
     const incomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND (
-           (income_type = 'VARIABLE' AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3)
-           OR (income_type = 'FIXED' AND receipt_day IS NOT NULL)
-         )
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`,
       [userId, currentMonth, currentYear]
     );
@@ -231,6 +428,24 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     incomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
       totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+    });
+
+    const fixedIncomeStatsResult = await query(
+      `SELECT amount, currency, frequency, receipt_day, date
+       FROM income
+       WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
+      [userId]
+    );
+
+    fixedIncomeStatsResult.rows.forEach((row) => {
+      const amount = parseFloat(row.amount);
+      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency: row.frequency, receipt_day: row.receipt_day, date: row.date },
+        monthStart,
+        monthEnd
+      );
+      totalIncomeDop += amountDop * dates.length;
     });
 
     let totalExpensesDop = 0;
@@ -252,7 +467,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     const debtProgress = loansResult.rows.map((loan) => {
       const totalPaid = parseFloat(loan.total_paid);
       const totalAmount = parseFloat(loan.total_amount);
-      const progress = (totalPaid / totalAmount) * 100;
+      const progress = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
       return {
         id: loan.id,
         loanName: loan.loan_name,
@@ -299,20 +514,19 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
     // Monthly income - variable income + fixed income for this month
     const monthStart = new Date(currentYear, currentMonth - 1, 1);
     const monthEnd = new Date(currentYear, currentMonth, 0);
     monthEnd.setHours(23, 59, 59, 999);
 
-    // Variable income
+    // Ingreso puntual del mes
     const incomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`,
       [userId, currentMonth, currentYear]
     );
@@ -323,11 +537,10 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Fixed income - calculate based on frequency
     const fixedIncomeResult = await query(
       `SELECT amount, currency, frequency, receipt_day, date
        FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'`,
+       WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
     );
 
@@ -336,33 +549,20 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        dates = calculateMonthlyRecurringDates(parseInt(row.receipt_day), monthStart, monthEnd);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, monthEnd);
-        // Filter dates to only include those in the current month
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date.getMonth() + 1 === currentMonth && date.getFullYear() === currentYear;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        monthStart,
+        monthEnd
+      );
+
       totalIncomeDop += amountDop * dates.length;
     });
 
-    // Monthly expenses - non-recurring + recurring monthly + annual for this month
     const expensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL)
-           OR (expense_type = 'ANNUAL' AND payment_month = $2 AND EXTRACT(YEAR FROM date) = $3)
-         )
+         AND ( ${EXPENSE_STATS_MONTH_OR} )
        GROUP BY currency`,
       [userId, currentMonth, currentYear]
     );
@@ -373,16 +573,25 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Expenses by category
+    const otherFreqMonth = await query(
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+       FROM expenses
+       WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
+      [userId]
+    );
+    const otherMonthTotals = otherFreqExpenseTotalsInPeriod(
+      otherFreqMonth.rows,
+      monthStart,
+      monthEnd,
+      exchangeRate
+    );
+    totalExpensesDop += otherMonthTotals.totalDop;
+
     const expensesByCategoryResult = await query(
       `SELECT category, SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL)
-           OR (expense_type = 'ANNUAL' AND payment_month = $2 AND EXTRACT(YEAR FROM date) = $3)
-         )
+         AND ( ${EXPENSE_STATS_MONTH_OR} )
        GROUP BY category, currency`,
       [userId, currentMonth, currentYear]
     );
@@ -394,6 +603,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
+    mergeCategoryTotals(expensesByCategory, otherMonthTotals.byCategory);
 
     // Total debts
     const cardsResult = await query(
@@ -428,26 +638,8 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
 
     const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
 
-    // Calculate financial health metrics
-    const savings = totalIncomeDop - totalExpensesDop;
-    const savingsRate = totalIncomeDop > 0 ? (savings / totalIncomeDop) * 100 : 0;
-    const debtToIncomeRatio = totalIncomeDop > 0 ? (totalDebtsDop / totalIncomeDop) * 100 : 0;
-    const expenseToIncomeRatio = totalIncomeDop > 0 ? (totalExpensesDop / totalIncomeDop) * 100 : 0;
-
-    // Financial health score (0-100)
-    let healthScore = 100;
-    if (savingsRate < 0) healthScore -= 30; // Negative savings
-    else if (savingsRate < 10) healthScore -= 15; // Low savings
-    else if (savingsRate >= 20) healthScore += 10; // Good savings
-
-    if (debtToIncomeRatio > 40) healthScore -= 25; // High debt
-    else if (debtToIncomeRatio > 30) healthScore -= 15;
-    else if (debtToIncomeRatio < 20) healthScore += 10; // Low debt
-
-    if (expenseToIncomeRatio > 90) healthScore -= 20; // High expenses
-    else if (expenseToIncomeRatio < 70) healthScore += 10; // Low expenses
-
-    healthScore = Math.max(0, Math.min(100, healthScore));
+    const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
+      computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
 
     // Monthly trend (compare with previous month)
     const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
@@ -462,8 +654,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`,
       [userId, prevMonth, prevYear]
     );
@@ -480,33 +671,20 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        dates = calculateMonthlyRecurringDates(parseInt(row.receipt_day), prevMonthStart, prevMonthEnd);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, prevMonthEnd);
-        // Filter dates to only include those in the previous month
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date.getMonth() + 1 === prevMonth && date.getFullYear() === prevYear;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        prevMonthStart,
+        prevMonthEnd
+      );
+
       prevIncomeDop += amountDop * dates.length;
     });
 
-    // Previous month expenses
     const prevExpensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL)
-           OR (expense_type = 'ANNUAL' AND payment_month = $2 AND EXTRACT(YEAR FROM date) = $3)
-         )
+         AND ( ${EXPENSE_STATS_MONTH_OR} )
        GROUP BY currency`,
       [userId, prevMonth, prevYear]
     );
@@ -516,6 +694,12 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       const amount = parseFloat(row.total || 0);
       prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
+    prevExpensesDop += otherFreqExpenseTotalsInPeriod(
+      otherFreqMonth.rows,
+      prevMonthStart,
+      prevMonthEnd,
+      exchangeRate
+    ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
     const expensesChange = prevExpensesDop > 0 ? ((totalExpensesDop - prevExpensesDop) / prevExpensesDop) * 100 : 0;
@@ -569,9 +753,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
-    // Annual income - only variable income by month
     const incomeResult = await query(
       `SELECT 
          EXTRACT(MONTH FROM date) as month,
@@ -579,8 +762,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
          currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(YEAR FROM date) = $2
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_YEAR} )
        GROUP BY EXTRACT(MONTH FROM date), currency
        ORDER BY month`,
       [userId, currentYear]
@@ -596,7 +778,6 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       totalIncomeDop += amountDop;
     });
 
-    // Add fixed income for all months
     const yearStart = new Date(currentYear, 0, 1);
     const yearEnd = new Date(currentYear, 11, 31);
     yearEnd.setHours(23, 59, 59, 999);
@@ -604,7 +785,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     const fixedIncomeResult = await query(
       `SELECT amount, currency, frequency, receipt_day, date
        FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'`,
+       WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
     );
 
@@ -613,20 +794,12 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        dates = calculateMonthlyRecurringDates(parseInt(row.receipt_day), yearStart, yearEnd);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, yearEnd);
-        // Filter dates to only include those in the current year
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date.getFullYear() === currentYear;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        yearStart,
+        yearEnd
+      );
+
       // Distribute dates across months
       dates.forEach((dateStr) => {
         const date = new Date(dateStr);
@@ -637,7 +810,6 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       totalIncomeDop += amountDop * dates.length;
     });
 
-    // Annual expenses - only non-recurring and annual expenses by month
     const expensesResult = await query(
       `SELECT 
          EXTRACT(MONTH FROM date) as month,
@@ -646,8 +818,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
        FROM expenses
        WHERE user_id = $1
          AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2)
-           OR (expense_type = 'ANNUAL' AND EXTRACT(YEAR FROM date) = $2)
+           ( ${EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
+           OR ( ${EXPENSE_ANNUAL_ROW_IN_YEAR} )
          )
        GROUP BY EXTRACT(MONTH FROM date), currency
        ORDER BY month`,
@@ -664,11 +836,10 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += amountDop;
     });
 
-    // Add recurring monthly expenses for all months
     const recurringExpensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY'
+       WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_MONTHLY} )
        GROUP BY currency`,
       [userId]
     );
@@ -682,17 +853,16 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += amountDop * 12;
     });
 
-    // Expenses by category for the year (avoid duplication)
     const expensesByCategoryResult = await query(
-      `SELECT category, SUM(amount) as total, currency, expense_type
+      `SELECT category, SUM(amount) as total, currency, frequency, recurrence_type
        FROM expenses
        WHERE user_id = $1
          AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2)
-           OR (expense_type = 'RECURRING_MONTHLY')
-           OR (expense_type = 'ANNUAL' AND EXTRACT(YEAR FROM date) = $2)
+           ( ${EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
+           OR ( ${EXPENSE_RECURRING_MONTHLY} )
+           OR ( ${EXPENSE_ANNUAL_ROW_IN_YEAR} )
          )
-       GROUP BY category, currency, expense_type`,
+       GROUP BY category, currency, frequency, recurrence_type`,
       [userId, currentYear]
     );
 
@@ -701,10 +871,26 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      // For recurring monthly, multiply by 12 for annual total
-      const finalAmount = row.expense_type === 'RECURRING_MONTHLY' ? amountDop * 12 : amountDop;
+      const monthlyRec = isMonthlyRecurringExpenseRow(row);
+      const finalAmount = monthlyRec ? amountDop * 12 : amountDop;
       expensesByCategory[category] = (expensesByCategory[category] || 0) + finalAmount;
     });
+
+    const otherFreqAnnual = await query(
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+       FROM expenses
+       WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
+      [userId]
+    );
+    for (let m = 1; m <= 12; m++) {
+      const ms = new Date(currentYear, m - 1, 1);
+      const me = new Date(currentYear, m, 0);
+      me.setHours(23, 59, 59, 999);
+      const t = otherFreqExpenseTotalsInPeriod(otherFreqAnnual.rows, ms, me, exchangeRate);
+      monthlyExpenses[m] = (monthlyExpenses[m] || 0) + t.totalDop;
+      totalExpensesDop += t.totalDop;
+      mergeCategoryTotals(expensesByCategory, t.byCategory);
+    }
 
     // Total debts
     const cardsResult = await query(
@@ -739,26 +925,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
 
     const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
 
-    // Calculate financial health metrics
-    const savings = totalIncomeDop - totalExpensesDop;
-    const savingsRate = totalIncomeDop > 0 ? (savings / totalIncomeDop) * 100 : 0;
-    const debtToIncomeRatio = totalIncomeDop > 0 ? (totalDebtsDop / totalIncomeDop) * 100 : 0;
-    const expenseToIncomeRatio = totalIncomeDop > 0 ? (totalExpensesDop / totalIncomeDop) * 100 : 0;
-
-    // Financial health score (0-100)
-    let healthScore = 100;
-    if (savingsRate < 0) healthScore -= 30;
-    else if (savingsRate < 10) healthScore -= 15;
-    else if (savingsRate >= 20) healthScore += 10;
-
-    if (debtToIncomeRatio > 40) healthScore -= 25;
-    else if (debtToIncomeRatio > 30) healthScore -= 15;
-    else if (debtToIncomeRatio < 20) healthScore += 10;
-
-    if (expenseToIncomeRatio > 90) healthScore -= 20;
-    else if (expenseToIncomeRatio < 70) healthScore += 10;
-
-    healthScore = Math.max(0, Math.min(100, healthScore));
+    const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
+      computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
 
     // Prepare monthly data for charts
     const monthlyData = [];
@@ -775,13 +943,11 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     // Compare with previous year
     const prevYear = currentYear - 1;
     
-    // Previous year variable income
     const prevIncomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(YEAR FROM date) = $2
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_YEAR} )
        GROUP BY currency`,
       [userId, prevYear]
     );
@@ -802,31 +968,22 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        dates = calculateMonthlyRecurringDates(parseInt(row.receipt_day), prevYearStart, prevYearEnd);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, prevYearEnd);
-        // Filter dates to only include those in the previous year
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date.getFullYear() === prevYear;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        prevYearStart,
+        prevYearEnd
+      );
+
       prevIncomeDop += amountDop * dates.length;
     });
 
-    // Previous year expenses
     const prevExpensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
          AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2)
-           OR (expense_type = 'ANNUAL' AND EXTRACT(YEAR FROM date) = $2)
+           ( ${EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
+           OR ( ${EXPENSE_ANNUAL_ROW_IN_YEAR} )
          )
        GROUP BY currency`,
       [userId, prevYear]
@@ -838,12 +995,18 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Add recurring expenses for previous year (same as current year since it's recurring)
     recurringExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       prevExpensesDop += amountDop * 12;
     });
+
+    prevExpensesDop += otherFreqExpenseTotalsInPeriod(
+      otherFreqAnnual.rows,
+      prevYearStart,
+      prevYearEnd,
+      exchangeRate
+    ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
     const expensesChange = prevExpensesDop > 0 ? ((totalExpensesDop - prevExpensesDop) / prevExpensesDop) * 100 : 0;
@@ -903,15 +1066,17 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
-    // Daily income - variable income
+    const targetDateObj = new Date(targetYear, targetMonth - 1, targetDay);
+    const dayRangeStart = new Date(targetYear, targetMonth - 1, targetDay, 0, 0, 0, 0);
+    const dayRangeEnd = new Date(targetYear, targetMonth - 1, targetDay, 23, 59, 59, 999);
+
     const incomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(DAY FROM date) = $4
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_DAY} )
        GROUP BY currency`,
       [userId, targetYear, targetMonth, targetDay]
     );
@@ -922,12 +1087,10 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Add fixed income for the day
-    const targetDateObj = new Date(targetYear, targetMonth - 1, targetDay);
     const fixedIncomeResult = await query(
       `SELECT amount, currency, frequency, receipt_day, date
        FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'`,
+       WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
     );
 
@@ -936,33 +1099,24 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let shouldInclude = false;
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        // For monthly, check if day of month matches
-        shouldInclude = targetDay === parseInt(row.receipt_day);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        // For weekly/biweekly, check if target date is in the recurring dates
-        const startDate = new Date(row.date);
-        const dates = calculateRecurringDates(startDate, frequency, targetDateObj);
-        shouldInclude = dates.includes(targetDateObj.toISOString().split('T')[0]);
-      }
-      
+      const dayStr = dateToYmdLocal(targetDateObj);
+      const occ = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        targetDateObj,
+        targetDateObj
+      );
+      const shouldInclude = occ.includes(dayStr);
+
       if (shouldInclude) {
         totalIncomeDop += amountDop;
       }
     });
 
-    // Daily expenses
     const expensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(DAY FROM date) = $4)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day = $4)
-           OR (expense_type = 'ANNUAL' AND payment_month = $3 AND payment_day = $4)
-         )
+         AND ( ${EXPENSE_DAILY_MATCH} )
        GROUP BY currency`,
       [userId, targetYear, targetMonth, targetDay]
     );
@@ -973,16 +1127,11 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Expenses by category
     const expensesByCategoryResult = await query(
       `SELECT category, SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(DAY FROM date) = $4)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day = $4)
-           OR (expense_type = 'ANNUAL' AND payment_month = $3 AND payment_day = $4)
-         )
+         AND ( ${EXPENSE_DAILY_MATCH} )
        GROUP BY category, currency`,
       [userId, targetYear, targetMonth, targetDay]
     );
@@ -994,6 +1143,16 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
+
+    const otherFreqDayRows = await query(
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+       FROM expenses
+       WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
+      [userId]
+    );
+    const otherDay = otherFreqExpenseTotalsInPeriod(otherFreqDayRows.rows, dayRangeStart, dayRangeEnd, exchangeRate);
+    totalExpensesDop += otherDay.totalDop;
+    mergeCategoryTotals(expensesByCategory, otherDay.byCategory);
 
     // Total debts
     const cardsResult = await query(
@@ -1028,26 +1187,8 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
 
     const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
 
-    // Calculate financial health metrics
-    const savings = totalIncomeDop - totalExpensesDop;
-    const savingsRate = totalIncomeDop > 0 ? (savings / totalIncomeDop) * 100 : 0;
-    const debtToIncomeRatio = totalIncomeDop > 0 ? (totalDebtsDop / totalIncomeDop) * 100 : 0;
-    const expenseToIncomeRatio = totalIncomeDop > 0 ? (totalExpensesDop / totalIncomeDop) * 100 : 0;
-
-    // Financial health score (0-100)
-    let healthScore = 100;
-    if (savingsRate < 0) healthScore -= 30;
-    else if (savingsRate < 10) healthScore -= 15;
-    else if (savingsRate >= 20) healthScore += 10;
-
-    if (debtToIncomeRatio > 40) healthScore -= 25;
-    else if (debtToIncomeRatio > 30) healthScore -= 15;
-    else if (debtToIncomeRatio < 20) healthScore += 10;
-
-    if (expenseToIncomeRatio > 90) healthScore -= 20;
-    else if (expenseToIncomeRatio < 70) healthScore += 10;
-
-    healthScore = Math.max(0, Math.min(100, healthScore));
+    const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
+      computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
 
     // Compare with previous day
     const prevDate = new Date(targetDate);
@@ -1056,13 +1197,11 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     const prevMonth = prevDate.getMonth() + 1;
     const prevDay = prevDate.getDate();
 
-    // Previous day income - variable
     const prevIncomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(DAY FROM date) = $4
+         AND ( ${INCOME_PUNCTUAL_CALENDAR_DAY} )
        GROUP BY currency`,
       [userId, prevYear, prevMonth, prevDay]
     );
@@ -1080,30 +1219,27 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let shouldInclude = false;
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        shouldInclude = prevDay === parseInt(row.receipt_day);
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        const startDate = new Date(row.date);
-        const dates = calculateRecurringDates(startDate, frequency, prevDateObj);
-        shouldInclude = dates.includes(prevDateObj.toISOString().split('T')[0]);
-      }
-      
+      const prevDayStr = dateToYmdLocal(prevDateObj);
+      const occPrev = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        prevDateObj,
+        prevDateObj
+      );
+      const shouldInclude = occPrev.includes(prevDayStr);
+
       if (shouldInclude) {
         prevIncomeDop += amountDop;
       }
     });
 
+    const prevDayRangeStart = new Date(prevYear, prevMonth - 1, prevDay, 0, 0, 0, 0);
+    const prevDayRangeEnd = new Date(prevYear, prevMonth - 1, prevDay, 23, 59, 59, 999);
+
     const prevExpensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND (
-           (expense_type = 'NON_RECURRING' AND EXTRACT(YEAR FROM date) = $2 AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(DAY FROM date) = $4)
-           OR (expense_type = 'RECURRING_MONTHLY' AND payment_day = $4)
-           OR (expense_type = 'ANNUAL' AND payment_month = $3 AND payment_day = $4)
-         )
+         AND ( ${EXPENSE_DAILY_MATCH} )
        GROUP BY currency`,
       [userId, prevYear, prevMonth, prevDay]
     );
@@ -1113,6 +1249,12 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       const amount = parseFloat(row.total || 0);
       prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
+    prevExpensesDop += otherFreqExpenseTotalsInPeriod(
+      otherFreqDayRows.rows,
+      prevDayRangeStart,
+      prevDayRangeEnd,
+      exchangeRate
+    ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
     const expensesChange = prevExpensesDop > 0 ? ((totalExpensesDop - prevExpensesDop) / prevExpensesDop) * 100 : 0;
@@ -1120,7 +1262,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       data: {
-        date: targetDate.toISOString().split('T')[0],
+        date: dateToYmdLocal(targetDate),
         income: {
           total: totalIncomeDop,
           change: incomeChange,
@@ -1179,15 +1321,13 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
       [userId]
     );
-    const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
 
-    // Weekly income - variable income in the week
     const incomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND date >= $2 AND date <= $3
+         AND ( ${INCOME_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`,
       [userId, startDate, endDate]
     );
@@ -1198,16 +1338,10 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Add fixed income that falls within the week
-    const weekStartDay = startDate.getDate();
-    const weekEndDay = endDate.getDate();
-    const weekStartMonth = startDate.getMonth() + 1;
-    const weekEndMonth = endDate.getMonth() + 1;
-
     const fixedIncomeResult = await query(
       `SELECT amount, currency, frequency, receipt_day, date
        FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'`,
+       WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
     );
 
@@ -1216,38 +1350,20 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        // For monthly, check if receipt_day falls within the week
-        const receiptDay = parseInt(row.receipt_day);
-        if (
-          (weekStartMonth === weekEndMonth && receiptDay >= weekStartDay && receiptDay <= weekEndDay) ||
-          (weekStartMonth !== weekEndMonth && (receiptDay >= weekStartDay || receiptDay <= weekEndDay))
-        ) {
-          dates = [startDate.toISOString().split('T')[0]]; // Add one occurrence
-        }
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        // For weekly/biweekly, calculate dates from start date
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, endDate);
-        // Filter dates to only include those in the current week
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date >= startDate && date <= endDate;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        startDate,
+        endDate
+      );
+
       totalIncomeDop += amountDop * dates.length;
     });
 
-    // Weekly expenses - non-recurring
     const expensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND expense_type = 'NON_RECURRING'
-         AND date >= $2 AND date <= $3
+         AND ( ${EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`,
       [userId, startDate, endDate]
     );
@@ -1258,57 +1374,25 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // weekStartDay, weekEndDay, weekStartMonth, weekEndMonth already defined above
-
-    const recurringExpensesResult = await query(
-      `SELECT SUM(amount) as total, currency, payment_day
+    const recurringAllWeek = await query(
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
        FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL
-       GROUP BY currency, payment_day`,
+       WHERE user_id = $1
+         AND (
+           ( ${EXPENSE_RECURRING_MONTHLY} )
+           OR ( ${EXPENSE_RECURRING_ANNUAL} )
+           OR ( ${EXPENSE_RECURRING_OTHER_FREQ} )
+         )`,
       [userId]
     );
+    const recWeek = otherFreqExpenseTotalsInPeriod(recurringAllWeek.rows, startDate, endDate, exchangeRate);
+    totalExpensesDop += recWeek.totalDop;
 
-    recurringExpensesResult.rows.forEach((row) => {
-      const paymentDay = parseInt(row.payment_day);
-      // Check if payment day falls within the week
-      if (
-        (weekStartMonth === weekEndMonth && paymentDay >= weekStartDay && paymentDay <= weekEndDay) ||
-        (weekStartMonth !== weekEndMonth && (paymentDay >= weekStartDay || paymentDay <= weekEndDay))
-      ) {
-        const amount = parseFloat(row.total || 0);
-        totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
-      }
-    });
-
-    // Add annual expenses if they fall within the week
-    const annualExpensesResult = await query(
-      `SELECT SUM(amount) as total, currency, payment_month, payment_day
-       FROM expenses
-       WHERE user_id = $1 AND expense_type = 'ANNUAL' AND payment_month IS NOT NULL AND payment_day IS NOT NULL
-       GROUP BY currency, payment_month, payment_day`,
-      [userId]
-    );
-
-    annualExpensesResult.rows.forEach((row) => {
-      const paymentMonth = parseInt(row.payment_month);
-      const paymentDay = parseInt(row.payment_day);
-      if (
-        paymentMonth === weekStartMonth &&
-        paymentDay >= weekStartDay &&
-        paymentDay <= (weekStartMonth === weekEndMonth ? weekEndDay : 31)
-      ) {
-        const amount = parseFloat(row.total || 0);
-        totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
-      }
-    });
-
-    // Expenses by category
     const expensesByCategoryResult = await query(
       `SELECT category, SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND expense_type = 'NON_RECURRING'
-         AND date >= $2 AND date <= $3
+         AND ( ${EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY category, currency`,
       [userId, startDate, endDate]
     );
@@ -1320,35 +1404,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
-
-    // Add recurring expenses to categories
-    recurringExpensesResult.rows.forEach((row) => {
-      const paymentDay = parseInt(row.payment_day);
-      if (
-        (weekStartMonth === weekEndMonth && paymentDay >= weekStartDay && paymentDay <= weekEndDay) ||
-        (weekStartMonth !== weekEndMonth && (paymentDay >= weekStartDay || paymentDay <= weekEndDay))
-      ) {
-        const category = 'Recurrente Mensual';
-        const amount = parseFloat(row.total || 0);
-        const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-        expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
-      }
-    });
-
-    annualExpensesResult.rows.forEach((row) => {
-      const paymentMonth = parseInt(row.payment_month);
-      const paymentDay = parseInt(row.payment_day);
-      if (
-        paymentMonth === weekStartMonth &&
-        paymentDay >= weekStartDay &&
-        paymentDay <= (weekStartMonth === weekEndMonth ? weekEndDay : 31)
-      ) {
-        const category = 'Anual';
-        const amount = parseFloat(row.total || 0);
-        const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-        expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
-      }
-    });
+    mergeCategoryTotals(expensesByCategory, recWeek.byCategory);
 
     // Total debts
     const cardsResult = await query(
@@ -1383,26 +1439,8 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
 
     const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
 
-    // Calculate financial health metrics
-    const savings = totalIncomeDop - totalExpensesDop;
-    const savingsRate = totalIncomeDop > 0 ? (savings / totalIncomeDop) * 100 : 0;
-    const debtToIncomeRatio = totalIncomeDop > 0 ? (totalDebtsDop / totalIncomeDop) * 100 : 0;
-    const expenseToIncomeRatio = totalIncomeDop > 0 ? (totalExpensesDop / totalIncomeDop) * 100 : 0;
-
-    // Financial health score (0-100)
-    let healthScore = 100;
-    if (savingsRate < 0) healthScore -= 30;
-    else if (savingsRate < 10) healthScore -= 15;
-    else if (savingsRate >= 20) healthScore += 10;
-
-    if (debtToIncomeRatio > 40) healthScore -= 25;
-    else if (debtToIncomeRatio > 30) healthScore -= 15;
-    else if (debtToIncomeRatio < 20) healthScore += 10;
-
-    if (expenseToIncomeRatio > 90) healthScore -= 20;
-    else if (expenseToIncomeRatio < 70) healthScore += 10;
-
-    healthScore = Math.max(0, Math.min(100, healthScore));
+    const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
+      computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
 
     // Compare with previous week
     const prevStartDate = new Date(startDate);
@@ -1411,18 +1449,11 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     prevEndDate.setDate(prevEndDate.getDate() + 6);
     prevEndDate.setHours(23, 59, 59, 999);
 
-    const prevWeekStartDay = prevStartDate.getDate();
-    const prevWeekEndDay = prevEndDate.getDate();
-    const prevWeekStartMonth = prevStartDate.getMonth() + 1;
-    const prevWeekEndMonth = prevEndDate.getMonth() + 1;
-
-    // Previous week income - variable income
     const prevIncomeResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND income_type = 'VARIABLE'
-         AND date >= $2 AND date <= $3
+         AND ( ${INCOME_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`,
       [userId, prevStartDate, prevEndDate]
     );
@@ -1433,44 +1464,25 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       prevIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Add fixed income for previous week
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const frequency = row.frequency;
       
-      let dates: string[] = [];
-      
-      if (frequency === 'MONTHLY' && row.receipt_day) {
-        // For monthly, check if receipt_day falls within the previous week
-        const receiptDay = parseInt(row.receipt_day);
-        if (
-          (prevWeekStartMonth === prevWeekEndMonth && receiptDay >= prevWeekStartDay && receiptDay <= prevWeekEndDay) ||
-          (prevWeekStartMonth !== prevWeekEndMonth && (receiptDay >= prevWeekStartDay || receiptDay <= prevWeekEndDay))
-        ) {
-          dates = [prevStartDate.toISOString().split('T')[0]]; // Add one occurrence
-        }
-      } else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-        // For weekly/biweekly, calculate dates from start date
-        const startDate = new Date(row.date);
-        dates = calculateRecurringDates(startDate, frequency, prevEndDate);
-        // Filter dates to only include those in the previous week
-        dates = dates.filter(dateStr => {
-          const date = new Date(dateStr);
-          return date >= prevStartDate && date <= prevEndDate;
-        });
-      }
-      
+      const dates = getFixedIncomeOccurrenceDates(
+        { frequency, receipt_day: row.receipt_day, date: row.date },
+        prevStartDate,
+        prevEndDate
+      );
+
       prevIncomeDop += amountDop * dates.length;
     });
 
-    // Previous week expenses
     const prevExpensesResult = await query(
       `SELECT SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND expense_type = 'NON_RECURRING'
-         AND date >= $2 AND date <= $3
+         AND ( ${EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`,
       [userId, prevStartDate, prevEndDate]
     );
@@ -1481,30 +1493,12 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
     });
 
-    // Add recurring expenses for previous week
-    recurringExpensesResult.rows.forEach((row) => {
-      const paymentDay = parseInt(row.payment_day);
-      if (
-        (prevWeekStartMonth === prevWeekEndMonth && paymentDay >= prevWeekStartDay && paymentDay <= prevWeekEndDay) ||
-        (prevWeekStartMonth !== prevWeekEndMonth && (paymentDay >= prevWeekStartDay || paymentDay <= prevWeekEndDay))
-      ) {
-        const amount = parseFloat(row.total || 0);
-        prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
-      }
-    });
-
-    annualExpensesResult.rows.forEach((row) => {
-      const paymentMonth = parseInt(row.payment_month);
-      const paymentDay = parseInt(row.payment_day);
-      if (
-        paymentMonth === prevWeekStartMonth &&
-        paymentDay >= prevWeekStartDay &&
-        paymentDay <= (prevWeekStartMonth === prevWeekEndMonth ? prevWeekEndDay : 31)
-      ) {
-        const amount = parseFloat(row.total || 0);
-        prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
-      }
-    });
+    prevExpensesDop += otherFreqExpenseTotalsInPeriod(
+      recurringAllWeek.rows,
+      prevStartDate,
+      prevEndDate,
+      exchangeRate
+    ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
     const expensesChange = prevExpensesDop > 0 ? ((totalExpensesDop - prevExpensesDop) / prevExpensesDop) * 100 : 0;
@@ -1512,8 +1506,8 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       data: {
-        weekStart: startDate.toISOString().split('T')[0],
-        weekEnd: endDate.toISOString().split('T')[0],
+        weekStart: dateToYmdLocal(startDate),
+        weekEnd: dateToYmdLocal(endDate),
         income: {
           total: totalIncomeDop,
           change: incomeChange,

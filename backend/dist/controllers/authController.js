@@ -3,13 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetPasswordWithToken = exports.forgotPassword = exports.changePassword = exports.updateMe = exports.getMe = exports.login = exports.register = exports.getRegistrationStatus = void 0;
+exports.resetPasswordWithToken = exports.forgotPassword = exports.changePassword = exports.updateMe = exports.getMe = exports.login = exports.register = exports.getPublicConfig = exports.getRegistrationStatus = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const jwt_1 = require("../utils/jwt");
 const emailService_1 = require("../services/emailService");
 const notificationTemplateSeed_1 = require("../services/notificationTemplateSeed");
+const exchangeRate_1 = require("../utils/exchangeRate");
 function hashResetToken(token) {
     return crypto_1.default.createHash('sha256').update(token, 'utf8').digest('hex');
 }
@@ -30,6 +31,21 @@ const getRegistrationStatus = async (_req, res) => {
     }
 };
 exports.getRegistrationStatus = getRegistrationStatus;
+/** Sin autenticación: banderas para la app (registro, mantenimiento). */
+const getPublicConfig = async (_req, res) => {
+    try {
+        const r = await (0, database_1.query)(`SELECT key, value FROM system_settings WHERE key IN ('registration_enabled', 'maintenance_mode')`);
+        const map = new Map(r.rows.map((row) => [row.key, row.value]));
+        const registrationEnabled = !map.has('registration_enabled') || map.get('registration_enabled') === 'true';
+        const maintenanceMode = map.get('maintenance_mode') === 'true';
+        res.json({ registrationEnabled, maintenanceMode });
+    }
+    catch (error) {
+        console.error('getPublicConfig error:', error);
+        res.status(500).json({ message: 'Error' });
+    }
+};
+exports.getPublicConfig = getPublicConfig;
 const register = async (req, res) => {
     try {
         const { email, password, firstName, lastName } = req.body;
@@ -51,9 +67,10 @@ const register = async (req, res) => {
         // Hash password
         const passwordHash = await bcryptjs_1.default.hash(password, 10);
         // Create user
-        const result = await (0, database_1.query)(`INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, email, first_name, last_name, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper]);
+        const defaultRate = (0, exchangeRate_1.getDefaultExchangeRateDopUsd)();
+        const result = await (0, database_1.query)(`INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper, defaultRate]);
         const user = result.rows[0];
         const freePlan = await (0, database_1.query)(`SELECT id FROM subscription_plans WHERE slug = 'free' LIMIT 1`);
         if (freePlan.rows[0]) {
@@ -80,11 +97,15 @@ const register = async (req, res) => {
                 email: user.email,
                 firstName: user.first_name,
                 lastName: user.last_name,
+                cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference || 'DOP',
-                exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd) || 55.00,
+                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: !!user.is_super_admin,
+                hasUserSubscriptionRecord: !!freePlan.rows[0],
+                subscriptionPlan: 'free',
+                subscriptionStatus: 'active',
             },
         });
     }
@@ -100,9 +121,10 @@ const login = async (req, res) => {
         if (!email || !password) {
             return res.status(400).json({ message: 'Email and password are required' });
         }
-        const result = await (0, database_1.query)(`SELECT id, email, password_hash, first_name, last_name, telegram_chat_id, currency_preference,
-              exchange_rate_dop_usd, timezone, is_super_admin, is_active
-       FROM users WHERE email = $1`, [email]);
+        const result = await (0, database_1.query)(`SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.cedula, u.telegram_chat_id, u.currency_preference,
+              u.exchange_rate_dop_usd, u.timezone, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
+       FROM users u WHERE u.email = $1`, [email]);
         if (result.rows.length === 0) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
@@ -128,11 +150,15 @@ const login = async (req, res) => {
                 email: user.email,
                 firstName: user.first_name,
                 lastName: user.last_name,
+                cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference || 'DOP',
-                exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd) || 55.00,
+                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,
+                hasUserSubscriptionRecord: user.has_user_subscription_row === true,
+                subscriptionPlan: user.subscription_plan || 'free',
+                subscriptionStatus: user.subscription_status || 'active',
             },
         });
     }
@@ -145,10 +171,11 @@ exports.login = login;
 const getMe = async (req, res) => {
     try {
         const userId = req.userId;
-        const result = await (0, database_1.query)(`SELECT id, email, first_name, last_name, telegram_chat_id,
-              currency_preference, exchange_rate_dop_usd, timezone, created_at,
-              is_super_admin, is_active, subscription_plan, subscription_status
-       FROM users WHERE id = $1`, [userId]);
+        const result = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.cedula, u.telegram_chat_id,
+              u.currency_preference, u.exchange_rate_dop_usd, u.timezone, u.created_at,
+              u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
+       FROM users u WHERE u.id = $1`, [userId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -160,14 +187,16 @@ const getMe = async (req, res) => {
                 email: user.email,
                 firstName: user.first_name,
                 lastName: user.last_name,
+                cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference,
-                exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd),
+                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,
                 isActive: user.is_active !== false,
                 subscriptionPlan: user.subscription_plan || 'free',
                 subscriptionStatus: user.subscription_status || 'active',
+                hasUserSubscriptionRecord: user.has_user_subscription_row === true,
             },
             impersonatedBy: req.impersonatedBy ?? null,
         });
@@ -181,7 +210,7 @@ exports.getMe = getMe;
 const updateMe = async (req, res) => {
     try {
         const userId = req.userId;
-        const { firstName, lastName, telegramChatId, exchangeRateDopUsd, timezone, email } = req.body;
+        const { firstName, lastName, cedula, telegramChatId, exchangeRateDopUsd, timezone, email } = req.body;
         // Handle null/empty values explicitly
         // For telegramChatId: if provided (even if empty string), update it; if undefined, keep current value
         let telegramValue = null;
@@ -216,6 +245,14 @@ const updateMe = async (req, res) => {
         if (lastName !== undefined) {
             updates.push(`last_name = $${paramIndex}`);
             values.push(lastName || null);
+            paramIndex++;
+        }
+        if (cedula !== undefined) {
+            const cedulaNorm = cedula === null || cedula === ''
+                ? null
+                : String(cedula).trim() || null;
+            updates.push(`cedula = $${paramIndex}`);
+            values.push(cedulaNorm);
             paramIndex++;
         }
         if (telegramChatId !== undefined) {
@@ -254,7 +291,7 @@ const updateMe = async (req, res) => {
         const result = await (0, database_1.query)(`UPDATE users
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex}
-       RETURNING id, email, first_name, last_name, telegram_chat_id,
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id,
                  currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`, values);
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'User not found' });
@@ -268,9 +305,10 @@ const updateMe = async (req, res) => {
                 email: user.email,
                 firstName: user.first_name,
                 lastName: user.last_name,
+                cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference,
-                exchangeRateDopUsd: parseFloat(user.exchange_rate_dop_usd),
+                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,
             },

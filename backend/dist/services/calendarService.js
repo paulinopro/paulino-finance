@@ -36,7 +36,7 @@ const getCalendarEvents = async (userId, startDate, endDate, filters) => {
             eventType: row.event_type,
             relatedId: row.related_id,
             relatedType: row.related_type,
-            eventDate: row.event_date.toISOString().split('T')[0],
+            eventDate: (0, dateUtils_1.toYmdFromPgDate)(row.event_date),
             title: row.title,
             amount: parseFloat(row.amount),
             currency: row.currency || 'DOP',
@@ -73,7 +73,7 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
             // Generate events for each month in range
             let checkDate = new Date(currentYear, currentMonth, dueDay);
             while (checkDate <= end) {
-                const eventDate = checkDate.toISOString().split('T')[0];
+                const eventDate = (0, dateUtils_1.dateToYmdLocal)(checkDate);
                 const isOverdue = checkDate < today;
                 const debtAmount = card.currency_type === 'USD'
                     ? parseFloat(card.current_debt_usd || 0)
@@ -119,7 +119,7 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
                 paymentDate.setMonth(paymentDate.getMonth() + i - 1);
                 paymentDate.setDate(paymentDay);
                 if (paymentDate >= start && paymentDate <= end) {
-                    const eventDate = paymentDate.toISOString().split('T')[0];
+                    const eventDate = (0, dateUtils_1.dateToYmdLocal)(paymentDate);
                     const isOverdue = paymentDate < today;
                     // Check if event already exists
                     const existingEvent = await (0, database_1.query)(`SELECT id FROM calendar_events 
@@ -144,20 +144,18 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
             }
         }
         // Get income events
-        const incomeResult = await (0, database_1.query)(`SELECT id, description, amount, currency, date, income_type, frequency, receipt_day
+        const incomeResult = await (0, database_1.query)(`SELECT id, description, amount, currency, date, frequency, receipt_day, recurrence_type
        FROM income
-       WHERE user_id = $1 AND (date >= $2 OR income_type = 'FIXED')`, [userId, startDate]);
+       WHERE user_id = $1 AND (date >= $2 OR recurrence_type = 'recurrent')`, [userId, startDate]);
         for (const income of incomeResult.rows) {
-            if (income.income_type === 'FIXED' && income.frequency) {
+            if (income.recurrence_type === 'recurrent' && income.frequency) {
                 // Recurring income
                 let dates = [];
-                if (income.frequency === 'MONTHLY' && income.receipt_day) {
-                    dates = (0, dateUtils_1.calculateMonthlyRecurringDates)(parseInt(income.receipt_day), start, end);
-                }
-                else if ((income.frequency === 'BIWEEKLY' || income.frequency === 'WEEKLY') && income.date) {
-                    const startDate = new Date(income.date);
-                    dates = (0, dateUtils_1.calculateRecurringDates)(startDate, income.frequency, end);
-                }
+                dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({
+                    frequency: income.frequency,
+                    receipt_day: income.receipt_day,
+                    date: income.date,
+                }, start, end);
                 for (const dateStr of dates) {
                     const eventDate = new Date(dateStr);
                     const isReceived = eventDate < today;
@@ -183,7 +181,7 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
             }
             else if (income.date) {
                 // One-time income
-                const eventDate = new Date(income.date).toISOString().split('T')[0];
+                const eventDate = (0, dateUtils_1.toYmdFromPgDate)(income.date);
                 if (eventDate >= startDate && eventDate <= endDate) {
                     const isReceived = new Date(income.date) < today;
                     const existingEvent = await (0, database_1.query)(`SELECT id FROM calendar_events 
@@ -208,9 +206,11 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
             }
         }
         // Get recurring expenses
-        const expensesResult = await (0, database_1.query)(`SELECT id, description, amount, currency, payment_day, expense_type
+        const expensesResult = await (0, database_1.query)(`SELECT id, description, amount, currency, payment_day, frequency, recurrence_type
        FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY'`, [userId]);
+       WHERE user_id = $1
+         AND recurrence_type = 'recurrent'
+         AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'`, [userId]);
         for (const expense of expensesResult.rows) {
             if (expense.payment_day) {
                 let checkDate = new Date(start);
@@ -218,7 +218,7 @@ const generateCalendarEvents = async (userId, startDate, endDate) => {
                 while (checkDate <= end) {
                     const eventDate = new Date(checkDate.getFullYear(), checkDate.getMonth(), paymentDay);
                     if (eventDate >= start && eventDate <= end) {
-                        const dateStr = eventDate.toISOString().split('T')[0];
+                        const dateStr = (0, dateUtils_1.dateToYmdLocal)(eventDate);
                         const isOverdue = eventDate < today;
                         const existingEvent = await (0, database_1.query)(`SELECT id FROM calendar_events 
                WHERE user_id = $1 AND event_type = 'RECURRING_EXPENSE' 
@@ -268,7 +268,7 @@ const updateEventStatus = async (userId, eventId, status) => {
             eventType: row.event_type,
             relatedId: row.related_id,
             relatedType: row.related_type,
-            eventDate: row.event_date.toISOString().split('T')[0],
+            eventDate: (0, dateUtils_1.toYmdFromPgDate)(row.event_date),
             title: row.title,
             amount: parseFloat(row.amount),
             currency: row.currency || 'DOP',
@@ -293,8 +293,8 @@ const getFinancialSummary = async (userId, startDate, endDate) => {
         const result = await (0, database_1.query)(`SELECT 
         COALESCE(SUM(CASE WHEN event_type IN ('INCOME') AND status = 'RECEIVED' THEN amount ELSE 0 END), 0) as total_income,
         COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PAID' THEN amount ELSE 0 END), 0) as total_expenses,
-        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PENDING' THEN amount ELSE 0 END), 0) as pending_payments,
-        COALESCE(SUM(CASE WHEN status = 'OVERDUE' THEN amount ELSE 0 END), 0) as overdue_payments
+        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PENDING' AND event_date >= CURRENT_DATE THEN amount ELSE 0 END), 0) as pending_payments,
+        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND (status = 'OVERDUE' OR (status = 'PENDING' AND event_date < CURRENT_DATE)) THEN amount ELSE 0 END), 0) as overdue_payments
        FROM calendar_events
        WHERE user_id = $1 AND event_date >= $2 AND event_date <= $3`, [userId, startDate, endDate]);
         const row = result.rows[0];

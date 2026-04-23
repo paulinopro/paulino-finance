@@ -1,0 +1,2 @@
+export declare function logAdminAction(actorId: number, action: string, targetType?: string | null, targetId?: number | null, details?: Record<string, unknown> | null): Promise<void>;
+//# sourceMappingURL=adminAuditService.d.ts.map

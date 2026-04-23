@@ -43,12 +43,31 @@ function defaultEnabledModulesFree() {
     }
     return o;
 }
+const validModuleSet = new Set(exports.SUBSCRIPTION_MODULE_KEYS);
 function modulesFromJson(json) {
-    if (!json || typeof json !== 'object')
+    if (json == null)
+        return [];
+    if (Array.isArray(json)) {
+        const out = [];
+        for (const x of json) {
+            if (typeof x === 'string' && validModuleSet.has(x))
+                out.push(x);
+        }
+        return out;
+    }
+    if (typeof json === 'string') {
+        try {
+            return modulesFromJson(JSON.parse(json));
+        }
+        catch {
+            return [];
+        }
+    }
+    if (typeof json !== 'object')
         return [];
     const out = [];
     for (const [k, v] of Object.entries(json)) {
-        if (v === true)
+        if (v === true && validModuleSet.has(k))
             out.push(k);
     }
     return out;

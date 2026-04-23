@@ -8,7 +8,7 @@ export interface NotificationTemplate {
     updatedAt: string;
 }
 export interface TemplateVariables {
-    [key: string]: string | number;
+    [key: string]: string | number | undefined;
 }
 /**
  * Plantilla por usuario y tipo

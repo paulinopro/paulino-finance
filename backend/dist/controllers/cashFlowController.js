@@ -2,19 +2,84 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCashFlow = void 0;
 const database_1 = require("../config/database");
+const exchangeRate_1 = require("../utils/exchangeRate");
+const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
 const dateUtils_1 = require("../utils/dateUtils");
+const recurrenceSql_1 = require("../constants/recurrenceSql");
+/** Evita `new Date('YYYY-MM-DD')` en UTC que desplaza el día según zona horaria. */
+function parseLocalDateFromYmd(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
+    if (!m)
+        return new Date(s);
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+}
+function expenseRowIsAnnual(row) {
+    return (0, incomeExpenseTaxonomy_1.normalizeFrequency)(row.frequency) === 'annual';
+}
+function toDop(amount, currency, exchangeRate) {
+    return currency === 'USD' ? amount * exchangeRate : amount;
+}
+function addToFrequencyBucket(map, frequencyKey, amountDop) {
+    map[frequencyKey] = (map[frequencyKey] || 0) + amountDop;
+}
+/** Canonica la clave de frecuencia para totales; recurrente sin frecuencia válida → mensual */
+function frequencyKeyForIncome(rowFrequency) {
+    return (0, incomeExpenseTaxonomy_1.normalizeFrequency)(rowFrequency) ?? 'monthly';
+}
+function frequencyKeyForExpense(row, isAnnual) {
+    if (isAnnual)
+        return 'annual';
+    return (0, incomeExpenseTaxonomy_1.normalizeFrequency)(row.frequency) ?? 'monthly';
+}
+function roundFrequencyMap(m) {
+    const out = {};
+    for (const [k, v] of Object.entries(m)) {
+        const r = Math.round(v);
+        if (r !== 0)
+            out[k] = r;
+    }
+    return out;
+}
+/** Cuántas veces el día de corte de tarjeta cae en [start, end] (cada mes como máximo 1). */
+function countCardPaymentDueOccurrencesInRange(start, end, paymentDueDay) {
+    if (paymentDueDay < 1 || paymentDueDay > 31)
+        return 0;
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    if (e < s)
+        return 0;
+    let count = 0;
+    let y = s.getFullYear();
+    let m = s.getMonth();
+    const endY = e.getFullYear();
+    const endM = e.getMonth();
+    while (y < endY || (y === endY && m <= endM)) {
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        const day = Math.min(paymentDueDay, lastDay);
+        const due = new Date(y, m, day, 0, 0, 0, 0);
+        if (due >= s && due <= e)
+            count++;
+        m += 1;
+        if (m > 11) {
+            m = 0;
+            y += 1;
+        }
+    }
+    return count;
+}
 const getCashFlow = async (req, res) => {
     try {
         const userId = req.userId;
         const { startDate, endDate, period } = req.query;
         // Get user's exchange rate
         const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = parseFloat(userResult.rows[0]?.exchange_rate_dop_usd || 55);
+        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
         let start;
         let end;
         if (startDate && endDate) {
-            start = new Date(startDate);
-            end = new Date(endDate);
+            start = parseLocalDateFromYmd(startDate);
+            end = parseLocalDateFromYmd(endDate);
+            end.setHours(23, 59, 59, 999);
         }
         else if (period === 'month') {
             const now = new Date();
@@ -32,27 +97,20 @@ const getCashFlow = async (req, res) => {
             start = new Date();
             start.setDate(start.getDate() - 30);
         }
-        // Get income
+        // Ingresos únicos (fecha en rango): legacy VARIABLE o recurrence non_recurrent
         const incomeResult = await (0, database_1.query)(`SELECT date, SUM(amount) as total, currency
        FROM income
        WHERE user_id = $1
-         AND date >= $2 AND date <= $3
-         AND income_type = 'VARIABLE'
+         AND (${recurrenceSql_1.INCOME_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY date, currency
        ORDER BY date ASC`, [userId, start, end]);
-        // Get expenses
+        // Gastos únicos en rango
         const expensesResult = await (0, database_1.query)(`SELECT date, SUM(amount) as total, currency
        FROM expenses
        WHERE user_id = $1
-         AND date >= $2 AND date <= $3
-         AND expense_type = 'NON_RECURRING'
+         AND (${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY date, currency
        ORDER BY date ASC`, [userId, start, end]);
-        // Get recurring monthly expenses
-        const recurringExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
-       FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY'
-       GROUP BY currency`, [userId]);
         // Get accounts payable paid
         const accountsPayableResult = await (0, database_1.query)(`SELECT paid_date as date, SUM(amount) as total, currency
        FROM accounts_payable
@@ -73,7 +131,7 @@ const getCashFlow = async (req, res) => {
         const cashFlowByDate = {};
         // Process variable income
         incomeResult.rows.forEach((row) => {
-            const date = row.date.toISOString().split('T')[0];
+            const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             if (!cashFlowByDate[date]) {
@@ -81,24 +139,14 @@ const getCashFlow = async (req, res) => {
             }
             cashFlowByDate[date].income += amountDop;
         });
-        // Process fixed income (recurring)
-        const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date
+        const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, nature
        FROM income
-       WHERE user_id = $1 AND income_type = 'FIXED'`, [userId]);
+       WHERE user_id = $1 AND (${recurrenceSql_1.INCOME_RECURRENT_ROWS})`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             const frequency = row.frequency;
-            let dates = [];
-            if (frequency === 'MONTHLY' && row.receipt_day) {
-                // Monthly: use receipt_day (day of month)
-                dates = (0, dateUtils_1.calculateMonthlyRecurringDates)(parseInt(row.receipt_day), start, end);
-            }
-            else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-                // Weekly/Biweekly: use date as start date and calculate recurring dates
-                const startDate = new Date(row.date);
-                dates = (0, dateUtils_1.calculateRecurringDates)(startDate, frequency, end);
-            }
+            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({ frequency, receipt_day: row.receipt_day, date: row.date }, start, end);
             // Add income to each calculated date
             dates.forEach((dateStr) => {
                 if (!cashFlowByDate[dateStr]) {
@@ -109,7 +157,7 @@ const getCashFlow = async (req, res) => {
         });
         // Process non-recurring expenses
         expensesResult.rows.forEach((row) => {
-            const date = row.date.toISOString().split('T')[0];
+            const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             if (!cashFlowByDate[date]) {
@@ -117,16 +165,23 @@ const getCashFlow = async (req, res) => {
             }
             cashFlowByDate[date].expenses += amountDop;
         });
-        // Process recurring expenses (only on payment day)
-        const recurringExpensesWithDayResult = await (0, database_1.query)(`SELECT amount, currency, payment_day
+        const recurringExpensesExpandedResult = await (0, database_1.query)(`SELECT amount, currency, frequency, payment_day, payment_month, date
        FROM expenses
-       WHERE user_id = $1 AND expense_type = 'RECURRING_MONTHLY' AND payment_day IS NOT NULL`, [userId]);
-        recurringExpensesWithDayResult.rows.forEach((row) => {
+       WHERE user_id = $1
+         AND (
+           (${recurrenceSql_1.EXPENSE_RECURRING_MONTHLY})
+           OR (${recurrenceSql_1.EXPENSE_RECURRING_ANNUAL})
+           OR (${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ})
+         )`, [userId]);
+        recurringExpensesExpandedResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-            const paymentDay = parseInt(row.payment_day);
-            // Calculate dates for recurring monthly expenses
-            const dates = (0, dateUtils_1.calculateMonthlyRecurringDates)(paymentDay, start, end);
+            const dates = (0, dateUtils_1.getExpenseOccurrenceDatesInPeriod)({
+                frequency: row.frequency,
+                payment_day: row.payment_day,
+                payment_month: row.payment_month,
+                date: row.date,
+            }, start, end);
             dates.forEach((dateStr) => {
                 if (!cashFlowByDate[dateStr]) {
                     cashFlowByDate[dateStr] = { income: 0, expenses: 0 };
@@ -136,7 +191,7 @@ const getCashFlow = async (req, res) => {
         });
         // Process accounts payable
         accountsPayableResult.rows.forEach((row) => {
-            const date = row.date.toISOString().split('T')[0];
+            const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             if (!cashFlowByDate[date]) {
@@ -146,7 +201,7 @@ const getCashFlow = async (req, res) => {
         });
         // Process accounts receivable
         accountsReceivableResult.rows.forEach((row) => {
-            const date = row.date.toISOString().split('T')[0];
+            const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             if (!cashFlowByDate[date]) {
@@ -161,7 +216,7 @@ const getCashFlow = async (req, res) => {
         const allDates = [];
         const currentDate = new Date(start);
         while (currentDate <= end) {
-            allDates.push(currentDate.toISOString().split('T')[0]);
+            allDates.push((0, dateUtils_1.dateToYmdLocal)(currentDate));
             currentDate.setDate(currentDate.getDate() + 1);
         }
         for (const dateStr of allDates) {
@@ -176,79 +231,215 @@ const getCashFlow = async (req, res) => {
                 balance: Math.round(runningBalance),
             });
         }
-        // Calculate summary
-        const totalIncome = cashFlowData.reduce((sum, day) => sum + day.income, 0);
-        const totalExpenses = cashFlowData.reduce((sum, day) => sum + day.expenses, 0);
-        const netCashFlow = totalIncome - totalExpenses;
-        const finalBalance = cashFlowData[cashFlowData.length - 1]?.balance || 0;
-        // Calculate income breakdown for debugging
-        let variableIncomeTotal = 0;
-        incomeResult.rows.forEach((row) => {
-            const amount = parseFloat(row.total);
-            variableIncomeTotal += row.currency === 'USD' ? amount * exchangeRate : amount;
+        const finalBalance = cashFlowData.length > 0 ? cashFlowData[cashFlowData.length - 1].balance : 0;
+        const incomePunctualByNature = await (0, database_1.query)(`SELECT nature AS nat, currency, SUM(amount) AS total
+       FROM income
+       WHERE user_id = $1 AND (${recurrenceSql_1.INCOME_DATE_IN_RANGE_PUNCTUAL})
+       GROUP BY nature, currency`, [userId, start, end]);
+        let punctualIncomeFixed = 0;
+        let punctualIncomeVariable = 0;
+        incomePunctualByNature.rows.forEach((r) => {
+            const v = parseFloat(r.total);
+            const dop = toDop(v, r.currency, exchangeRate);
+            if (r.nat === 'fixed')
+                punctualIncomeFixed += dop;
+            else
+                punctualIncomeVariable += dop;
         });
-        let fixedIncomeTotal = 0;
+        const punctualIncomeTotal = punctualIncomeFixed + punctualIncomeVariable;
+        const recurrentIncomeByFrequency = {};
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = toDop(amount, row.currency, exchangeRate);
             const frequency = row.frequency;
-            let dates = [];
-            if (frequency === 'MONTHLY' && row.receipt_day) {
-                dates = (0, dateUtils_1.calculateMonthlyRecurringDates)(parseInt(row.receipt_day), start, end);
-            }
-            else if ((frequency === 'BIWEEKLY' || frequency === 'WEEKLY') && row.date) {
-                const startDate = new Date(row.date);
-                dates = (0, dateUtils_1.calculateRecurringDates)(startDate, frequency, end);
-            }
-            fixedIncomeTotal += amountDop * dates.length;
+            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({ frequency, receipt_day: row.receipt_day, date: row.date }, start, end);
+            const add = amountDop * dates.length;
+            const fk = frequencyKeyForIncome(row.frequency);
+            addToFrequencyBucket(recurrentIncomeByFrequency, fk, add);
         });
+        const recurrentIncomeByFrequencyRounded = roundFrequencyMap(recurrentIncomeByFrequency);
+        const recurrentIncomeTotal = Object.values(recurrentIncomeByFrequencyRounded).reduce((a, b) => a + b, 0);
         let accountsReceivableTotal = 0;
         accountsReceivableResult.rows.forEach((row) => {
             const amount = parseFloat(row.total);
-            accountsReceivableTotal += row.currency === 'USD' ? amount * exchangeRate : amount;
+            accountsReceivableTotal += toDop(amount, row.currency, exchangeRate);
         });
-        // Calculate expenses breakdown
-        let nonRecurringExpensesTotal = 0;
-        expensesResult.rows.forEach((row) => {
-            const amount = parseFloat(row.total);
-            nonRecurringExpensesTotal += row.currency === 'USD' ? amount * exchangeRate : amount;
+        const expensePunctualByNature = await (0, database_1.query)(`SELECT e.nature AS nat, e.currency, SUM(e.amount) AS total
+       FROM expenses e
+       WHERE user_id = $1 AND (${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL})
+       GROUP BY e.nature, e.currency`, [userId, start, end]);
+        let punctualExpenseFixed = 0;
+        let punctualExpenseVariable = 0;
+        expensePunctualByNature.rows.forEach((r) => {
+            const v = parseFloat(r.total);
+            const dop = toDop(v, r.currency, exchangeRate);
+            if (r.nat === 'fixed')
+                punctualExpenseFixed += dop;
+            else
+                punctualExpenseVariable += dop;
         });
-        let recurringExpensesTotal = 0;
-        recurringExpensesWithDayResult.rows.forEach((row) => {
+        const punctualExpenseTotal = punctualExpenseFixed + punctualExpenseVariable;
+        const recurrentExpenseByFrequency = {};
+        recurringExpensesExpandedResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-            const paymentDay = parseInt(row.payment_day);
-            const dates = (0, dateUtils_1.calculateMonthlyRecurringDates)(paymentDay, start, end);
-            recurringExpensesTotal += amountDop * dates.length;
+            const amountDop = toDop(amount, row.currency, exchangeRate);
+            const dates = (0, dateUtils_1.getExpenseOccurrenceDatesInPeriod)({
+                frequency: row.frequency,
+                payment_day: row.payment_day,
+                payment_month: row.payment_month,
+                date: row.date,
+            }, start, end);
+            const mult = amountDop * dates.length;
+            const isAnnual = expenseRowIsAnnual(row);
+            const fk = frequencyKeyForExpense(row, isAnnual);
+            addToFrequencyBucket(recurrentExpenseByFrequency, fk, mult);
         });
+        const recurrentExpenseByFrequencyRounded = roundFrequencyMap(recurrentExpenseByFrequency);
+        const annualExpensesTotal = recurrentExpenseByFrequencyRounded['annual'] || 0;
+        const recurringExpensesNonAnnual = Object.entries(recurrentExpenseByFrequencyRounded)
+            .filter(([k]) => k !== 'annual')
+            .reduce((s, [, v]) => s + v, 0);
+        const recurringExpensesMonthly = recurrentExpenseByFrequencyRounded['monthly'] || 0;
+        const recurringExpensesOtherFreq = recurringExpensesNonAnnual - recurringExpensesMonthly;
+        const recurrentExpenseTotalDop = Object.values(recurrentExpenseByFrequencyRounded).reduce((a, b) => a + b, 0);
         let accountsPayableTotal = 0;
         accountsPayableResult.rows.forEach((row) => {
             const amount = parseFloat(row.total);
-            accountsPayableTotal += row.currency === 'USD' ? amount * exchangeRate : amount;
+            accountsPayableTotal += toDop(amount, row.currency, exchangeRate);
         });
+        const incomeSum = punctualIncomeTotal + recurrentIncomeTotal + accountsReceivableTotal;
+        const expenseSum = punctualExpenseTotal +
+            recurringExpensesNonAnnual +
+            accountsPayableTotal +
+            annualExpensesTotal;
+        const totalIncome = Math.round(incomeSum);
+        const totalExpenses = Math.round(expenseSum);
+        const netCashFlow = Math.round(incomeSum - expenseSum);
+        const startYmd = (0, dateUtils_1.dateToYmdLocal)(start);
+        const endYmd = (0, dateUtils_1.dateToYmdLocal)(end);
+        /**
+         * Compromisos alineados al mismo período [start, end] que Ingresos/Gastos:
+         * - CxP: vencimientos (due_date) en el rango, saldo restante
+         * - Tarjetas: pago mínimo × nº de fechas de pago (día del mes) que caen en el rango
+         * - Préstamos: cuotas en amortization_schedule con due_date en rango, o next_payment en rango sin tabla
+         */
+        const apRemainingResult = await (0, database_1.query)(`SELECT COALESCE(SUM(
+         CASE
+           WHEN ap.currency = 'USD' THEN GREATEST(ap.amount::numeric - COALESCE(tp.total_paid, 0), 0) * $2
+           ELSE GREATEST(ap.amount::numeric - COALESCE(tp.total_paid, 0), 0)
+         END
+       ), 0) AS total
+       FROM accounts_payable ap
+       LEFT JOIN (
+         SELECT account_payable_id, SUM(amount) AS total_paid
+         FROM accounts_payable_payments
+         GROUP BY account_payable_id
+       ) tp ON tp.account_payable_id = ap.id
+       WHERE ap.user_id = $1
+         AND ap.status <> 'PAID'
+         AND ap.due_date::date >= $3::date
+         AND ap.due_date::date <= $4::date`, [userId, exchangeRate, startYmd, endYmd]);
+        const pendingAccountsPayable = Math.round(parseFloat(apRemainingResult.rows[0]?.total || '0'));
+        const cardRowsResult = await (0, database_1.query)(`SELECT payment_due_day, minimum_payment_dop, minimum_payment_usd, currency_type
+       FROM credit_cards
+       WHERE user_id = $1`, [userId]);
+        let pendingCreditCardMinimums = 0;
+        for (const row of cardRowsResult.rows) {
+            const n = countCardPaymentDueOccurrencesInRange(start, end, parseInt(String(row.payment_due_day), 10) || 0);
+            if (n === 0)
+                continue;
+            const minDop = parseFloat(String(row.minimum_payment_dop ?? 0)) || 0;
+            const minUsd = parseFloat(String(row.minimum_payment_usd ?? 0)) || 0;
+            const ct = String(row.currency_type ?? 'DOP');
+            let per = 0;
+            if (ct === 'DOP') {
+                per = minDop;
+            }
+            else if (ct === 'USD') {
+                per = minUsd * exchangeRate;
+            }
+            else {
+                per = minDop + minUsd * exchangeRate;
+            }
+            pendingCreditCardMinimums += per * n;
+        }
+        pendingCreditCardMinimums = Math.round(pendingCreditCardMinimums);
+        const loanAmortResult = await (0, database_1.query)(`SELECT COALESCE(SUM(
+         CASE
+           WHEN l.currency = 'USD' THEN a.total_due::numeric * $1
+           ELSE a.total_due::numeric
+         END
+       ), 0) AS total
+       FROM amortization_schedule a
+       INNER JOIN loans l ON l.id = a.loan_id
+       WHERE l.user_id = $2
+         AND a.due_date::date >= $3::date
+         AND a.due_date::date <= $4::date
+         AND a.status IN ('PENDING', 'OVERDUE')`, [exchangeRate, userId, startYmd, endYmd]);
+        let pendingLoanInstallments = Math.round(parseFloat(String(loanAmortResult.rows[0]?.total ?? 0)) || 0);
+        const loanNextFallback = await (0, database_1.query)(`SELECT l.installment_amount, l.fixed_charge, l.currency
+       FROM loans l
+       WHERE l.user_id = $1
+         AND l.status = 'ACTIVE'
+         AND l.next_payment_date IS NOT NULL
+         AND l.next_payment_date::date >= $2::date
+         AND l.next_payment_date::date <= $3::date
+         AND NOT EXISTS (SELECT 1 FROM amortization_schedule a WHERE a.loan_id = l.id)`, [userId, startYmd, endYmd]);
+        for (const row of loanNextFallback.rows) {
+            const inst = parseFloat(String(row.installment_amount)) + parseFloat(String(row.fixed_charge || '0'));
+            pendingLoanInstallments += Math.round(toDop(inst, String(row.currency || 'DOP'), exchangeRate));
+        }
+        pendingLoanInstallments = Math.round(pendingLoanInstallments);
+        const pendingCommitments = pendingAccountsPayable + pendingCreditCardMinimums + pendingLoanInstallments;
+        const availableBalance = Math.round(totalIncome - totalExpenses - pendingCommitments);
         res.json({
             success: true,
             data: {
-                startDate: start.toISOString().split('T')[0],
-                endDate: end.toISOString().split('T')[0],
+                startDate: (0, dateUtils_1.dateToYmdLocal)(start),
+                endDate: (0, dateUtils_1.dateToYmdLocal)(end),
                 dailyData: cashFlowData,
                 summary: {
                     totalIncome,
                     totalExpenses,
                     netCashFlow,
                     finalBalance,
+                    pendingCommitments,
+                    pendingCommitmentsBreakdown: {
+                        accountsPayable: pendingAccountsPayable,
+                        creditCardMinimums: pendingCreditCardMinimums,
+                        loanInstallments: pendingLoanInstallments,
+                    },
+                    availableBalance,
                 },
                 incomeBreakdown: {
-                    variableIncome: Math.round(variableIncomeTotal),
-                    fixedIncome: Math.round(fixedIncomeTotal),
+                    punctual: {
+                        fixed: Math.round(punctualIncomeFixed),
+                        variable: Math.round(punctualIncomeVariable),
+                        total: Math.round(punctualIncomeTotal),
+                    },
+                    recurrent: {
+                        byFrequency: recurrentIncomeByFrequencyRounded,
+                        total: Math.round(recurrentIncomeTotal),
+                    },
                     accountsReceivable: Math.round(accountsReceivableTotal),
-                    total: Math.round(variableIncomeTotal + fixedIncomeTotal + accountsReceivableTotal),
+                    total: Math.round(incomeSum),
                 },
                 expensesBreakdown: {
-                    nonRecurringExpenses: Math.round(nonRecurringExpensesTotal),
-                    recurringExpenses: Math.round(recurringExpensesTotal),
+                    punctual: {
+                        fixed: Math.round(punctualExpenseFixed),
+                        variable: Math.round(punctualExpenseVariable),
+                        total: Math.round(punctualExpenseTotal),
+                    },
+                    recurring: {
+                        byFrequency: recurrentExpenseByFrequencyRounded,
+                        total: Math.round(recurrentExpenseTotalDop),
+                        monthly: Math.round(recurringExpensesMonthly),
+                        otherFrequencies: Math.round(recurringExpensesOtherFreq),
+                        nonAnnual: Math.round(recurringExpensesNonAnnual),
+                    },
+                    annualExpenses: Math.round(annualExpensesTotal),
                     accountsPayable: Math.round(accountsPayableTotal),
-                    total: Math.round(nonRecurringExpensesTotal + recurringExpensesTotal + accountsPayableTotal),
+                    total: Math.round(expenseSum),
                 },
             },
         });

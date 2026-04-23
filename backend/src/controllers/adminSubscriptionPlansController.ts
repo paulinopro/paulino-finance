@@ -1,12 +1,14 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/database';
+import { logAdminAction } from '../services/adminAuditService';
+import { syncPaypalSubscriptionPlanById } from '../services/paypalPlanProvisioningService';
 
 export const listSubscriptionPlans = async (_req: AuthRequest, res: Response) => {
   try {
     const r = await query(
       `SELECT id, name, slug, description, price_monthly, price_yearly, currency,
-              paypal_plan_id_monthly, paypal_plan_id_yearly, enabled_modules,
+              paypal_product_id, paypal_plan_id_monthly, paypal_plan_id_yearly, enabled_modules,
               is_active, sort_order, created_at, updated_at
        FROM subscription_plans
        ORDER BY sort_order ASC, id ASC`
@@ -20,6 +22,7 @@ export const listSubscriptionPlans = async (_req: AuthRequest, res: Response) =>
         priceMonthly: parseFloat(p.price_monthly),
         priceYearly: parseFloat(p.price_yearly),
         currency: p.currency,
+        paypalProductId: p.paypal_product_id ?? null,
         paypalPlanIdMonthly: p.paypal_plan_id_monthly,
         paypalPlanIdYearly: p.paypal_plan_id_yearly,
         enabledModules: p.enabled_modules,
@@ -44,6 +47,7 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       priceMonthly,
       priceYearly,
       currency,
+      paypalProductId,
       paypalPlanIdMonthly,
       paypalPlanIdYearly,
       enabledModules,
@@ -58,8 +62,8 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
     const result = await query(
       `INSERT INTO subscription_plans (
          name, slug, description, price_monthly, price_yearly, currency,
-         paypal_plan_id_monthly, paypal_plan_id_yearly, enabled_modules, is_active, sort_order
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+         paypal_product_id, paypal_plan_id_monthly, paypal_plan_id_yearly, enabled_modules, is_active, sort_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
        RETURNING id`,
       [
         String(name).slice(0, 255),
@@ -68,6 +72,7 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
         priceMonthly ?? 0,
         priceYearly ?? 0,
         currency || 'USD',
+        paypalProductId || null,
         paypalPlanIdMonthly || null,
         paypalPlanIdYearly || null,
         JSON.stringify(enabledModules),
@@ -76,7 +81,9 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       ]
     );
 
-    res.status(201).json({ id: result.rows[0].id });
+    const newId = result.rows[0].id as number;
+    void logAdminAction(req.userId!, 'plan.create', 'subscription_plan', newId, { name, slug });
+    res.status(201).json({ id: newId });
   } catch (e: any) {
     if (e.code === '23505') {
       return res.status(400).json({ message: 'Ya existe un plan con ese slug' });
@@ -100,6 +107,7 @@ export const updateSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       priceMonthly,
       priceYearly,
       currency,
+      paypalProductId,
       paypalPlanIdMonthly,
       paypalPlanIdYearly,
       enabledModules,
@@ -167,10 +175,40 @@ export const updateSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       values
     );
 
+    void logAdminAction(req.userId!, 'plan.update', 'subscription_plan', id, { body: req.body });
     res.json({ success: true });
   } catch (e: any) {
     console.error('updateSubscriptionPlan', e);
     res.status(500).json({ message: 'Error al actualizar plan' });
+  }
+};
+
+/** Crea en PayPal el producto (catálogo) y los planes de facturación mensual/anual; guarda PROD- y P- en BD. */
+export const syncSubscriptionPlanPaypal = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ message: 'ID inválido' });
+    }
+
+    const result = await syncPaypalSubscriptionPlanById(id);
+    if (!result.ok) {
+      return res.status(400).json({ message: result.message });
+    }
+
+    void logAdminAction(req.userId!, 'plan.sync_paypal', 'subscription_plan', id, {
+      created: result.created,
+    });
+    res.json({
+      success: true,
+      paypalProductId: result.paypalProductId,
+      paypalPlanIdMonthly: result.paypalPlanIdMonthly,
+      paypalPlanIdYearly: result.paypalPlanIdYearly,
+      created: result.created,
+    });
+  } catch (e: any) {
+    console.error('syncSubscriptionPlanPaypal', e);
+    res.status(500).json({ message: e.message || 'Error al sincronizar con PayPal' });
   }
 };
 
@@ -192,6 +230,7 @@ export const deleteSubscriptionPlan = async (req: AuthRequest, res: Response) =>
     }
 
     await query(`DELETE FROM subscription_plans WHERE id = $1`, [id]);
+    void logAdminAction(req.userId!, 'plan.delete', 'subscription_plan', id, {});
     res.json({ success: true });
   } catch (e: any) {
     console.error('deleteSubscriptionPlan', e);

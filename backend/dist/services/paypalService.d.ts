@@ -11,6 +11,8 @@ type CreateApprovalResult = {
     ok: false;
     message: string;
 };
+/** OAuth2 client_credentials; reutilizable por otros servicios PayPal (catálogo, planes, etc.). */
+export declare function getAccessToken(): Promise<string | null>;
 export declare function createPaypalSubscriptionApproval(params: {
     userId: number;
     paypalPlanId: string | null;

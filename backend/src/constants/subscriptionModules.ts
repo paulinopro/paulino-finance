@@ -42,11 +42,28 @@ export function defaultEnabledModulesFree(): Record<string, boolean> {
   return o;
 }
 
+const validModuleSet = new Set<string>(SUBSCRIPTION_MODULE_KEYS as unknown as string[]);
+
 export function modulesFromJson(json: unknown): string[] {
-  if (!json || typeof json !== 'object') return [];
+  if (json == null) return [];
+  if (Array.isArray(json)) {
+    const out: string[] = [];
+    for (const x of json) {
+      if (typeof x === 'string' && validModuleSet.has(x)) out.push(x);
+    }
+    return out;
+  }
+  if (typeof json === 'string') {
+    try {
+      return modulesFromJson(JSON.parse(json));
+    } catch {
+      return [];
+    }
+  }
+  if (typeof json !== 'object') return [];
   const out: string[] = [];
   for (const [k, v] of Object.entries(json as Record<string, boolean>)) {
-    if (v === true) out.push(k);
+    if (v === true && validModuleSet.has(k)) out.push(k);
   }
   return out;
 }

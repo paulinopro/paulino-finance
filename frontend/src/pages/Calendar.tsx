@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
+import esLocale from '@fullcalendar/core/locales/es';
+import type { LocaleInput } from '@fullcalendar/core';
 import {
   Calendar as CalendarIcon,
   Filter,
@@ -19,10 +21,93 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
+import { dateToYmdLocal, formatCalendarDateLongEs } from '../utils/dateUtils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { CalendarEvent, FinancialSummary } from '../types';
+
+/** Intl en es-DO devuelve días en minúscula; capitalizamos solo la primera letra del texto. */
+function capitalizeEs(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+type VerboseDateArg = { date: { year: number; month: number; day: number } };
+
+function lastDayOfMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+/**
+ * Título del toolbar: primera letra en mayúscula (es-DO).
+ * FullCalendar usa `end` exclusivo en el rango visible; lo convertimos al último día inclusivo.
+ */
+function formatCalendarToolbarTitle(arg: {
+  start: { year: number; month: number; day: number };
+  end?: { year: number; month: number; day: number };
+}): string {
+  const s = new Date(arg.start.year, arg.start.month, arg.start.day);
+  let endInclusive: Date;
+  if (!arg.end) {
+    endInclusive = s;
+  } else {
+    const endExclusive = new Date(arg.end.year, arg.end.month, arg.end.day);
+    endInclusive = new Date(endExclusive);
+    endInclusive.setDate(endInclusive.getDate() - 1);
+  }
+
+  const sameDay =
+    s.getFullYear() === endInclusive.getFullYear() &&
+    s.getMonth() === endInclusive.getMonth() &&
+    s.getDate() === endInclusive.getDate();
+
+  if (sameDay) {
+    return capitalizeEs(
+      s.toLocaleDateString('es-DO', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    );
+  }
+
+  const sameMonth =
+    s.getFullYear() === endInclusive.getFullYear() && s.getMonth() === endInclusive.getMonth();
+
+  const spansFullMonth =
+    sameMonth &&
+    s.getDate() === 1 &&
+    endInclusive.getDate() === lastDayOfMonth(endInclusive.getFullYear(), endInclusive.getMonth());
+
+  if (spansFullMonth) {
+    return capitalizeEs(s.toLocaleDateString('es-DO', { month: 'long', year: 'numeric' }));
+  }
+
+  if (sameMonth) {
+    return capitalizeEs(
+      `${s.getDate()} – ${endInclusive.getDate()} de ${s.toLocaleDateString('es-DO', { month: 'long' })} de ${s.getFullYear()}`
+    );
+  }
+
+  const fmt = new Intl.DateTimeFormat('es-DO', { day: 'numeric', month: 'long', year: 'numeric' });
+  return capitalizeEs(`${fmt.format(s)} – ${fmt.format(endInclusive)}`);
+}
+
+function formatVerboseToEsDate(verboseArg: VerboseDateArg, options: Intl.DateTimeFormatOptions): string {
+  const { year, month, day } = verboseArg.date;
+  const d = new Date(year, month, day);
+  return capitalizeEs(d.toLocaleDateString('es-DO', options));
+}
+
+const CALENDAR_STATUS_COLORS: Record<string, string> = {
+  PENDING: '#f59e0b',
+  PAID: '#10b981',
+  RECEIVED: '#10b981',
+  OVERDUE: '#ef4444',
+  CANCELLED: '#6b7280',
+};
 
 const Calendar: React.FC = () => {
   const [events, setEvents] = useState<any[]>([]);
@@ -37,6 +122,27 @@ const Calendar: React.FC = () => {
   const calendarRef = useRef<FullCalendar>(null);
   const eventDetailModalRef = useRef<HTMLDivElement>(null);
   const isMobileCalendar = useMediaQuery('(max-width: 767px)');
+
+  /**
+   * Las vistas list usan `buttonTextKey: 'list'`. El locale `es` define `list: 'Agenda'`, que gana
+   * sobre `listMonth`/`listWeek`/`listDay` y dejaba los tres botones como "Agenda". Omitimos `list`
+   * y fijamos etiquetas por nombre de vista; en escritorio el cuarto botón (listWeek) sigue siendo "Agenda".
+   */
+  const calendarLocale = useMemo<LocaleInput>(() => {
+    const esButtons = { ...(esLocale.buttonText ?? {}) } as Record<string, string>;
+    delete esButtons.list;
+    return {
+      ...esLocale,
+      buttonText: {
+        ...esButtons,
+        prev: 'Anterior',
+        next: 'Siguiente',
+        ...(isMobileCalendar
+          ? { listMonth: 'Mes', listWeek: 'Semana', listDay: 'Día' }
+          : { listWeek: 'Agenda' }),
+      },
+    };
+  }, [isMobileCalendar]);
 
   const eventTypeLabels: { [key: string]: string } = {
     CARD_PAYMENT: 'Pago de Tarjeta',
@@ -54,37 +160,15 @@ const Calendar: React.FC = () => {
     CANCELLED: 'Cancelado',
   };
 
-  const statusColors: { [key: string]: string } = {
-    PENDING: '#f59e0b', // Amarillo
-    PAID: '#10b981', // Verde
-    RECEIVED: '#10b981', // Verde
-    OVERDUE: '#ef4444', // Rojo
-    CANCELLED: '#6b7280', // Gris
-  };
-
-  useEffect(() => {
-    fetchEvents();
-  }, [filters]);
-
-  useEffect(() => {
-    const api = calendarRef.current?.getApi();
-    if (!api) return;
-    const target = isMobileCalendar ? 'listWeek' : 'dayGridMonth';
-    if (api.view.type !== target) {
-      api.changeView(target);
-    }
-  }, [isMobileCalendar]);
-
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       const calendarApi = calendarRef.current?.getApi();
       if (!calendarApi) return;
 
       const view = calendarApi.view;
-      const start = view.activeStart.toISOString().split('T')[0];
-      const end = view.activeEnd.toISOString().split('T')[0];
+      const start = dateToYmdLocal(view.activeStart);
+      const end = dateToYmdLocal(view.activeEnd);
 
-      // Fetch events
       const params = new URLSearchParams({
         start,
         end,
@@ -102,8 +186,8 @@ const Calendar: React.FC = () => {
         id: event.id.toString(),
         title: event.title,
         start: event.eventDate,
-        backgroundColor: statusColors[event.status] || event.color,
-        borderColor: statusColors[event.status] || event.color,
+        backgroundColor: CALENDAR_STATUS_COLORS[event.status] || event.color,
+        borderColor: CALENDAR_STATUS_COLORS[event.status] || event.color,
         textColor: '#ffffff',
         extendedProps: {
           ...event,
@@ -111,14 +195,26 @@ const Calendar: React.FC = () => {
       }));
       setEvents(formattedEvents);
 
-      // Fetch summary
       const summaryResponse = await api.get(`/calendar/summary?start=${start}&end=${end}`);
       setSummary(summaryResponse.data.summary);
     } catch (error: any) {
       console.error('Error fetching calendar events:', error);
       toast.error('Error al cargar eventos del calendario');
     }
-  };
+  }, [filters]);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  useEffect(() => {
+    const api = calendarRef.current?.getApi();
+    if (!api) return;
+    const target = isMobileCalendar ? 'listWeek' : 'dayGridMonth';
+    if (api.view.type !== target) {
+      api.changeView(target);
+    }
+  }, [isMobileCalendar]);
 
   const handleDateClick = (arg: any) => {
     const dayEvents = events.filter(
@@ -160,8 +256,8 @@ const Calendar: React.FC = () => {
       if (!calendarApi) return;
 
       const view = calendarApi.view;
-      const start = view.activeStart.toISOString().split('T')[0];
-      const end = view.activeEnd.toISOString().split('T')[0];
+      const start = dateToYmdLocal(view.activeStart);
+      const end = dateToYmdLocal(view.activeEnd);
 
       await api.post(`/calendar/refresh?start=${start}&end=${end}`);
       toast.success('Eventos actualizados');
@@ -201,7 +297,7 @@ const Calendar: React.FC = () => {
     <div className="w-full max-w-7xl mx-auto py-2 sm:py-4">
       <div className="mb-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-          <div className="flex items-center gap-2 sm:space-x-3 min-w-0">
+          <div className="flex items-center justify-center gap-2 sm:justify-start sm:space-x-3 min-w-0 text-center sm:text-left">
             <CalendarIcon className="w-7 h-7 sm:w-8 sm:h-8 text-primary-400 shrink-0" />
             <h1 className="page-title truncate">Calendario Financiero</h1>
           </div>
@@ -368,13 +464,13 @@ const Calendar: React.FC = () => {
           <FullCalendar
             ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-            initialView={isMobileCalendar ? 'listWeek' : 'dayGridMonth'}
+            initialView={isMobileCalendar ? 'listMonth' : 'dayGridMonth'}
             headerToolbar={
               isMobileCalendar
                 ? {
                     left: 'prev,next',
                     center: 'title',
-                    right: 'today,dayGridMonth,listWeek',
+                    right: 'today,listMonth,listWeek,listDay',
                   }
                 : {
                     left: 'prev,next today',
@@ -387,7 +483,50 @@ const Calendar: React.FC = () => {
             eventClick={handleEventClick}
             viewDidMount={handleViewChange}
             datesSet={fetchEvents}
-            locale="es"
+            locale={calendarLocale}
+            firstDay={1}
+            titleFormat={(arg) => formatCalendarToolbarTitle(arg)}
+            dayHeaderFormat={(arg) => formatVerboseToEsDate(arg as VerboseDateArg, { weekday: 'short' })}
+            slotLabelFormat={{
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }}
+            eventTimeFormat={{
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }}
+            views={{
+              listWeek: {
+                listDayFormat: (arg) => formatVerboseToEsDate(arg as VerboseDateArg, { weekday: 'long' }),
+                listDaySideFormat: (arg) =>
+                  formatVerboseToEsDate(arg as VerboseDateArg, {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }),
+              },
+              listMonth: {
+                listDayFormat: (arg) => formatVerboseToEsDate(arg as VerboseDateArg, { weekday: 'long' }),
+                listDaySideFormat: (arg) =>
+                  formatVerboseToEsDate(arg as VerboseDateArg, {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }),
+              },
+              listDay: {
+                listDayFormat: (arg) =>
+                  formatVerboseToEsDate(arg as VerboseDateArg, {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  }),
+                listDaySideFormat: false,
+              },
+            }}
             height="auto"
             eventDisplay="block"
             dayMaxEvents={3}
@@ -434,14 +573,7 @@ const Calendar: React.FC = () => {
               </div>
               <div>
                 <label className="text-dark-400 text-sm">Fecha</label>
-                <p className="text-white">
-                  {new Date(selectedEvent.eventDate).toLocaleDateString('es-DO', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
-                </p>
+                <p className="text-white">{formatCalendarDateLongEs(selectedEvent.eventDate)}</p>
               </div>
               <div>
                 <label className="text-dark-400 text-sm">Monto</label>

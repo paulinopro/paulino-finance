@@ -15,7 +15,41 @@ export interface NotificationTemplate {
 }
 
 export interface TemplateVariables {
-  [key: string]: string | number;
+  [key: string]: string | number | undefined;
+}
+
+function isNonEmpty(value: string | number | undefined | null): boolean {
+  if (value === undefined || value === null) return false;
+  const s = String(value).trim();
+  if (s === '') return false;
+  const normalized = s.replace(/\s/g, '').replace(/,/g, '.');
+  if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+    const n = parseFloat(normalized);
+    if (n === 0) return false;
+  }
+  return true;
+}
+
+/**
+ * Bloques condicionales: contenido solo si la variable tiene valor, no está vacía y no es numéricamente 0.
+ * Sintaxis: {{#if nombreVariable}}...texto con {otrasVar}...{{/if}}
+ * No anidar {{#if}} dentro de otro en la misma línea (sí se puede en líneas distintas; se procesan de dentro hacia afuera).
+ */
+function renderConditionals(template: string, variables: TemplateVariables): string {
+  const innermostRe = /\{\{#if\s+(\w+)\}\}((?:(?!\{\{#if)[\s\S])*?)\{\{\/if\}\}/g;
+  let result = template;
+  let prev = '';
+  while (result !== prev) {
+    prev = result;
+    innermostRe.lastIndex = 0;
+    const m = innermostRe.exec(result);
+    if (!m) break;
+    const [full, key, inner] = m;
+    const show = isNonEmpty(variables[key]);
+    const replacement = show ? inner : '';
+    result = result.replace(full, replacement);
+  }
+  return result;
 }
 
 async function ensureTemplates(userId: number): Promise<void> {
@@ -117,12 +151,12 @@ export const updateTemplate = async (
 };
 
 export const renderTemplate = (template: string, variables: TemplateVariables): string => {
-  let rendered = template;
+  let rendered = renderConditionals(template, variables);
 
   Object.keys(variables).forEach((key) => {
     const value = variables[key];
     const regex = new RegExp(`\\{${key}\\}`, 'g');
-    rendered = rendered.replace(regex, String(value));
+    rendered = rendered.replace(regex, value === undefined || value === null ? '' : String(value));
   });
 
   return rendered;

@@ -23,14 +23,40 @@ const NotificationTemplates: React.FC = () => {
   const templateTypes = {
     CARD_PAYMENT: {
       name: 'Pagos de Tarjetas',
-      variables: ['cardName', 'bankName', 'dueDay', 'debtText', 'days'],
+      variables: [
+        'bankName',
+        'cardName',
+        'currencyType',
+        'currencyTypeLabel',
+        'creditLimitDop',
+        'creditLimitUsd',
+        'currentDebtDop',
+        'currentDebtUsd',
+        'minimumPaymentDop',
+        'minimumPaymentUsd',
+        'cutOffDay',
+        'dueDay',
+        'debtText',
+        'days',
+      ],
       variableDescriptions: {
+        bankName: 'Banco',
         cardName: 'Nombre de la tarjeta',
-        bankName: 'Nombre del banco',
-        dueDay: 'Día de vencimiento',
-        debtText: 'Deuda actual',
-        days: 'Días restantes',
+        currencyType: 'Tipo de moneda en sistema (DOP, USD, DUAL)',
+        currencyTypeLabel: 'Etiqueta legible del tipo de moneda',
+        creditLimitDop: 'Límite de crédito en DOP (vacío si la tarjeta es solo USD)',
+        creditLimitUsd: 'Límite de crédito en USD (vacío si la tarjeta es solo DOP)',
+        currentDebtDop: 'Deuda actual en DOP',
+        currentDebtUsd: 'Deuda actual en USD',
+        minimumPaymentDop: 'Pago mínimo en DOP',
+        minimumPaymentUsd: 'Pago mínimo en USD',
+        cutOffDay: 'Día de corte',
+        dueDay: 'Día límite de pago',
+        debtText: 'Resumen de deuda (según moneda de la tarjeta)',
+        days: 'Días restantes hasta el recordatorio',
       },
+      conditionalHelp:
+        '{{#if variable}}…{{/if}} se muestra solo si la variable no está vacía y no es 0 (p. ej. 0, 0.00). Ej.: {{#if creditLimitDop}}<b>Límite (DOP):</b> {creditLimitDop}{{/if}} — En tarjetas solo USD las variables DOP vienen vacías.',
     },
     LOAN_PAYMENT: {
       name: 'Pagos de Préstamos',
@@ -47,8 +73,20 @@ const NotificationTemplates: React.FC = () => {
     },
     RECURRING_EXPENSE: {
       name: 'Gastos Recurrentes',
-      variables: ['description', 'amount', 'currency', 'paymentDay', 'days'],
+      variables: [
+        'expenseScheduleLabel',
+        'expenseTypeLabel',
+        'category',
+        'description',
+        'amount',
+        'currency',
+        'paymentDay',
+        'days',
+      ],
       variableDescriptions: {
+        expenseScheduleLabel: 'Texto del calendario del gasto (p. ej. Recurrente mensual)',
+        expenseTypeLabel: 'Alias de expenseScheduleLabel (compatibilidad con plantillas antiguas)',
+        category: 'Categoría del gasto (vacía si no tiene)',
         description: 'Descripción del gasto',
         amount: 'Monto',
         currency: 'Moneda',
@@ -151,12 +189,12 @@ const NotificationTemplates: React.FC = () => {
 
   return (
     <div className="w-full max-w-5xl mx-auto py-2 sm:py-4">
-      <div className="mb-6 sm:mb-8">
-        <div className="flex items-start gap-2 sm:space-x-3 mb-2">
+      <div className="mb-6 sm:mb-8 text-center sm:text-left">
+        <div className="flex items-start justify-center gap-2 sm:justify-start sm:space-x-3 mb-2">
           <FileText className="w-7 h-7 sm:w-8 sm:h-8 text-primary-400 shrink-0 mt-0.5" />
           <h1 className="page-title leading-tight truncate">Plantillas de Notificaciones</h1>
         </div>
-        <p className="text-dark-400 text-sm sm:text-base leading-relaxed">
+        <p className="text-dark-400 text-sm sm:text-base leading-relaxed max-w-prose mx-auto sm:mx-0">
           Personaliza los mensajes que se enviarán por Telegram para cada tipo de notificación.
           Usa las variables disponibles entre llaves {'{variable}'} para insertar información dinámica.
         </p>
@@ -247,6 +285,12 @@ const NotificationTemplates: React.FC = () => {
                       </span>
                     ))}
                   </div>
+                  {'conditionalHelp' in config && config.conditionalHelp && (
+                    <p className="text-xs text-dark-400 mt-3 leading-relaxed border-t border-dark-600 pt-3">
+                      <span className="text-dark-300 font-medium">Condicionales: </span>
+                      {config.conditionalHelp}
+                    </p>
+                  )}
                 </div>
 
                 {/* Título */}
@@ -285,7 +329,10 @@ const NotificationTemplates: React.FC = () => {
                     </div>
                   )}
                   <p className="text-xs text-dark-400 mt-1">
-                    Puedes usar HTML básico como {'<b>texto</b>'} para negrita y {'\n'} para saltos de línea.
+                    Puedes usar HTML básico como {'<b>texto</b>'} para negrita y saltos de línea. Usa{' '}
+                    <code className="text-primary-400">{'{{#if variable}}'}</code> …{' '}
+                    <code className="text-primary-400">{'{{/if}}'}</code> para incluir un bloque solo si esa
+                    variable tiene valor, no está vacía y no es numéricamente 0.
                   </p>
                 </div>
               </div>

@@ -2,10 +2,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import express from 'express';
+import path from 'path';
+import { existsSync } from 'fs';
 import type { CorsOptions } from 'cors';
 import { initializeDatabase } from './config/database';
 import { paypalWebhook } from './controllers/paypalWebhookController';
 import { errorHandler } from './middleware/errorHandler';
+import { maintenanceApiGuard } from './middleware/maintenanceMode';
 import authRoutes from './routes/auth';
 import cardRoutes from './routes/cards';
 import loanRoutes from './routes/loans';
@@ -28,8 +31,17 @@ import vehicleRoutes from './routes/vehicles';
 import adminRoutes from './routes/admin';
 import subscriptionRoutes from './routes/subscription';
 import { startNotificationScheduler } from './services/notificationService';
+import { initWebPush } from './services/webPushService';
 
-// Load environment variables
+// Carga .env: raíz del repo (monorepo) y luego backend/.env (sobrescribe)
+const rootEnv = path.resolve(__dirname, '../../.env');
+const backendEnv = path.resolve(__dirname, '../.env');
+if (existsSync(rootEnv)) {
+  dotenv.config({ path: rootEnv });
+}
+if (existsSync(backendEnv)) {
+  dotenv.config({ path: backendEnv, override: true });
+}
 dotenv.config();
 
 const app = express();
@@ -60,6 +72,8 @@ app.post(
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use('/api', maintenanceApiGuard);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -96,6 +110,8 @@ app.use(errorHandler);
 initializeDatabase()
     .then(() => {
         console.log('Database initialized successfully');
+
+        initWebPush();
 
         // Start notification scheduler
         startNotificationScheduler();

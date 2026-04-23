@@ -18,11 +18,13 @@ module.exports = {
   webpack: {
     configure: (webpackConfig, { env }) => {
       if (env === 'production') {
+        const pushHandlerScript = `${publicUrl}/pwa-push-handler.js`.replace(/\/{2,}/g, '/');
         webpackConfig.plugins.push(
           new GenerateSW({
             clientsClaim: false,
             skipWaiting: false,
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+            importScripts: [pushHandlerScript],
             navigateFallback: `${publicUrl || ''}/index.html`.replace(/\/+/g, '/'),
             navigateFallbackDenylist: [
               /^\/api\//,

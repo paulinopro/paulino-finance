@@ -133,11 +133,20 @@ const testTemplate = async (req, res) => {
         let testVariables = {};
         if (type === 'CARD_PAYMENT') {
             testVariables = {
-                cardName: 'Tarjeta de Prueba',
+                cardName: 'Tarjeta Oro',
                 bankName: 'Banco de Prueba',
                 dueDay: '25',
-                debtText: '15,000.00 DOP',
                 days: '7',
+                debtText: '12,500.00 DOP / 200.00 USD',
+                currencyType: 'DUAL',
+                currencyTypeLabel: 'DOP y USD (dual)',
+                cutOffDay: '12',
+                creditLimitDop: '50000.00',
+                creditLimitUsd: '2000.00',
+                currentDebtDop: '12500.00',
+                currentDebtUsd: '200.00',
+                minimumPaymentDop: '500.00',
+                minimumPaymentUsd: '25.00',
             };
         }
         else if (type === 'LOAN_PAYMENT') {
@@ -154,10 +163,13 @@ const testTemplate = async (req, res) => {
         else if (type === 'RECURRING_EXPENSE') {
             testVariables = {
                 description: 'Gasto Recurrente de Prueba',
-                amount: '2,500.00',
+                amount: '2500.00',
                 currency: 'DOP',
                 paymentDay: '15',
                 days: '7',
+                expenseScheduleLabel: 'Recurrente mensual',
+                expenseTypeLabel: 'Recurrente mensual',
+                category: 'Servicios',
             };
         }
         // Render templates with test variables

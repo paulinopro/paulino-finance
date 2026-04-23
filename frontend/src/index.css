@@ -32,6 +32,17 @@
     @apply bg-dark-800 rounded-xl p-4 sm:p-6 shadow-lg border border-dark-700;
   }
 
+  /**
+   * Tarjetas de listado / vistas: mismo fondo que .card (bg-dark-800 → rgb(30 41 59 / var(--tw-bg-opacity, 1))).
+   * Modales: .card.modal-sheet.
+   */
+  .card-view {
+    @apply rounded-2xl border border-dark-600/70 bg-dark-800;
+    @apply p-4 sm:p-5 shadow-lg shadow-black/20;
+    @apply transition-[box-shadow,transform,border-color] duration-200;
+    @apply hover:border-dark-500/80 hover:shadow-xl hover:shadow-black/25 sm:hover:-translate-y-0.5;
+  }
+
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 min-h-[44px] sm:min-h-[40px] bg-primary-600 hover:bg-primary-700 text-white font-medium px-4 py-2.5 rounded-lg transition-colors duration-200;
   }
@@ -76,6 +87,11 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* Proyecciones: el scroll horizontal lo hace un hijo; evitar doble scrollbar con .chart-box */
+  .projections-page .chart-box.chart-box--projections {
+    @apply min-w-[280px] overflow-x-visible;
+  }
+
   /* Modales: hoja inferior en móvil, centrado desde sm */
   .modal-overlay {
     @apply fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 overflow-y-auto overscroll-contain;
@@ -83,6 +99,102 @@
 
   .modal-sheet {
     @apply w-full max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-t-2xl sm:rounded-xl pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl;
+  }
+
+  /**
+   * Dashboard: widgets de resumen (gradiente sutil, borde, hover).
+   */
+  .dashboard-stat-widget {
+    @apply relative overflow-hidden rounded-2xl border border-dark-600/40;
+    @apply bg-gradient-to-br from-dark-800 via-dark-800 to-slate-900/50;
+    @apply p-4 sm:p-5 shadow-lg shadow-black/30 ring-1 ring-white/5;
+    @apply transition-[box-shadow,border-color,transform] duration-300 ease-out;
+    @apply hover:border-primary-500/35 hover:shadow-xl hover:shadow-black/40 sm:hover:-translate-y-0.5;
+  }
+
+  .dashboard-stat-label {
+    @apply mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500 sm:text-xs;
+  }
+
+  .dashboard-stat-value {
+    @apply text-2xl font-bold tabular-nums tracking-tight text-white sm:text-[1.65rem];
+  }
+
+  .dashboard-panel {
+    @apply relative overflow-hidden rounded-2xl border border-dark-600/40;
+    @apply bg-gradient-to-br from-dark-800 via-dark-800 to-slate-900/50;
+    @apply p-4 sm:p-6 shadow-lg shadow-black/30 ring-1 ring-white/5;
+  }
+
+  .dashboard-panel-title {
+    @apply mb-4 text-lg font-semibold text-white sm:text-xl;
+  }
+
+  .dashboard-ratio-card {
+    @apply rounded-xl border border-dark-600/30 bg-dark-900/35 p-4 shadow-inner ring-1 ring-white/5;
+  }
+
+  .dashboard-debt-row {
+    @apply rounded-xl border border-dark-600/40 bg-dark-900/40 p-4 ring-1 ring-white/5;
+  }
+
+  .dashboard-icon-tile {
+    @apply flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg shadow-black/25 ring-1 ring-white/15;
+  }
+
+  .dashboard-icon-tile-lg {
+    @apply flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg shadow-black/25 ring-1 ring-white/15 sm:h-16 sm:w-16;
+  }
+
+  /* Página de reportes: tablas de detalle (alineación coherente con PDF: primera col. izq., última der., medias centradas) */
+  .report-data-table {
+    @apply w-full min-w-0 text-sm;
+  }
+  .report-data-table thead tr {
+    @apply border-b border-dark-600/50 bg-dark-800/55;
+  }
+  .report-data-table thead th {
+    @apply py-3 px-3 sm:px-4 text-[0.65rem] font-semibold uppercase tracking-wider text-dark-400/95 align-middle;
+  }
+  @media (min-width: 768px) {
+    .report-data-table thead th:first-child {
+      @apply text-left;
+    }
+    .report-data-table thead th:last-child {
+      @apply text-right;
+    }
+    .report-data-table thead th:not(:first-child):not(:last-child) {
+      @apply text-center;
+    }
+    .report-data-table tbody td:first-child {
+      @apply text-left;
+    }
+    .report-data-table tbody td:last-child {
+      @apply text-right;
+    }
+    .report-data-table tbody td:not(:first-child):not(:last-child) {
+      @apply text-center;
+    }
+  }
+  .report-data-table tbody tr {
+    @apply border-b border-dark-700/70 transition-colors;
+  }
+  .report-data-table tbody tr:nth-child(even) {
+    @apply bg-dark-900/20;
+  }
+  .report-data-table tbody tr:hover {
+    @apply bg-primary-500/5;
+  }
+  .report-data-table tbody td {
+    @apply py-3 px-3 sm:px-4 align-middle;
+  }
+  /* Tarjetas: montos DOP/USD en una sola línea en escritorio */
+  @media (min-width: 768px) {
+    .report-data-table--card-currency tbody td:nth-child(3) .table-stack-value,
+    .report-data-table--card-currency tbody td:nth-child(4) .table-stack-value,
+    .report-data-table--card-currency tbody td:nth-child(5) .table-stack-value {
+      white-space: nowrap;
+    }
   }
 }
 
@@ -377,6 +489,69 @@
   border-color: var(--fc-border-color);
 }
 
+/*
+ * Vista semana/día: columna del eje (izquierda).
+ * FullCalendar calcula shrinkWidth en JS y lo pone en <col style="width: Npx"> (~61px);
+ * min-width en td no gana frente a eso. Hay que fijar el primer <col> con !important.
+ */
+.calendar-container .fc-timegrid col:first-child {
+  width: 140px !important;
+  min-width: 140px !important;
+}
+
+.calendar-container .fc-timegrid .fc-timegrid-axis,
+.calendar-container .fc-timegrid .fc-timegrid-slot-label {
+  min-width: 140px !important;
+}
+
+.calendar-container .fc-timegrid .fc-timegrid-axis .fc-timegrid-axis-cushion,
+.calendar-container .fc-timegrid .fc-timegrid-slot-label .fc-timegrid-slot-label-cushion {
+  white-space: nowrap;
+}
+
+/* Solo "Todo el día": su span está en td.fc-timegrid-axis; las horas usan fc-timegrid-slot-label-cushion y siguen usando el max-width global de FC */
+.calendar-container .fc-timegrid td.fc-timegrid-axis > .fc-timegrid-axis-frame span.fc-timegrid-axis-cushion {
+  max-width: none !important;
+}
+
+.calendar-container .fc-timegrid .fc-timegrid-axis-frame,
+.calendar-container .fc-timegrid .fc-timegrid-slot-label-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* "Todo el día" e intervalos de hora: celda del eje centrada y marco a altura completa */
+.calendar-container .fc-timegrid .fc-timegrid-axis.fc-scrollgrid-shrink,
+.calendar-container .fc-timegrid .fc-timegrid-slot-label {
+  vertical-align: middle;
+}
+
+.calendar-container .fc-timegrid .fc-timegrid-axis .fc-timegrid-axis-frame,
+.calendar-container .fc-timegrid .fc-timegrid-slot-label .fc-timegrid-slot-label-frame {
+  min-height: 100%;
+  align-self: stretch;
+}
+
+/* Franja entre "Todo el día" y la cuadrícula horaria (FullCalendar deja el td vacío) */
+.calendar-container .fc-timegrid td.fc-timegrid-divider.fc-cell-shaded {
+  padding: 0.375rem 0.5rem !important;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  line-height: 1.25;
+  height: auto !important;
+}
+
+.calendar-container .fc-timegrid td.fc-timegrid-divider.fc-cell-shaded::before {
+  content: "Cuadrícula de tiempo";
+}
+
 .calendar-container .fc-timegrid-col {
   background-color: var(--fc-page-bg-color);
 }
@@ -394,7 +569,8 @@
   background-color: var(--fc-neutral-bg-color);
 }
 
-@media (max-width: 639px) {
+/* Mismo breakpoint que Calendar.tsx (vistas tipo agenda en <768px) */
+@media (max-width: 767px) {
   .calendar-container .fc-header-toolbar {
     flex-direction: column;
     align-items: stretch;

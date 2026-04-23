@@ -3,6 +3,8 @@ export interface User {
   email: string;
   firstName?: string;
   lastName?: string;
+  /** Cédula de identidad (opcional) */
+  cedula?: string | null;
   telegramChatId?: string;
   currencyPreference: string;
   exchangeRateDopUsd: number;
@@ -11,6 +13,8 @@ export interface User {
   isActive?: boolean;
   subscriptionPlan?: string;
   subscriptionStatus?: string;
+  /** Fila en `user_subscriptions` (fuente de verdad en servidor). Evita redirección errónea a /subscription al recargar. */
+  hasUserSubscriptionRecord?: boolean;
 }
 
 export interface CreditCard {
@@ -67,8 +71,19 @@ export interface LoanPayment {
   outstandingBalance?: number;
   paymentType?: 'COMPLETE' | 'PARTIAL' | 'ADVANCE';
   notes?: string;
+  bankAccountId?: number | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface CardPayment {
+  id: number;
+  amount: number;
+  currency: string;
+  paymentDate: string;
+  bankAccountId?: number | null;
+  notes?: string;
+  createdAt: string;
 }
 
 export interface AmortizationScheduleItem {
@@ -130,30 +145,72 @@ export interface FinancialSummary {
   overduePayments: number;
 }
 
+/** Tipo fijo/variable — API `nature` */
+export type IncomeNature = 'fixed' | 'variable';
+/** Recurrente vs único — API `recurrence_type` */
+export type IncomeRecurrenceType = 'recurrent' | 'non_recurrent';
+/** Frecuencia canónica (minúsculas) — API `frequency` */
+export type IncomeFrequency =
+  | 'daily'
+  | 'weekly'
+  | 'biweekly'
+  | 'semi_monthly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semi_annual'
+  | 'annual';
+
 export interface Income {
   id: number;
   description: string;
   amount: number;
   currency: string;
-  incomeType: 'FIXED' | 'VARIABLE';
-  frequency?: string;
+  nature: IncomeNature;
+  recurrenceType?: IncomeRecurrenceType;
+  frequency?: string | null;
   receiptDay?: number;
   date?: string;
+  bankAccountId?: number | null;
+  /** Ingreso acreditado en la cuenta (actualiza saldo al marcar «Recibido» si hay cuenta vinculada) */
+  isReceived: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Tipo (fijo / variable) — API `nature` */
+export type ExpenseNature = 'fixed' | 'variable';
+/** Naturaleza (recurrente / único) — API `recurrence_type` */
+export type ExpenseRecurrenceType = 'recurrent' | 'non_recurrent';
+/** Frecuencia — API `frequency` (minúsculas) */
+export type ExpenseFrequency =
+  | 'daily'
+  | 'weekly'
+  | 'biweekly'
+  | 'semi_monthly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semi_annual'
+  | 'annual';
 
 export interface Expense {
   id: number;
   description: string;
   amount: number;
   currency: string;
-  expenseType: 'RECURRING_MONTHLY' | 'NON_RECURRING' | 'ANNUAL';
+  nature: ExpenseNature;
+  /** Recurrente vs único */
+  recurrenceType?: ExpenseRecurrenceType;
+  /** Frecuencia para gastos recurrentes */
+  frequency?: ExpenseFrequency | null;
   category?: string;
   paymentDay?: number;
   paymentMonth?: number;
   date?: string;
   isPaid: boolean;
+  bankAccountId?: number | null;
+  /** Si el gasto está vinculado a un vehículo (origen módulo Vehículos) */
+  vehicleId?: number | null;
+  vehicleLabel?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -166,11 +223,14 @@ export interface BankAccount {
   balanceDop: number;
   balanceUsd: number;
   currencyType: 'DOP' | 'USD' | 'DUAL';
+  /** banco vs efectivo / billetera */
+  accountKind: 'bank' | 'cash' | 'wallet';
   createdAt: string;
   updatedAt: string;
 }
 
-export interface Notification {
+/** Notificación in-app (evitar el nombre `Notification`: choca con la API del navegador en el bundler). */
+export interface AppNotification {
   id: number;
   type: string;
   title: string;
@@ -186,6 +246,10 @@ export interface DashboardSummary {
     dop: number;
     usd: number;
     dopUnified: number;
+    byKind?: {
+      bank: { dop: number; usd: number; dopUnified: number };
+      cash: { dop: number; usd: number; dopUnified: number };
+    };
   };
   debts: {
     dop: number;
@@ -215,6 +279,12 @@ export interface DashboardSummary {
   };
   activeBudgets: number;
   activeGoals: number;
+  /** Cantidad de cuentas en bank_accounts */
+  bankAccounts: number;
+  /** Cantidad de tarjetas registradas */
+  creditCards: number;
+  /** Cantidad de préstamos registrados */
+  loans: number;
   vehicles: number;
   exchangeRate: number;
 }
