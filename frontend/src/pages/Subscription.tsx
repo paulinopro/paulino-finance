@@ -242,17 +242,13 @@ const Subscription: React.FC = () => {
             <Receipt className="h-5 w-5 text-primary-400 shrink-0" aria-hidden />
             Historial de pagos
           </h2>
-          <p className="text-sm text-dark-500 max-w-2xl">
-            Cobros procesados (PayPal). Cada pago queda vinculado al periodo de facturación cuando los datos vienen de PayPal.
-          </p>
           {paymentsLoading ? (
             <div className="flex justify-center py-10 text-dark-400">
               <Loader2 className="h-7 w-7 animate-spin" />
             </div>
           ) : payments.length === 0 ? (
             <div className="card-view text-center py-10 text-dark-400 text-sm">
-              No hay pagos registrados aún. Tras un cobro, aparecerá aquí (requiere el webhook{' '}
-              <code className="text-primary-300/90">PAYMENT.SALE.COMPLETED</code> en PayPal).
+              No hay pagos registrados aún. Tras un cobro, aparecerá aquí automáticamente.
             </div>
           ) : (
             <div className="card-view overflow-x-auto p-0 sm:p-0">
