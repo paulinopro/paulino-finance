@@ -11,6 +11,9 @@ import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { useAuth } from '../context/AuthContext';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 const INCOME_FREQUENCY_LABELS: Record<IncomeFrequency, string> = {
   daily: 'Diario',
@@ -103,6 +106,11 @@ function formatIncomeScheduleCell(item: Income): string {
 }
 
 const IncomePage: React.FC = () => {
+  const { user } = useAuth();
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'income'
+  );
   const modalPanelRef = useRef<HTMLDivElement>(null);
   const [income, setIncome] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,37 +311,42 @@ const IncomePage: React.FC = () => {
         title="Ingresos"
         subtitle="Gestiona tus ingresos"
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-          >
-            <Plus size={20} />
-            <span>Agregar Ingreso</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
+            >
+              <Plus size={20} />
+              <span>Agregar Ingreso</span>
+            </button>
+          </div>
         }
       />
 
       {/* Summary */}
-      <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-dark-400 text-sm mb-1">Ingresos Totales DOP</p>
-            <p className="text-2xl font-bold text-white">{summary.totalDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
-          </div>
-          <div>
-            <p className="text-dark-400 text-sm mb-1">Ingresos Totales USD</p>
-            <p className="text-2xl font-bold text-white">{summary.totalUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
-          </div>
-          <div>
-            <p className="text-dark-400 text-sm mb-1">Cantidad de Ingresos</p>
-            <p className="text-2xl font-bold text-white">{summary.totalIncome}</p>
+      {summaryBarVisible && (
+        <div className="card">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Ingresos Totales (DOP)</p>
+              <p className="text-2xl font-bold text-white">{summary.totalDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Ingresos Totales (USD)</p>
+              <p className="text-2xl font-bold text-white">{summary.totalUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Cantidad de Ingresos</p>
+              <p className="text-2xl font-bold text-white">{summary.totalIncome}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Filters */}
       <div className="card">
@@ -428,259 +441,259 @@ const IncomePage: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-        <div className="card overflow-hidden">
-          <div className="table-responsive table-stack">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-dark-700">
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'description') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('description');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Descripción</span>
-                    {sortBy === 'description' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'amount') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('amount');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Monto</span>
-                    {sortBy === 'amount' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'type') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('type');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Tipo</span>
-                    {sortBy === 'type' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'frequency') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('frequency');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Frecuencia</span>
-                    {sortBy === 'frequency' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'naturaleza') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('naturaleza');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Naturaleza</span>
-                    {sortBy === 'naturaleza' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th 
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'date') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('date');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Fecha/Día</span>
-                    {sortBy === 'date' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th
-                  className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
-                  onClick={() => {
-                    if (sortBy === 'status') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortBy('status');
-                      setSortOrder('asc');
-                    }
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <span>Estado</span>
-                    {sortBy === 'status' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
-                  </div>
-                </th>
-                <th className="text-right py-3 px-4 text-dark-400 font-medium">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...income].sort((a, b) => {
-                if (!sortBy) return 0;
-                let aValue: any, bValue: any;
-                
-                switch (sortBy) {
-                  case 'description':
-                    aValue = a.description.toLowerCase();
-                    bValue = b.description.toLowerCase();
-                    break;
-                  case 'amount':
-                    aValue = a.amount;
-                    bValue = b.amount;
-                    break;
-                  case 'type':
-                    aValue = labelIncomeTipo(a);
-                    bValue = labelIncomeTipo(b);
-                    break;
-                  case 'frequency':
-                    aValue = incomeFrequencyFromApi(a.frequency) || '';
-                    bValue = incomeFrequencyFromApi(b.frequency) || '';
-                    break;
-                  case 'naturaleza':
-                    aValue = labelIncomeNaturaleza(a);
-                    bValue = labelIncomeNaturaleza(b);
-                    break;
-                  case 'date':
-                    aValue = a.date ? calendarDateToSortableMs(a.date) : (a.receiptDay || 0);
-                    bValue = b.date ? calendarDateToSortableMs(b.date) : (b.receiptDay || 0);
-                    break;
-                  case 'status':
-                    aValue = a.isReceived ? 1 : 0;
-                    bValue = b.isReceived ? 1 : 0;
-                    break;
-                  default:
-                    return 0;
-                }
-                
-                if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
-                if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
-                return 0;
-              }).map((item) => (
-                <tr key={item.id} className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0">
-                  <td data-label="Descripción" data-stack="hero" className="py-3 px-4 text-white">
-                    {item.description}
-                  </td>
-                  <td data-label="Monto" className="py-3 px-4">
-                    <span className="table-stack-value">
-                      {item.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {item.currency}
-                    </span>
-                  </td>
-                  <td data-label="Tipo" className="py-3 px-4">
-                    <span className="table-stack-value text-dark-300">{labelIncomeTipo(item)}</span>
-                  </td>
-                  <td data-label="Frecuencia" className="py-3 px-4">
-                    <span className="table-stack-value text-dark-300">
-                      {deriveIncomeRecurrence(item) === 'recurrent'
-                        ? formatIncomeFrequencyCell(item.frequency)
-                        : '—'}
-                    </span>
-                  </td>
-                  <td data-label="Naturaleza" className="py-3 px-4">
-                    <span className="table-stack-value text-dark-300">{labelIncomeNaturaleza(item)}</span>
-                  </td>
-                  <td data-label="Fecha / día" className="py-3 px-4">
-                    <span className="table-stack-value text-dark-300">{formatIncomeScheduleCell(item)}</span>
-                  </td>
-                  <td data-label="Estado" className="py-3 px-4">
-                    <span className="table-stack-value">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleReceived(item.id, item.isReceived)}
-                        className="flex items-center gap-2"
-                      >
-                        {item.isReceived ? (
-                          <CheckCircle className="text-green-400" size={20} />
-                        ) : (
-                          <Circle className="text-dark-400" size={20} />
-                        )}
-                        <span className={item.isReceived ? 'text-green-400' : 'text-dark-300'}>
-                          {item.isReceived ? 'Recibido' : 'Pendiente'}
-                        </span>
-                      </button>
-                    </span>
-                  </td>
-                  <td data-label="Acciones" className="py-3 px-4">
-                    <span className="table-stack-value">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingIncome(item);
-                            const nat = deriveIncomeNature(item);
-                            const rec = deriveIncomeRecurrence(item);
-                            const fq = incomeFrequencyFromApi(item.frequency) || 'monthly';
-                            setFormData({
-                              description: item.description,
-                              amount: item.amount.toString(),
-                              currency: item.currency,
-                              nature: nat,
-                              recurrenceType: rec,
-                              frequency: rec === 'recurrent' ? fq : '',
-                              receiptDay: item.receiptDay?.toString() || '',
-                              date: formatDateForInput(item.date),
-                              bankAccountId: item.bankAccountId != null ? String(item.bankAccountId) : '',
-                              isReceived: item.isReceived ?? false,
-                            });
-                            setShowModal(true);
-                          }}
-                          className="p-2 text-primary-400 hover:text-primary-300"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button type="button" onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:text-red-300"><Trash2 size={18} /></button>
+          <div className="card overflow-hidden">
+            <div className="table-responsive table-stack">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-dark-700">
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'description') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('description');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Descripción</span>
+                        {sortBy === 'description' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'amount') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('amount');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Monto</span>
+                        {sortBy === 'amount' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'type') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('type');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Tipo</span>
+                        {sortBy === 'type' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'frequency') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('frequency');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Frecuencia</span>
+                        {sortBy === 'frequency' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'naturaleza') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('naturaleza');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Naturaleza</span>
+                        {sortBy === 'naturaleza' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'date') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('date');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Fecha/Día</span>
+                        {sortBy === 'date' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th
+                      className="text-left py-3 px-4 text-dark-400 font-medium cursor-pointer hover:text-white select-none"
+                      onClick={() => {
+                        if (sortBy === 'status') {
+                          setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy('status');
+                          setSortOrder('asc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <span>Estado</span>
+                        {sortBy === 'status' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
+                      </div>
+                    </th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...income].sort((a, b) => {
+                    if (!sortBy) return 0;
+                    let aValue: any, bValue: any;
+
+                    switch (sortBy) {
+                      case 'description':
+                        aValue = a.description.toLowerCase();
+                        bValue = b.description.toLowerCase();
+                        break;
+                      case 'amount':
+                        aValue = a.amount;
+                        bValue = b.amount;
+                        break;
+                      case 'type':
+                        aValue = labelIncomeTipo(a);
+                        bValue = labelIncomeTipo(b);
+                        break;
+                      case 'frequency':
+                        aValue = incomeFrequencyFromApi(a.frequency) || '';
+                        bValue = incomeFrequencyFromApi(b.frequency) || '';
+                        break;
+                      case 'naturaleza':
+                        aValue = labelIncomeNaturaleza(a);
+                        bValue = labelIncomeNaturaleza(b);
+                        break;
+                      case 'date':
+                        aValue = a.date ? calendarDateToSortableMs(a.date) : (a.receiptDay || 0);
+                        bValue = b.date ? calendarDateToSortableMs(b.date) : (b.receiptDay || 0);
+                        break;
+                      case 'status':
+                        aValue = a.isReceived ? 1 : 0;
+                        bValue = b.isReceived ? 1 : 0;
+                        break;
+                      default:
+                        return 0;
+                    }
+
+                    if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+                    if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+                    return 0;
+                  }).map((item) => (
+                    <tr key={item.id} className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0">
+                      <td data-label="Descripción" data-stack="hero" className="py-3 px-4 text-white">
+                        {item.description}
+                      </td>
+                      <td data-label="Monto" className="py-3 px-4">
+                        <span className="table-stack-value">
+                          {item.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {item.currency}
+                        </span>
+                      </td>
+                      <td data-label="Tipo" className="py-3 px-4">
+                        <span className="table-stack-value text-dark-300">{labelIncomeTipo(item)}</span>
+                      </td>
+                      <td data-label="Frecuencia" className="py-3 px-4">
+                        <span className="table-stack-value text-dark-300">
+                          {deriveIncomeRecurrence(item) === 'recurrent'
+                            ? formatIncomeFrequencyCell(item.frequency)
+                            : '—'}
+                        </span>
+                      </td>
+                      <td data-label="Naturaleza" className="py-3 px-4">
+                        <span className="table-stack-value text-dark-300">{labelIncomeNaturaleza(item)}</span>
+                      </td>
+                      <td data-label="Fecha / día" className="py-3 px-4">
+                        <span className="table-stack-value text-dark-300">{formatIncomeScheduleCell(item)}</span>
+                      </td>
+                      <td data-label="Estado" className="py-3 px-4">
+                        <span className="table-stack-value">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleReceived(item.id, item.isReceived)}
+                            className="flex items-center gap-2"
+                          >
+                            {item.isReceived ? (
+                              <CheckCircle className="text-green-400" size={20} />
+                            ) : (
+                              <Circle className="text-dark-400" size={20} />
+                            )}
+                            <span className={item.isReceived ? 'text-green-400' : 'text-dark-300'}>
+                              {item.isReceived ? 'Recibido' : 'Pendiente'}
+                            </span>
+                          </button>
+                        </span>
+                      </td>
+                      <td data-label="Acciones" className="py-3 px-4">
+                        <span className="table-stack-value">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingIncome(item);
+                                const nat = deriveIncomeNature(item);
+                                const rec = deriveIncomeRecurrence(item);
+                                const fq = incomeFrequencyFromApi(item.frequency) || 'monthly';
+                                setFormData({
+                                  description: item.description,
+                                  amount: item.amount.toString(),
+                                  currency: item.currency,
+                                  nature: nat,
+                                  recurrenceType: rec,
+                                  frequency: rec === 'recurrent' ? fq : '',
+                                  receiptDay: item.receiptDay?.toString() || '',
+                                  date: formatDateForInput(item.date),
+                                  bankAccountId: item.bankAccountId != null ? String(item.bankAccountId) : '',
+                                  isReceived: item.isReceived ?? false,
+                                });
+                                setShowModal(true);
+                              }}
+                              className="p-2 text-primary-400 hover:text-primary-300"
+                            >
+                              <Edit size={18} />
+                            </button>
+                            <button type="button" onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:text-red-300"><Trash2 size={18} /></button>
+                          </div>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-        <TablePagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={total}
-          itemsPerPage={itemsPerPage}
-          onPageChange={setCurrentPage}
-          itemLabel="ingresos"
-          disabled={loading}
-          variant="card"
-        />
+          <TablePagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={total}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            itemLabel="ingresos"
+            disabled={loading}
+            variant="card"
+          />
         </div>
       )}
 
@@ -831,25 +844,25 @@ const IncomePage: React.FC = () => {
                   )}
                   {formData.frequency &&
                     NEEDS_START_DATE_INCOME.includes(formData.frequency as IncomeFrequency) && (
-                    <div>
-                      <label className="label">Fecha de inicio / referencia</label>
-                      <input
-                        type="date"
-                        value={formData.date}
-                        onChange={(e) => setFormData({ ...formData, date: e.target.value, receiptDay: '' })}
-                        className="input w-full"
-                        required
-                      />
-                      <p className="text-xs text-dark-400 mt-1">
-                        {formData.frequency === 'daily' && 'Cada día a partir de esta fecha.'}
-                        {formData.frequency === 'weekly' && 'Cada 7 días a partir de esta fecha.'}
-                        {formData.frequency === 'biweekly' && 'Cada 14 días a partir de esta fecha.'}
-                        {formData.frequency === 'quarterly' && 'Cada 3 meses a partir de esta fecha.'}
-                        {formData.frequency === 'semi_annual' && 'Cada 6 meses a partir de esta fecha.'}
-                        {formData.frequency === 'annual' && 'Se repetirá cada año en la misma fecha calendario.'}
-                      </p>
-                    </div>
-                  )}
+                      <div>
+                        <label className="label">Fecha de inicio / referencia</label>
+                        <input
+                          type="date"
+                          value={formData.date}
+                          onChange={(e) => setFormData({ ...formData, date: e.target.value, receiptDay: '' })}
+                          className="input w-full"
+                          required
+                        />
+                        <p className="text-xs text-dark-400 mt-1">
+                          {formData.frequency === 'daily' && 'Cada día a partir de esta fecha.'}
+                          {formData.frequency === 'weekly' && 'Cada 7 días a partir de esta fecha.'}
+                          {formData.frequency === 'biweekly' && 'Cada 14 días a partir de esta fecha.'}
+                          {formData.frequency === 'quarterly' && 'Cada 3 meses a partir de esta fecha.'}
+                          {formData.frequency === 'semi_annual' && 'Cada 6 meses a partir de esta fecha.'}
+                          {formData.frequency === 'annual' && 'Se repetirá cada año en la misma fecha calendario.'}
+                        </p>
+                      </div>
+                    )}
                   {formData.frequency === 'semi_monthly' && (
                     <div className="rounded-lg border border-dark-600/80 bg-dark-800/40 px-3 py-2 text-sm text-dark-300">
                       <p>

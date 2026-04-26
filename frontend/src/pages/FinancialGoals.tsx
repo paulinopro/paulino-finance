@@ -6,12 +6,18 @@ import api from '../services/api';
 import { BankAccount } from '../types';
 import { Plus, Edit, Trash2, Search, X, Target, CheckCircle, Calendar, Banknote, History, Wallet } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { TABLE_PAGE_SIZE_GOALS } from '../constants/pagination';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { LIST_CARD_SHELL, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { formatDateForInput, formatDateDdMmYyyy, formatCalendarDateLongEs } from '../utils/dateUtils';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { useAuth } from '../context/AuthContext';
+import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
+import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
+import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 interface FinancialGoal {
   id: number;
@@ -96,6 +102,11 @@ function goalCanAddAbono(goal: FinancialGoal): boolean {
 }
 
 const FinancialGoals: React.FC = () => {
+  const { user } = useAuth();
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'financial_goals'
+  );
   const goalModalRef = useRef<HTMLDivElement>(null);
   const abonoModalRef = useRef<HTMLDivElement>(null);
   const historyModalRef = useRef<HTMLDivElement>(null);
@@ -427,6 +438,18 @@ const FinancialGoals: React.FC = () => {
     goal.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const { ordered: orderedFiltered, setOrderByIds: setGoalOrderByIds } = usePersistedIdOrder<FinancialGoal>({
+    module: 'financial_goals',
+    userId: user?.id,
+    sourceItems: filteredGoals,
+  });
+  const commitGoalOrder = useCallback(
+    (next: FinancialGoal[]) => {
+      setGoalOrderByIds(next.map((g) => g.id));
+    },
+    [setGoalOrderByIds]
+  );
+
   const historyGoalResolved = useMemo(() => {
     if (!historyGoal) return null;
     return goals.find((g) => g.id === historyGoal.id) ?? historyGoal;
@@ -436,15 +459,30 @@ const FinancialGoals: React.FC = () => {
   useEffect(() => {
     setGoalsListPage(1);
   }, [searchTerm, statusFilter]);
-  const goalsMainTotalPages = Math.max(1, Math.ceil(filteredGoals.length / TABLE_PAGE_SIZE));
+  const goalsMainTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_GOALS));
   const goalsMainPageSafe = Math.min(goalsListPage, goalsMainTotalPages);
   useEffect(() => {
     setGoalsListPage((p) => Math.min(p, goalsMainTotalPages));
   }, [goalsMainTotalPages]);
   const pagedGoals = useMemo(() => {
-    const start = (goalsMainPageSafe - 1) * TABLE_PAGE_SIZE;
-    return filteredGoals.slice(start, start + TABLE_PAGE_SIZE);
-  }, [filteredGoals, goalsMainPageSafe]);
+    const start = (goalsMainPageSafe - 1) * TABLE_PAGE_SIZE_GOALS;
+    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_GOALS);
+  }, [orderedFiltered, goalsMainPageSafe]);
+  const goalListStart = (goalsMainPageSafe - 1) * TABLE_PAGE_SIZE_GOALS;
+  const listDnd = useListOrderPageDnd(pagedGoals, goalListStart, orderedFiltered, commitGoalOrder);
+
+  const goalsSummaryKpis = useMemo(() => {
+    let active = 0;
+    let dop = 0;
+    let usd = 0;
+    for (const g of orderedFiltered) {
+      if (g.status === 'ACTIVE') active += 1;
+      const c = String(g.currency || 'DOP').toUpperCase();
+      if (c === 'USD') usd += g.targetAmount;
+      else dop += g.targetAmount;
+    }
+    return { count: orderedFiltered.length, active, dop, usd };
+  }, [orderedFiltered]);
 
   if (loading) {
     return (
@@ -460,19 +498,49 @@ const FinancialGoals: React.FC = () => {
         title="Metas Financieras"
         subtitle="Establece y rastrea tus metas financieras"
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-          >
-            <Plus size={20} />
-            Nueva Meta
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
+            >
+              <Plus size={20} />
+              Nueva Meta
+            </button>
+          </div>
         }
       />
+
+      {summaryBarVisible && (
+        <div className="card-view">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Objetivo total (DOP)</p>
+              <p className="text-2xl font-bold text-white">
+                {goalsSummaryKpis.dop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+              </p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Objetivo total (USD)</p>
+              <p className="text-2xl font-bold text-white">
+                {goalsSummaryKpis.usd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD
+              </p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Activas</p>
+              <p className="text-2xl font-bold text-white">{goalsSummaryKpis.active}</p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Cantidad de Metas</p>
+              <p className="text-2xl font-bold text-white">{goalsSummaryKpis.count}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card-view">
@@ -501,155 +569,169 @@ const FinancialGoals: React.FC = () => {
       </div>
 
       {/* Goals List */}
-      {filteredGoals.length === 0 ? (
+      {orderedFiltered.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
           <p className="text-dark-400">No hay metas financieras</p>
         </div>
       ) : (
         <div className="space-y-4">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 xl:gap-6">
-          {pagedGoals.map((goal) => {
-            const canAbono = goalCanAddAbono(goal);
-            return (
-            <motion.article
-              key={goal.id}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={[LIST_CARD_SHELL, goalListAccent(goal)].join(' ')}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
-                      <Target className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                      Meta
-                    </span>
-                    <span className="text-xs text-dark-500 sm:text-sm">
-                      {goal.status === 'ACTIVE' && 'Activa'}
-                      {goal.status === 'COMPLETED' && 'Completada'}
-                      {goal.status === 'CANCELLED' && 'Cancelada'}
-                    </span>
-                    {goal.status === 'COMPLETED' && <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />}
-                  </div>
-                  <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{goal.name}</h3>
-                  {goal.description && <p className="text-sm text-dark-400">{goal.description}</p>}
-                  {goal.targetDate && (
-                    <p className="inline-flex items-center gap-1.5 text-xs text-dark-500">
-                      <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      Objetivo: {formatCalendarDateLongEs(goal.targetDate)}
-                    </p>
-                  )}
-                </div>
-                <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
-                  {canAbono && (
-                    <button
-                      type="button"
-                      onClick={() => openAbonoModal(goal)}
-                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
-                      title="Agregar abono"
-                      aria-label="Agregar abono"
-                    >
-                      <Banknote className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => openHistoryModal(goal)}
-                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
-                    title="Historial de abonos"
-                    aria-label="Historial de abonos"
-                  >
-                    <History className="h-5 w-5" />
-                  </button>
-                  {goal.status === 'ACTIVE' && (
-                    <button type="button" onClick={() => openEditModal(goal)} className={listCardBtnEdit} title="Editar" aria-label="Editar meta">
-                      <Edit className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button type="button" onClick={() => handleDelete(goal.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar meta">
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
-                <div className="flex items-center gap-2.5 sm:gap-3">
-                  <span className="shrink-0 text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">
-                    Progreso
-                  </span>
-                  <div
-                    className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-700/85"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(Math.min(100, Math.max(0, goal.progress)))}
-                    aria-label={`Progreso ${formatGoalProgressPercentValue(goal.progress)} por ciento`}
-                  >
-                    <div
-                      className="h-full rounded-full transition-[width] duration-300 ease-out"
-                      style={{
-                        width: `${Math.min(100, Math.max(0, goal.progress))}%`,
-                        backgroundColor: goalProgressBarColor(goal.progress),
-                      }}
-                    />
-                  </div>
-                  <span
-                    className={`shrink-0 text-sm font-bold tabular-nums sm:text-base ${goalProgressPercentTextClass(goal.progress)}`}
-                  >
-                    {formatGoalProgressPercentValue(goal.progress)}%
-                  </span>
-                </div>
-
-                <div className="grid w-full max-w-md grid-cols-1 gap-2 xs:grid-cols-3 sm:max-w-none">
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Meta</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {goal.targetAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
-                      </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 xl:gap-6">
+            {pagedGoals.map((goal) => {
+              const canAbono = goalCanAddAbono(goal);
+              return (
+                <motion.article
+                  key={goal.id}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  onDragOver={listDnd.onDragOver}
+                  onDrop={listDnd.onDrop(goal.id)}
+                  className={[
+                    LIST_CARD_SHELL,
+                    goalListAccent(goal),
+                    listDnd.dragId === goal.id ? 'opacity-60' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                    <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                          <Target className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                          Meta
+                        </span>
+                        <span className="text-xs text-dark-500 sm:text-sm">
+                          {goal.status === 'ACTIVE' && 'Activa'}
+                          {goal.status === 'COMPLETED' && 'Completada'}
+                          {goal.status === 'CANCELLED' && 'Cancelada'}
+                        </span>
+                        {goal.status === 'COMPLETED' && <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />}
+                      </div>
+                      <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{goal.name}</h3>
+                      {goal.description && <p className="text-sm text-dark-400">{goal.description}</p>}
+                      {goal.targetDate && (
+                        <p className="inline-flex items-center gap-1.5 text-xs text-dark-500">
+                          <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Objetivo: {formatCalendarDateLongEs(goal.targetDate)}
+                        </p>
+                      )}
                     </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Actual</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-400 sm:text-base">
-                        {goal.currentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-primary-400 sm:text-base">
-                        {goal.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
-                      </p>
+                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                      <ListOrderDragHandle
+                        itemId={goal.id}
+                        onDragStart={listDnd.onDragStart}
+                        onDragEnd={listDnd.onDragEnd}
+                        disabled={pagedGoals.length < 2}
+                      />
+                      {canAbono && (
+                        <button
+                          type="button"
+                          onClick={() => openAbonoModal(goal)}
+                          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
+                          title="Agregar abono"
+                          aria-label="Agregar abono"
+                        >
+                          <Banknote className="h-5 w-5" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => openHistoryModal(goal)}
+                        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
+                        title="Historial de abonos"
+                        aria-label="Historial de abonos"
+                      >
+                        <History className="h-5 w-5" />
+                      </button>
+                      {goal.status === 'ACTIVE' && (
+                        <button type="button" onClick={() => openEditModal(goal)} className={listCardBtnEdit} title="Editar" aria-label="Editar meta">
+                          <Edit className="h-5 w-5" />
+                        </button>
+                      )}
+                      <button type="button" onClick={() => handleDelete(goal.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar meta">
+                        <Trash2 className="h-5 w-5" />
+                      </button>
                     </div>
                   </div>
 
-                <div>
-                  <label className="mb-1 block text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Estado</label>
-                  <select
-                    value={goal.status}
-                    onChange={(e) => handleStatusChange(goal.id, e.target.value)}
-                    className="input w-full text-sm"
-                  >
-                    <option value="ACTIVE">Activa</option>
-                    <option value="COMPLETED">Completada</option>
-                    <option value="CANCELLED">Cancelada</option>
-                  </select>
-                </div>
-              </div>
-            </motion.article>
-          );
-          })}
-        </div>
-        <TablePagination
-          currentPage={goalsMainPageSafe}
-          totalPages={goalsMainTotalPages}
-          totalItems={filteredGoals.length}
-          itemsPerPage={TABLE_PAGE_SIZE}
-          onPageChange={setGoalsListPage}
-          itemLabel="metas"
-          variant="card"
-        />
+                  <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                      <span className="shrink-0 text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">
+                        Progreso
+                      </span>
+                      <div
+                        className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-700/85"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(Math.min(100, Math.max(0, goal.progress)))}
+                        aria-label={`Progreso ${formatGoalProgressPercentValue(goal.progress)} por ciento`}
+                      >
+                        <div
+                          className="h-full rounded-full transition-[width] duration-300 ease-out"
+                          style={{
+                            width: `${Math.min(100, Math.max(0, goal.progress))}%`,
+                            backgroundColor: goalProgressBarColor(goal.progress),
+                          }}
+                        />
+                      </div>
+                      <span
+                        className={`shrink-0 text-sm font-bold tabular-nums sm:text-base ${goalProgressPercentTextClass(goal.progress)}`}
+                      >
+                        {formatGoalProgressPercentValue(goal.progress)}%
+                      </span>
+                    </div>
+
+                    <div className="grid w-full max-w-md grid-cols-1 gap-2 xs:grid-cols-3 sm:max-w-none">
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Meta</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                          {goal.targetAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Actual</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-400 sm:text-base">
+                          {goal.currentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-primary-400 sm:text-base">
+                          {goal.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Estado</label>
+                      <select
+                        value={goal.status}
+                        onChange={(e) => handleStatusChange(goal.id, e.target.value)}
+                        className="input w-full text-sm"
+                      >
+                        <option value="ACTIVE">Activa</option>
+                        <option value="COMPLETED">Completada</option>
+                        <option value="CANCELLED">Cancelada</option>
+                      </select>
+                    </div>
+                  </div>
+                </motion.article>
+              );
+            })}
+          </div>
+          <TablePagination
+            currentPage={goalsMainPageSafe}
+            totalPages={goalsMainTotalPages}
+            totalItems={orderedFiltered.length}
+            itemsPerPage={TABLE_PAGE_SIZE_GOALS}
+            onPageChange={setGoalsListPage}
+            itemLabel="metas"
+            variant="card"
+          />
         </div>
       )}
 

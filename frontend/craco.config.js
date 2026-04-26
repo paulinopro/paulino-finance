@@ -3,10 +3,19 @@ const { GenerateSW } = require('workbox-webpack-plugin');
 const publicUrl = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
 /** RegExp serializado en el SW; no usar variables dentro de funciones match (no existen en el SW). */
-function pwaIconsRuntimePattern() {
-  const pathPart = `${publicUrl}/pwa-icons/`.replace(/\/+/g, '/');
-  const escaped = pathPart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`${escaped}[^?]+\\.png$`, 'i');
+function pwaImageAssetsRuntimePattern() {
+  const prefix = (publicUrl || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') || '';
+  // /pwa-icons/*.png o /apple-touch-icon.png (login, apple-touch, og); mismo host + PUBLIC_URL
+  if (!prefix) {
+    return new RegExp(
+      `^https?://[^/]+(/pwa-icons/[^?]+\\.png|/apple-touch-icon\\.png)(\\?.*)?$`,
+      'i'
+    );
+  }
+  return new RegExp(
+    `^https?://[^/]+${prefix}(/pwa-icons/[^?]+\\.png|/apple-touch-icon\\.png)(\\?.*)?$`,
+    'i'
+  );
 }
 
 /**
@@ -44,7 +53,7 @@ module.exports = {
                 handler: 'NetworkOnly',
               },
               {
-                urlPattern: pwaIconsRuntimePattern(),
+                urlPattern: pwaImageAssetsRuntimePattern(),
                 handler: 'StaleWhileRevalidate',
                 options: {
                   cacheName: 'pwa-icons',

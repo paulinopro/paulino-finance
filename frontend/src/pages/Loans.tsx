@@ -7,7 +7,7 @@ import { BankAccount, Loan, LoanPayment } from '../types';
 import { Plus, Edit, Trash2, Receipt, DollarSign, Search, X, Table, List } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AmortizationTable from '../components/AmortizationTable';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { TABLE_PAGE_SIZE_LOANS } from '../constants/pagination';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import {
@@ -20,6 +20,12 @@ import {
 } from '../utils/listCard';
 import { todayYmdLocal } from '../utils/dateUtils';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { useAuth } from '../context/AuthContext';
+import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
+import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
+import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 function loanListAccent(loan: Loan): string {
   if (loan.status === 'PAID') return listCardAccentLoan('PAID');
@@ -28,6 +34,11 @@ function loanListAccent(loan: Loan): string {
 }
 
 const Loans: React.FC = () => {
+  const { user } = useAuth();
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'loans'
+  );
   const loanFormModalRef = useRef<HTMLDivElement>(null);
   const paymentModalRef = useRef<HTMLDivElement>(null);
   const loanDetailsModalRef = useRef<HTMLDivElement>(null);
@@ -100,19 +111,33 @@ const Loans: React.FC = () => {
     fetchLoans();
   }, [fetchLoans]);
 
+  const { ordered: orderedLoans, setOrderByIds: setLoanOrderByIds } = usePersistedIdOrder<Loan>({
+    module: 'loans',
+    userId: user?.id,
+    sourceItems: loans,
+  });
+  const commitLoanOrder = useCallback(
+    (next: Loan[]) => {
+      setLoanOrderByIds(next.map((l) => l.id));
+    },
+    [setLoanOrderByIds]
+  );
+
   const [loanListPage, setLoanListPage] = useState(1);
   useEffect(() => {
     setLoanListPage(1);
   }, [searchTerm, bankFilter]);
-  const loanTotalPages = Math.max(1, Math.ceil(loans.length / TABLE_PAGE_SIZE));
+  const loanTotalPages = Math.max(1, Math.ceil(orderedLoans.length / TABLE_PAGE_SIZE_LOANS));
   const loanPageSafe = Math.min(loanListPage, loanTotalPages);
   useEffect(() => {
     setLoanListPage((p) => Math.min(p, loanTotalPages));
   }, [loanTotalPages]);
   const pagedLoans = useMemo(() => {
-    const start = (loanPageSafe - 1) * TABLE_PAGE_SIZE;
-    return loans.slice(start, start + TABLE_PAGE_SIZE);
-  }, [loans, loanPageSafe]);
+    const start = (loanPageSafe - 1) * TABLE_PAGE_SIZE_LOANS;
+    return orderedLoans.slice(start, start + TABLE_PAGE_SIZE_LOANS);
+  }, [orderedLoans, loanPageSafe]);
+  const loanListStart = (loanPageSafe - 1) * TABLE_PAGE_SIZE_LOANS;
+  const listDnd = useListOrderPageDnd(pagedLoans, loanListStart, orderedLoans, commitLoanOrder);
 
   const accountsForLoanPayment = useMemo(() => {
     if (!selectedLoan) return [];
@@ -361,7 +386,7 @@ const Loans: React.FC = () => {
     }
   };
 
-  const uniqueBanks = Array.from(new Set(loans.filter(l => l.bankName).map(l => l.bankName)));
+  const uniqueBanks = Array.from(new Set(orderedLoans.filter((l) => l.bankName).map((l) => l.bankName)));
 
   const getStatusText = (status: string) => {
     switch (status) {
@@ -424,22 +449,25 @@ const Loans: React.FC = () => {
         title="Préstamos"
         subtitle="Gestiona tus préstamos activos"
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-          >
-            <Plus size={20} />
-            <span>Agregar Préstamo</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
+            >
+              <Plus size={20} />
+              <span>Agregar Préstamo</span>
+            </button>
+          </div>
         }
       />
 
       {/* Summary */}
-      {summary && (
+      {summaryBarVisible && summary && (
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -510,7 +538,15 @@ const Loans: React.FC = () => {
                 key={loan.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={[LIST_CARD_SHELL, loanListAccent(loan)].join(' ')}
+                onDragOver={listDnd.onDragOver}
+                onDrop={listDnd.onDrop(loan.id)}
+                className={[
+                  LIST_CARD_SHELL,
+                  loanListAccent(loan),
+                  listDnd.dragId === loan.id ? 'opacity-60' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                   <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
@@ -525,6 +561,12 @@ const Loans: React.FC = () => {
                     {loan.bankName && <p className="text-sm text-dark-400">{loan.bankName}</p>}
                   </div>
                   <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                    <ListOrderDragHandle
+                      itemId={loan.id}
+                      onDragStart={listDnd.onDragStart}
+                      onDragEnd={listDnd.onDragEnd}
+                      disabled={pagedLoans.length < 2}
+                    />
                     <button
                       type="button"
                       onClick={() => {
@@ -651,8 +693,8 @@ const Loans: React.FC = () => {
         <TablePagination
           currentPage={loanPageSafe}
           totalPages={loanTotalPages}
-          totalItems={loans.length}
-          itemsPerPage={TABLE_PAGE_SIZE}
+          totalItems={orderedLoans.length}
+          itemsPerPage={TABLE_PAGE_SIZE_LOANS}
           onPageChange={setLoanListPage}
           itemLabel="préstamos"
           variant="card"
@@ -921,7 +963,7 @@ const Loans: React.FC = () => {
             </div>
             {(() => {
               const payments = selectedLoan.payments || [];
-              const itemsPerPage = TABLE_PAGE_SIZE;
+              const itemsPerPage = TABLE_PAGE_SIZE_LOANS;
               const totalPages = Math.max(1, Math.ceil(payments.length / itemsPerPage));
               const currentPage = Math.min(paymentHistoryPage, totalPages);
               const startIndex = (currentPage - 1) * itemsPerPage;

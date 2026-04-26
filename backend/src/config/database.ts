@@ -263,6 +263,10 @@ const createTables = async () => {
     `CREATE INDEX IF NOT EXISTS idx_subscription_payments_user_paid ON subscription_payments(user_id, paid_at DESC)`
   );
 
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`
+  );
+
   await query(`
     DO $$
     BEGIN

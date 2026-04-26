@@ -15,6 +15,9 @@ export interface AdminUserRow {
   subscriptionPlan: string;
   subscriptionPlanName?: string | null;
   subscriptionStatus: string;
+  /** Ventana de facturación actual (API en ISO/UTC) */
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
 }
 
 export interface AdminSubscriptionPlanSummary {
@@ -67,7 +70,23 @@ export interface AdminKpis {
   withSubscription: number;
   superAdmins: number;
   newLast7d: number;
+  newLast30d: number;
   auditEventsLast24h: number;
+  subscriptionByStatus: {
+    active: number;
+    trialing: number;
+    cancelled: number;
+    expired: number;
+    pastDue: number;
+  };
+  usersWithoutSubscription: number;
+  planDistribution: Array<{ planId: number; planName: string; userCount: number }>;
+  /** Cobros registrados (webhook PayPal → subscription_payments, status completed) */
+  subscriptionPayments: {
+    totalRecorded: number;
+    last30dCount: number;
+    last30dAmountByCurrency: Array<{ currency: string; total: number }>;
+  };
 }
 
 export interface AdminAuditEvent {
@@ -92,6 +111,12 @@ export interface AdminService {
     planId?: string | number;
     /** `none` = sin fila en user_subscriptions */
     subscriptionStatus?: string;
+    /** Fecha de registro del usuario (YYYY-MM-DD), filtra `created_at` */
+    createdFrom?: string;
+    createdTo?: string;
+    /** Solapamiento del periodo de facturación (fechas en UTC, YYYY-MM-DD) */
+    billingPeriodFrom?: string;
+    billingPeriodTo?: string;
   }) => Promise<{
     users: AdminUserRow[];
     page: number;
@@ -103,6 +128,10 @@ export interface AdminService {
     isActive?: 'true' | 'false';
     planId?: string | number;
     subscriptionStatus?: string;
+    createdFrom?: string;
+    createdTo?: string;
+    billingPeriodFrom?: string;
+    billingPeriodTo?: string;
   }) => Promise<void>;
   listAuditLog: (params: { page?: number; limit?: number; action?: string }) => Promise<{
     events: AdminAuditEvent[];

@@ -1,4 +1,7 @@
-/** Claves de módulos alineadas con rutas de la app (API y front). */
+/**
+ * Claves de módulos alineadas con rutas de la app (API y front).
+ * Espejo en el cliente: `frontend/src/constants/subscriptionModules.ts` — mantener sincronizados.
+ */
 export const SUBSCRIPTION_MODULE_KEYS = [
   'dashboard',
   'cards',
@@ -43,6 +46,33 @@ export function defaultEnabledModulesFree(): Record<string, boolean> {
 }
 
 const validModuleSet = new Set<string>(SUBSCRIPTION_MODULE_KEYS as unknown as string[]);
+
+/**
+ * Aplica payload de `enabled_modules` (objeto clave → boolean) dejando solo claves conocidas.
+ * Valores faltantes quedan en `false` (nunca se aceptan claves extra).
+ */
+export function normalizeEnabledModulesObject(raw: unknown): Record<string, boolean> {
+  const o: Record<string, boolean> = {};
+  for (const k of SUBSCRIPTION_MODULE_KEYS) {
+    o[k] = false;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const k of Object.keys(raw)) {
+      if (validModuleSet.has(k) && (raw as Record<string, unknown>)[k] === true) {
+        o[k] = true;
+      }
+    }
+  }
+  return o;
+}
+
+/** `true` si al menos un módulo está habilitado (planes de suscripción no deben quedar con todos en false). */
+export function enabledModulesHasAtLeastOne(m: Record<string, boolean>): boolean {
+  for (const v of Object.values(m)) {
+    if (v === true) return true;
+  }
+  return false;
+}
 
 export function modulesFromJson(json: unknown): string[] {
   if (json == null) return [];

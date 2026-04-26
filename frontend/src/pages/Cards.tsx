@@ -7,6 +7,12 @@ import { BankAccount, CardPayment, CreditCard } from '../types';
 import { Plus, Edit, Trash2, CreditCard as CardIcon, DollarSign, Search, X } from 'lucide-react';
 import { todayYmdLocal } from '../utils/dateUtils';
 import toast from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
+import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
+import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
+import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 import {
   LIST_CARD_SHELL,
   listCardAccentFromPercent,
@@ -14,7 +20,7 @@ import {
   listCardBtnEdit,
   listCardBtnDanger,
 } from '../utils/listCard';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { TABLE_PAGE_SIZE_CARDS } from '../constants/pagination';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
@@ -39,6 +45,11 @@ function creditCardListAccent(card: CreditCard): string {
 }
 
 const Cards: React.FC = () => {
+  const { user } = useAuth();
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'cards'
+  );
   const modalPanelRef = useRef<HTMLDivElement>(null);
   const cardPaymentModalRef = useRef<HTMLDivElement>(null);
   const [cards, setCards] = useState<CreditCard[]>([]);
@@ -104,19 +115,33 @@ const Cards: React.FC = () => {
     fetchCards();
   }, [fetchCards]);
 
+  const { ordered: orderedCards, setOrderByIds: setCardOrderByIds } = usePersistedIdOrder<CreditCard>({
+    module: 'cards',
+    userId: user?.id,
+    sourceItems: cards,
+  });
+  const commitCardOrder = useCallback(
+    (next: CreditCard[]) => {
+      setCardOrderByIds(next.map((c) => c.id));
+    },
+    [setCardOrderByIds]
+  );
+
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
   }, [searchTerm, bankFilter]);
-  const cardTotalPages = Math.max(1, Math.ceil(cards.length / TABLE_PAGE_SIZE));
+  const cardTotalPages = Math.max(1, Math.ceil(orderedCards.length / TABLE_PAGE_SIZE_CARDS));
   const cardPageSafe = Math.min(listPage, cardTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, cardTotalPages));
   }, [cardTotalPages]);
   const pagedCards = useMemo(() => {
-    const start = (cardPageSafe - 1) * TABLE_PAGE_SIZE;
-    return cards.slice(start, start + TABLE_PAGE_SIZE);
-  }, [cards, cardPageSafe]);
+    const start = (cardPageSafe - 1) * TABLE_PAGE_SIZE_CARDS;
+    return orderedCards.slice(start, start + TABLE_PAGE_SIZE_CARDS);
+  }, [orderedCards, cardPageSafe]);
+  const cardListStart = (cardPageSafe - 1) * TABLE_PAGE_SIZE_CARDS;
+  const listDnd = useListOrderPageDnd(pagedCards, cardListStart, orderedCards, commitCardOrder);
 
   const accountsForCardPayment = useMemo(() => {
     const c = cardPaymentForm.payCurrency;
@@ -297,38 +322,41 @@ const Cards: React.FC = () => {
         title="Tarjetas de Crédito"
         subtitle="Gestiona tus tarjetas de crédito"
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-          >
-            <Plus size={20} />
-            <span>Agregar Tarjeta</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
+            >
+              <Plus size={20} />
+              <span>Agregar Tarjeta</span>
+            </button>
+          </div>
         }
       />
 
       {/* Summary */}
-      {summary && (
+      {summaryBarVisible && summary && (
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Deudas Totales DOP</p>
+              <p className="text-dark-400 text-sm mb-1">Deudas Totales (DOP)</p>
               <p className="text-2xl font-bold text-white">{summary.totalDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Deudas Totales USD</p>
+              <p className="text-dark-400 text-sm mb-1">Deudas Totales (USD)</p>
               <p className="text-2xl font-bold text-white">{summary.totalDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos DOP</p>
+              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos (DOP)</p>
               <p className="text-2xl font-bold text-white">{summary.totalMinPaymentDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos USD</p>
+              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos (USD)</p>
               <p className="text-2xl font-bold text-white">{summary.totalMinPaymentUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
             </div>
             <div>
@@ -387,91 +415,138 @@ const Cards: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
-          {pagedCards.map((card) => (
-            <motion.article
-              key={card.id}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={[LIST_CARD_SHELL, creditCardListAccent(card)].join(' ')}
-            >
-              <div className="flex flex-row gap-3 justify-between items-start">
-                <div className="min-w-0 flex-1 space-y-2 pr-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
-                      <CardIcon className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                      Tarjeta
-                    </span>
-                    <span className="text-xs text-dark-500 sm:text-sm">{card.currencyType}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
+            {pagedCards.map((card) => (
+              <motion.article
+                key={card.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                onDragOver={listDnd.onDragOver}
+                onDrop={listDnd.onDrop(card.id)}
+                className={[
+                  LIST_CARD_SHELL,
+                  creditCardListAccent(card),
+                  listDnd.dragId === card.id ? 'opacity-60' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <div className="flex flex-row gap-3 justify-between items-start">
+                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                        <CardIcon className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                        Tarjeta
+                      </span>
+                      <span className="text-xs text-dark-500 sm:text-sm">{card.currencyType}</span>
+                    </div>
+                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{card.cardName}</h3>
+                    <p className="text-sm text-dark-400">{card.bankName}</p>
                   </div>
-                  <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{card.cardName}</h3>
-                  <p className="text-sm text-dark-400">{card.bankName}</p>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <ListOrderDragHandle
+                      itemId={card.id}
+                      onDragStart={listDnd.onDragStart}
+                      onDragEnd={listDnd.onDragEnd}
+                      disabled={pagedCards.length < 2}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => openCardPaymentModal(card)}
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
+                      title="Registrar pago"
+                      aria-label="Registrar pago"
+                    >
+                      <DollarSign className="h-[18px] w-[18px]" />
+                    </button>
+                    <button type="button" onClick={() => handleEdit(card)} className={listCardBtnEdit} title="Editar" aria-label="Editar tarjeta">
+                      <Edit className="h-5 w-5" />
+                    </button>
+                    <button type="button" onClick={() => handleDelete(card.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar tarjeta">
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => openCardPaymentModal(card)}
-                    className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
-                    title="Registrar pago"
-                    aria-label="Registrar pago"
-                  >
-                    <DollarSign className="h-[18px] w-[18px]" />
-                  </button>
-                  <button type="button" onClick={() => handleEdit(card)} className={listCardBtnEdit} title="Editar" aria-label="Editar tarjeta">
-                    <Edit className="h-5 w-5" />
-                  </button>
-                  <button type="button" onClick={() => handleDelete(card.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar tarjeta">
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
 
-              <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
-                {card.currencyType === 'DUAL' ? (
-                  <div className="flex flex-col gap-2 sm:gap-3">
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
+                  {card.currencyType === 'DUAL' ? (
+                    <div className="flex flex-col gap-2 sm:gap-3">
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (DOP)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                            {card.creditLimitDop.toLocaleString('es-DO')}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (USD)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                            {card.creditLimitUsd.toLocaleString('es-DO')}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (DOP)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
+                            {card.currentDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (USD)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
+                            {card.currentDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (DOP)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
+                            {formatMinPaymentAmount(card.minimumPaymentDop)}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (USD)</p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
+                            {formatMinPaymentAmount(card.minimumPaymentUsd)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Corte</p>
+                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.cutOffDay}</p>
+                        </div>
+                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
+                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.paymentDueDay}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
                       <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (DOP)</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                          {card.creditLimitDop.toLocaleString('es-DO')}
+                          {card.currencyType === 'DOP' && `${card.creditLimitDop.toLocaleString('es-DO')} DOP`}
+                          {card.currencyType === 'USD' && `${card.creditLimitUsd.toLocaleString('es-DO')} USD`}
                         </p>
                       </div>
                       <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (USD)</p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                          {card.creditLimitUsd.toLocaleString('es-DO')}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (DOP)</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                          {card.currentDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {card.currencyType === 'DOP' && `${card.currentDebtDop.toLocaleString('es-DO')} DOP`}
+                          {card.currencyType === 'USD' && `${card.currentDebtUsd.toLocaleString('es-DO')} USD`}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (USD)</p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                          {card.currentDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (DOP)</p>
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3 xs:col-span-2">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                          {formatMinPaymentAmount(card.minimumPaymentDop)}
+                          {card.currencyType === 'DOP' && `${formatMinPaymentAmount(card.minimumPaymentDop)} DOP`}
+                          {card.currencyType === 'USD' && `${formatMinPaymentAmount(card.minimumPaymentUsd)} USD`}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (USD)</p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                          {formatMinPaymentAmount(card.minimumPaymentUsd)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Corte</p>
                         <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.cutOffDay}</p>
@@ -481,53 +556,20 @@ const Cards: React.FC = () => {
                         <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.paymentDueDay}</p>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {card.currencyType === 'DOP' && `${card.creditLimitDop.toLocaleString('es-DO')} DOP`}
-                        {card.currencyType === 'USD' && `${card.creditLimitUsd.toLocaleString('es-DO')} USD`}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                        {card.currencyType === 'DOP' && `${card.currentDebtDop.toLocaleString('es-DO')} DOP`}
-                        {card.currencyType === 'USD' && `${card.currentDebtUsd.toLocaleString('es-DO')} USD`}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3 xs:col-span-2">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                        {card.currencyType === 'DOP' && `${formatMinPaymentAmount(card.minimumPaymentDop)} DOP`}
-                        {card.currencyType === 'USD' && `${formatMinPaymentAmount(card.minimumPaymentUsd)} USD`}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Corte</p>
-                      <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.cutOffDay}</p>
-                    </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
-                      <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.paymentDueDay}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </motion.article>
-          ))}
-        </div>
-        <TablePagination
-          currentPage={cardPageSafe}
-          totalPages={cardTotalPages}
-          totalItems={cards.length}
-          itemsPerPage={TABLE_PAGE_SIZE}
-          onPageChange={setListPage}
-          itemLabel="tarjetas"
-          variant="card"
-        />
+                  )}
+                </div>
+              </motion.article>
+            ))}
+          </div>
+          <TablePagination
+            currentPage={cardPageSafe}
+            totalPages={cardTotalPages}
+            totalItems={orderedCards.length}
+            itemsPerPage={TABLE_PAGE_SIZE_CARDS}
+            onPageChange={setListPage}
+            itemLabel="tarjetas"
+            variant="card"
+          />
         </div>
       )}
 

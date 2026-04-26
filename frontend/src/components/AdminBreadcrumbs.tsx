@@ -13,7 +13,7 @@ type Props = {
 };
 
 /**
- * Migas de pan para la consola super admin. «Consola» apunta a `/admin`.
+ * Migas de pan para la consola super admin. «Consola» apunta al resumen `/admin`.
  */
 const AdminBreadcrumbs: React.FC<Props> = ({ userLabel }) => {
   const { pathname } = useLocation();
@@ -34,7 +34,7 @@ const AdminBreadcrumbs: React.FC<Props> = ({ userLabel }) => {
       >
         {root}
         <Sep />
-        <Link to="/admin" className={link}>
+        <Link to="/admin/users" className={link}>
           Usuarios
         </Link>
         <Sep />
@@ -75,12 +75,32 @@ const AdminBreadcrumbs: React.FC<Props> = ({ userLabel }) => {
     );
   }
 
-  if (pathname === '/admin' || pathname === '/admin/') {
+  if (pathname === '/admin/users') {
     return (
       <nav className="mb-4 flex flex-wrap items-center gap-1.5 text-xs sm:text-sm" aria-label="Migas de pan">
         {root}
         <Sep />
         <span className={current}>Usuarios</span>
+      </nav>
+    );
+  }
+
+  if (pathname === '/admin/settings') {
+    return (
+      <nav className="mb-4 flex flex-wrap items-center gap-1.5 text-xs sm:text-sm" aria-label="Migas de pan">
+        {root}
+        <Sep />
+        <span className={current}>Configuración</span>
+      </nav>
+    );
+  }
+
+  if (pathname === '/admin' || pathname === '/admin/') {
+    return (
+      <nav className="mb-4 flex flex-wrap items-center gap-1.5 text-xs sm:text-sm" aria-label="Migas de pan">
+        {root}
+        <Sep />
+        <span className={current}>Resumen</span>
       </nav>
     );
   }

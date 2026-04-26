@@ -215,18 +215,16 @@ const Dashboard: React.FC = () => {
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Ahorro</span>
                   <span
-                    className={`shrink-0 text-xs font-semibold tabular-nums ${
-                      savingsRate >= 20 ? 'text-green-400' : savingsRate >= 10 ? 'text-yellow-400' : 'text-red-400'
-                    }`}
+                    className={`shrink-0 text-xs font-semibold tabular-nums ${savingsRate >= 20 ? 'text-green-400' : savingsRate >= 10 ? 'text-yellow-400' : 'text-red-400'
+                      }`}
                   >
                     {savingsRate.toFixed(1)}%
                   </span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-white/5">
                   <div
-                    className={`h-1.5 rounded-full ${
-                      savingsRate >= 20 ? 'bg-green-500' : savingsRate >= 10 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
+                    className={`h-1.5 rounded-full ${savingsRate >= 20 ? 'bg-green-500' : savingsRate >= 10 ? 'bg-yellow-500' : 'bg-red-500'
+                      }`}
                     style={{ width: `${Math.min(100, Math.max(0, savingsRate))}%` }}
                   />
                 </div>
@@ -235,18 +233,16 @@ const Dashboard: React.FC = () => {
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Deuda / ingreso</span>
                   <span
-                    className={`shrink-0 text-xs font-semibold tabular-nums ${
-                      debtRatio <= 20 ? 'text-green-400' : debtRatio <= 40 ? 'text-yellow-400' : 'text-red-400'
-                    }`}
+                    className={`shrink-0 text-xs font-semibold tabular-nums ${debtRatio <= 20 ? 'text-green-400' : debtRatio <= 40 ? 'text-yellow-400' : 'text-red-400'
+                      }`}
                   >
                     {debtRatio.toFixed(1)}%
                   </span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-white/5">
                   <div
-                    className={`h-1.5 rounded-full ${
-                      debtRatio <= 20 ? 'bg-green-500' : debtRatio <= 40 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
+                    className={`h-1.5 rounded-full ${debtRatio <= 20 ? 'bg-green-500' : debtRatio <= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                      }`}
                     style={{ width: `${Math.min(100, Math.max(0, debtRatio))}%` }}
                   />
                 </div>
@@ -255,18 +251,16 @@ const Dashboard: React.FC = () => {
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Gasto / ingreso</span>
                   <span
-                    className={`shrink-0 text-xs font-semibold tabular-nums ${
-                      expenseRatio <= 70 ? 'text-green-400' : expenseRatio <= 90 ? 'text-yellow-400' : 'text-red-400'
-                    }`}
+                    className={`shrink-0 text-xs font-semibold tabular-nums ${expenseRatio <= 70 ? 'text-green-400' : expenseRatio <= 90 ? 'text-yellow-400' : 'text-red-400'
+                      }`}
                   >
                     {expenseRatio.toFixed(1)}%
                   </span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-white/5">
                   <div
-                    className={`h-1.5 rounded-full ${
-                      expenseRatio <= 70 ? 'bg-green-500' : expenseRatio <= 90 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
+                    className={`h-1.5 rounded-full ${expenseRatio <= 70 ? 'bg-green-500' : expenseRatio <= 90 ? 'bg-yellow-500' : 'bg-red-500'
+                      }`}
                     style={{ width: `${Math.min(100, Math.max(0, expenseRatio))}%` }}
                   />
                 </div>
@@ -274,7 +268,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-dark-600/30 pt-4 xl:grid-cols-4">
+          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-dark-600/30 pt-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="dashboard-stat-widget !p-3 sm:!p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -285,9 +279,8 @@ const Dashboard: React.FC = () => {
                   <p className="mt-0.5 text-[0.65rem] text-dark-500">DOP</p>
                   {healthData.income.change !== 0 && (
                     <div
-                      className={`mt-1 flex items-center gap-0.5 text-[0.7rem] ${
-                        healthData.income.change >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}
+                      className={`mt-1 flex items-center gap-0.5 text-[0.7rem] ${healthData.income.change >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}
                     >
                       {healthData.income.change >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
                       <span>{Math.abs(healthData.income.change).toFixed(1)}%</span>
@@ -310,9 +303,8 @@ const Dashboard: React.FC = () => {
                   <p className="mt-0.5 text-[0.65rem] text-dark-500">DOP</p>
                   {healthData.expenses.change !== 0 && (
                     <div
-                      className={`mt-1 flex items-center gap-0.5 text-[0.7rem] ${
-                        healthData.expenses.change <= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}
+                      className={`mt-1 flex items-center gap-0.5 text-[0.7rem] ${healthData.expenses.change <= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}
                     >
                       {healthData.expenses.change <= 0 ? <TrendingDown className="h-3.5 w-3.5" /> : <TrendingUp className="h-3.5 w-3.5" />}
                       <span>{Math.abs(healthData.expenses.change).toFixed(1)}%</span>
@@ -330,9 +322,8 @@ const Dashboard: React.FC = () => {
                 <div className="min-w-0">
                   <p className="dashboard-stat-label !mb-0.5">Ahorro neto</p>
                   <p
-                    className={`truncate text-lg font-bold tabular-nums sm:text-xl ${
-                      healthData.savings.amount >= 0 ? 'text-green-400' : 'text-red-400'
-                    }`}
+                    className={`truncate text-lg font-bold tabular-nums sm:text-xl ${healthData.savings.amount >= 0 ? 'text-green-400' : 'text-red-400'
+                      }`}
                   >
                     ${healthData.savings.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                   </p>
@@ -463,16 +454,16 @@ const Dashboard: React.FC = () => {
             {healthIncomeVsExpensesData.length > 0 ? (
               <div className="chart-box h-[180px] sm:h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={healthIncomeVsExpensesData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="name" stroke="#94a3b8" />
-                  <YAxis stroke="#94a3b8" />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  />
-                  <Bar dataKey="value" fill="#0ea5e9" />
-                </BarChart>
-              </ResponsiveContainer>
+                  <BarChart data={healthIncomeVsExpensesData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis dataKey="name" stroke="#94a3b8" />
+                    <YAxis stroke="#94a3b8" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                    />
+                    <Bar dataKey="value" fill="#0ea5e9" />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             ) : (
               <div className="flex h-40 items-center justify-center text-dark-400">
@@ -492,39 +483,39 @@ const Dashboard: React.FC = () => {
           >
             <h2 className="dashboard-panel-title !mb-3">Tendencias Mensuales</h2>
             <div className="chart-box h-[240px] sm:h-[300px] lg:h-[340px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={healthData.monthlyData.map((d) => ({
-                month: d.monthName,
-                Ingresos: Math.round(d.income),
-                Gastos: Math.round(d.expenses),
-                Ahorros: Math.round(d.savings),
-              }))}>
-                <defs>
-                  <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorSavings" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="month" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                />
-                <Legend />
-                <Area type="monotone" dataKey="Ingresos" stroke="#10b981" fillOpacity={1} fill="url(#colorIncome)" />
-                <Area type="monotone" dataKey="Gastos" stroke="#ef4444" fillOpacity={1} fill="url(#colorExpenses)" />
-                <Area type="monotone" dataKey="Ahorros" stroke="#0ea5e9" fillOpacity={1} fill="url(#colorSavings)" />
-              </AreaChart>
-            </ResponsiveContainer>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={healthData.monthlyData.map((d) => ({
+                  month: d.monthName,
+                  Ingresos: Math.round(d.income),
+                  Gastos: Math.round(d.expenses),
+                  Ahorros: Math.round(d.savings),
+                }))}>
+                  <defs>
+                    <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorSavings" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="month" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                  />
+                  <Legend />
+                  <Area type="monotone" dataKey="Ingresos" stroke="#10b981" fillOpacity={1} fill="url(#colorIncome)" />
+                  <Area type="monotone" dataKey="Gastos" stroke="#ef4444" fillOpacity={1} fill="url(#colorExpenses)" />
+                  <Area type="monotone" dataKey="Ahorros" stroke="#0ea5e9" fillOpacity={1} fill="url(#colorSavings)" />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </motion.div>
         )}
@@ -543,44 +534,40 @@ const Dashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveTab('day')}
-                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${
-                  activeTab === 'day'
+                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${activeTab === 'day'
                     ? 'bg-primary-600 text-white'
                     : 'text-dark-400 hover:text-white hover:bg-dark-700'
-                }`}
+                  }`}
               >
                 Día
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('week')}
-                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${
-                  activeTab === 'week'
+                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${activeTab === 'week'
                     ? 'bg-primary-600 text-white'
                     : 'text-dark-400 hover:text-white hover:bg-dark-700'
-                }`}
+                  }`}
               >
                 Semana
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('month')}
-                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${
-                  activeTab === 'month'
+                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${activeTab === 'month'
                     ? 'bg-primary-600 text-white'
                     : 'text-dark-400 hover:text-white hover:bg-dark-700'
-                }`}
+                  }`}
               >
                 Mes
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('year')}
-                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${
-                  activeTab === 'year'
+                className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 ${activeTab === 'year'
                     ? 'bg-primary-600 text-white'
                     : 'text-dark-400 hover:text-white hover:bg-dark-700'
-                }`}
+                  }`}
               >
                 Año
               </button>
@@ -614,8 +601,7 @@ const Dashboard: React.FC = () => {
                   {summary.assets.byKind.cash.dopUnified.toLocaleString('es-DO', {
                     minimumFractionDigits: 0,
                     maximumFractionDigits: 0,
-                  })}{' '}
-                  DOP eq.
+                  })}
                 </p>
               )}
             </div>
@@ -655,18 +641,16 @@ const Dashboard: React.FC = () => {
             <div>
               <p className="dashboard-stat-label">Patrimonio Neto</p>
               <p
-                className={`dashboard-stat-value ${
-                  (summary?.netWorth.dopUnified || 0) >= 0 ? 'text-green-400' : 'text-red-400'
-                }`}
+                className={`dashboard-stat-value ${(summary?.netWorth.dopUnified || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                  }`}
               >
                 ${summary?.netWorth.dopUnified.toLocaleString('es-DO', { minimumFractionDigits: 2 }) || '0.00'}
               </p>
               <p className="mt-1 text-xs text-dark-400">DOP</p>
             </div>
             <div
-              className={`dashboard-icon-tile ${
-                (summary?.netWorth.dopUnified || 0) >= 0 ? 'from-emerald-600 to-green-700' : 'from-rose-600 to-red-700'
-              }`}
+              className={`dashboard-icon-tile ${(summary?.netWorth.dopUnified || 0) >= 0 ? 'from-emerald-600 to-green-700' : 'from-rose-600 to-red-700'
+                }`}
             >
               {(summary?.netWorth.dopUnified || 0) >= 0 ? (
                 <TrendingUp className="h-6 w-6 text-white" />

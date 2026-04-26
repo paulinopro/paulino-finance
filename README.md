@@ -208,6 +208,22 @@ Documentación adicional en `docs/` (por ejemplo planes responsive / PWA).
 
 ---
 
+## Consola de super administrador (operación)
+
+Rutas bajo el prefijo `/admin` (menú en `AdminLayout`), solo con usuario **super admin** (`is_super_admin` en base de datos o equivalente en JWT).
+
+| Acción | Dónde |
+|--------|--------|
+| **Mantenimiento** (solo lectura para usuarios finales) | `/admin/settings` — activa `modo_mantenimiento`. El aviso se muestra en el layout; los super admin no se bloquean. |
+| **Cerrar registro público** | `/admin/settings` — `registro_habilitado` / `registration_enabled` evita `POST /api/auth/register` (403 con mensaje en español). |
+| **KPIs y tráfico agregado** | `/admin` — `GET /api/admin/stats` (caché ~15 s; incluye agregados de **cobros** `subscription_payments` últimos 30 d por moneda). |
+| **Usuarios, filtros, CSV** | `/admin/users` — registro (`createdFrom`/`createdTo`) y **periodo de facturación** (`billingPeriodFrom`/`billingPeriodTo`, solapamiento en **UTC**). |
+| **Planes y módulos** | `/admin/subscriptions` — cada plan exige al menos un módulo activo. |
+
+Más detalle y estado de alcance: `docs/plan-super-admin.md`.
+
+---
+
 ## Licencia
 
 MIT (ver `package.json` de cada paquete).

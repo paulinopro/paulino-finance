@@ -218,10 +218,17 @@ const Layout: React.FC = () => {
         ],
       },
       {
+        label: 'Suscripción',
+        icon: CreditCard,
+        children: [
+          { path: '/subscription', label: 'Planes', icon: CreditCard, module: 'subscription' },
+          { path: '/subscription/payments', label: 'Historial de pagos', icon: Receipt, module: 'subscription' },
+        ],
+      },
+      {
         label: 'Preferencias',
         icon: Settings,
         children: [
-          { path: '/subscription', label: 'Planes', icon: CreditCard, module: 'subscription' },
           { path: '/profile', label: 'Mi perfil', icon: UserCircle, module: 'profile' },
           { path: '/categories', label: 'Categorías', icon: Tag, module: 'categories' },
           { path: '/templates', label: 'Plantillas', icon: MessageSquare, module: 'templates' },
@@ -258,10 +265,10 @@ const Layout: React.FC = () => {
 
     const hasAssignedPlan = Boolean(
       user.isSuperAdmin ||
-        user.hasUserSubscriptionRecord === true ||
-        subscription?.isSuperAdmin ||
-        subscription?.plan != null ||
-        (subscription != null && subscription.status !== 'none')
+      user.hasUserSubscriptionRecord === true ||
+      subscription?.isSuperAdmin ||
+      subscription?.plan != null ||
+      (subscription != null && subscription.status !== 'none')
     );
     if (hasAssignedPlan) {
       // Suscripción vencida: hay fila/plan pero sin acceso a módulos — mensaje y destino correctos
@@ -455,20 +462,19 @@ const Layout: React.FC = () => {
     >
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] max-w-[85vw] sm:w-64 transform transition-transform duration-300 ease-in-out pt-[env(safe-area-inset-top,0px)] bg-dark-800 border-r border-dark-700 ${
-          sidebarVisible ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] max-w-[85vw] sm:w-64 transform transition-transform duration-300 ease-in-out pt-[env(safe-area-inset-top,0px)] bg-dark-800 border-r border-dark-700 ${sidebarVisible ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
         <div className="flex flex-col h-full min-h-0">
           <div
             className="flex items-center justify-between gap-2 p-4 sm:p-6 border-b shrink-0 border-dark-700"
           >
             <div className="min-w-0">
-            <h1
-              className="text-lg sm:text-2xl font-bold truncate bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent"
-            >
-              Paulino Finance
-            </h1>
+              <h1
+                className="text-lg sm:text-2xl font-bold truncate bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent"
+              >
+                Paulino Finance
+              </h1>
             </div>
             <button
               type="button"
@@ -480,7 +486,7 @@ const Layout: React.FC = () => {
             </button>
           </div>
 
-          <nav className="flex-1 p-3 sm:p-4 space-y-1 overflow-y-auto overscroll-contain min-h-0">
+          <nav className="flex-1 p-3 sm:p-3 space-y-1 overflow-y-auto overscroll-contain min-h-0">
             {filteredMenuItems.map((item) => renderMenuItem(item))}
           </nav>
 
@@ -659,8 +665,9 @@ const Layout: React.FC = () => {
           <div className="bg-amber-900/35 border-b border-amber-700/50 px-3 sm:px-4 py-2.5 flex items-start gap-2 text-sm text-amber-100/95">
             <Wrench className="w-4 h-4 shrink-0 mt-0.5 text-amber-400/90" aria-hidden />
             <p>
-              La plataforma está en <span className="font-medium">modo mantenimiento</span>: solo lectura en
-              datos (ingresos, gastos, etc.). Inicio de sesión y consultas siguen disponibles.
+              La plataforma está en <span className="font-medium">modo mantenimiento</span>: no podrás crear ni
+              modificar datos (ingresos, gastos, etc.); inicio de sesión y la lectura de información siguen
+              disponibles. Los super administradores no ven esta restricción.
             </p>
           </div>
         )}
@@ -703,11 +710,10 @@ const Layout: React.FC = () => {
 
         {/* Page content */}
         <main
-          className={`flex-1 min-w-0 p-3 xs:p-4 sm:p-6 overflow-y-auto overflow-x-hidden ${
-            showMobileTabBar
-              ? 'pb-24 lg:pb-[max(1.5rem,env(safe-area-inset-bottom))]'
-              : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]'
-          }`}
+          className={`flex-1 min-w-0 p-3 xs:p-4 sm:p-6 overflow-y-auto overflow-x-hidden ${showMobileTabBar
+            ? 'pb-24 lg:pb-[max(1.5rem,env(safe-area-inset-bottom))]'
+            : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]'
+            }`}
         >
           <Outlet />
         </main>

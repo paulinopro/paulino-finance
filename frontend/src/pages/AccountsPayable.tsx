@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
@@ -9,9 +10,14 @@ import { Plus, Edit, Trash2, CheckCircle, Search, X, Calendar, Banknote, History
 import toast from 'react-hot-toast';
 import { LIST_CARD_SHELL, listCardAccentPayable, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { formatDateForInput, formatDateDdMmYyyy } from '../utils/dateUtils';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE } from '../constants/pagination';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
+import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
+import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
+import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 interface AccountPayable {
   id: number;
@@ -47,6 +53,11 @@ function todayYmd(): string {
 }
 
 const AccountsPayable: React.FC = () => {
+  const { user } = useAuth();
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'accounts_payable'
+  );
   const modalPanelRef = useRef<HTMLDivElement>(null);
   const payModalRef = useRef<HTMLDivElement>(null);
   const abonoModalRef = useRef<HTMLDivElement>(null);
@@ -376,19 +387,46 @@ const AccountsPayable: React.FC = () => {
     account.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const { ordered: orderedFiltered, setOrderByIds: setApOrderByIds } = usePersistedIdOrder<AccountPayable>({
+    module: 'accounts_payable',
+    userId: user?.id,
+    sourceItems: filteredAccounts,
+  });
+  const commitApOrder = useCallback(
+    (next: AccountPayable[]) => {
+      setApOrderByIds(next.map((a) => a.id));
+    },
+    [setApOrderByIds]
+  );
+
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
   }, [searchTerm, statusFilter]);
-  const apTotalPages = Math.max(1, Math.ceil(filteredAccounts.length / TABLE_PAGE_SIZE));
+  const apTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE));
   const apPageSafe = Math.min(listPage, apTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, apTotalPages));
   }, [apTotalPages]);
   const pagedAccountsPayable = useMemo(() => {
-    const start = (apPageSafe - 1) * TABLE_PAGE_SIZE;
-    return filteredAccounts.slice(start, start + TABLE_PAGE_SIZE);
-  }, [filteredAccounts, apPageSafe]);
+    const start = (apPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE;
+    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE);
+  }, [orderedFiltered, apPageSafe]);
+  const apListStart = (apPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE;
+  const listDnd = useListOrderPageDnd(pagedAccountsPayable, apListStart, orderedFiltered, commitApOrder);
+
+  const payableSummaryKpis = useMemo(() => {
+    let dop = 0;
+    let usd = 0;
+    for (const a of orderedFiltered) {
+      const rem = Math.max(0, a.amount - (a.totalPaid ?? 0));
+      if (a.status === 'PAID' || rem <= 0.0001) continue;
+      const c = String(a.currency || 'DOP').toUpperCase();
+      if (c === 'USD') usd += rem;
+      else dop += rem;
+    }
+    return { count: orderedFiltered.length, dop, usd };
+  }, [orderedFiltered]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -426,19 +464,45 @@ const AccountsPayable: React.FC = () => {
         title="Cuentas por Pagar"
         subtitle="Gestiona tus cuentas por pagar"
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setShowModal(true);
-            }}
-            className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto text-sm sm:text-base"
-          >
-            <Plus size={20} />
-            Nueva Cuenta por Pagar
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowModal(true);
+              }}
+              className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial text-sm sm:text-base"
+            >
+              <Plus size={20} />
+              Nueva Cuenta por Pagar
+            </button>
+          </div>
         }
       />
+
+      {summaryBarVisible && (
+        <div className="card-view">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Pendiente por pagar (DOP)</p>
+              <p className="text-2xl font-bold text-white">
+                {payableSummaryKpis.dop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+              </p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Pendiente por pagar (USD)</p>
+              <p className="text-2xl font-bold text-white">
+                {payableSummaryKpis.usd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD
+              </p>
+            </div>
+            <div>
+              <p className="text-dark-400 text-sm mb-1">Cantidad de Cuentas</p>
+              <p className="text-2xl font-bold text-white">{payableSummaryKpis.count}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card-view">
@@ -467,7 +531,7 @@ const AccountsPayable: React.FC = () => {
       </div>
 
       {/* Accounts List */}
-      {filteredAccounts.length === 0 ? (
+      {orderedFiltered.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
           <p className="text-dark-400">No hay cuentas por pagar</p>
         </div>
@@ -485,7 +549,15 @@ const AccountsPayable: React.FC = () => {
                   key={account.id}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={[LIST_CARD_SHELL, listCardAccentPayable(account.status)].join(' ')}
+                  onDragOver={listDnd.onDragOver}
+                  onDrop={listDnd.onDrop(account.id)}
+                  className={[
+                    LIST_CARD_SHELL,
+                    listCardAccentPayable(account.status),
+                    listDnd.dragId === account.id ? 'opacity-60' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                     <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
@@ -506,6 +578,12 @@ const AccountsPayable: React.FC = () => {
                       )}
                     </div>
                     <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                      <ListOrderDragHandle
+                        itemId={account.id}
+                        onDragStart={listDnd.onDragStart}
+                        onDragEnd={listDnd.onDragEnd}
+                        disabled={pagedAccountsPayable.length < 2}
+                      />
                       {canAct && (
                         <>
                           <button
@@ -605,8 +683,8 @@ const AccountsPayable: React.FC = () => {
           <TablePagination
             currentPage={apPageSafe}
             totalPages={apTotalPages}
-            totalItems={filteredAccounts.length}
-            itemsPerPage={TABLE_PAGE_SIZE}
+            totalItems={orderedFiltered.length}
+            itemsPerPage={TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE}
             onPageChange={setListPage}
             itemLabel="cuentas"
             variant="card"

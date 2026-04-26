@@ -35,12 +35,15 @@ const Projections = React.lazy(() => import('./pages/Projections'));
 const Vehicles = React.lazy(() => import('./pages/Vehicles'));
 const NotificationHistory = React.lazy(() => import('./pages/NotificationHistory'));
 const Categories = React.lazy(() => import('./pages/Categories'));
-const Admin = React.lazy(() => import('./pages/Admin'));
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const AdminUsers = React.lazy(() => import('./pages/AdminUsers'));
+const AdminSettings = React.lazy(() => import('./pages/AdminSettings'));
 const AdminUserDetail = React.lazy(() => import('./pages/AdminUserDetail'));
 const AdminSubscriptionPlans = React.lazy(() => import('./pages/AdminSubscriptionPlans'));
 const AdminAudit = React.lazy(() => import('./pages/AdminAudit'));
 const AdminStatus = React.lazy(() => import('./pages/AdminStatus'));
 const Subscription = React.lazy(() => import('./pages/Subscription'));
+const SubscriptionPayments = React.lazy(() => import('./pages/SubscriptionPayments'));
 
 function RouteFallback() {
   return (
@@ -99,8 +102,10 @@ function App() {
                     </AdminRoute>
                   }
                 >
-                  <Route index element={<Admin />} />
+                  <Route index element={<AdminDashboard />} />
+                  <Route path="users" element={<AdminUsers />} />
                   <Route path="users/:userId" element={<AdminUserDetail />} />
+                  <Route path="settings" element={<AdminSettings />} />
                   <Route path="audit" element={<AdminAudit />} />
                   <Route path="system" element={<AdminStatus />} />
                   <Route path="subscriptions" element={<AdminSubscriptionPlans />} />
@@ -127,6 +132,7 @@ function App() {
                   <Route path="notifications/history" element={<NotificationHistory />} />
                   <Route path="categories" element={<Categories />} />
                   <Route path="subscription" element={<Subscription />} />
+                  <Route path="subscription/payments" element={<SubscriptionPayments />} />
                 </Route>
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />

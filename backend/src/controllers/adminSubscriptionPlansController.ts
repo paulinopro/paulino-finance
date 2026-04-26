@@ -3,6 +3,12 @@ import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/database';
 import { logAdminAction } from '../services/adminAuditService';
 import { syncPaypalSubscriptionPlanById } from '../services/paypalPlanProvisioningService';
+import {
+  SUBSCRIPTION_MODULE_KEYS,
+  enabledModulesHasAtLeastOne,
+  normalizeEnabledModulesObject,
+} from '../constants/subscriptionModules';
+import { invalidateAdminStatsCache } from './adminStatsCacheStore';
 
 export const listSubscriptionPlans = async (_req: AuthRequest, res: Response) => {
   try {
@@ -55,8 +61,13 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       sortOrder,
     } = req.body;
 
-    if (!name || !slug || !enabledModules || typeof enabledModules !== 'object') {
-      return res.status(400).json({ message: 'name, slug y enabledModules son requeridos' });
+    if (!name || !slug) {
+      return res.status(400).json({ message: 'name y slug son requeridos' });
+    }
+
+    const modulesNorm = normalizeEnabledModulesObject(enabledModules);
+    if (!enabledModulesHasAtLeastOne(modulesNorm)) {
+      return res.status(400).json({ message: 'Seleccione al menos un módulo para el plan' });
     }
 
     const result = await query(
@@ -75,14 +86,19 @@ export const createSubscriptionPlan = async (req: AuthRequest, res: Response) =>
         paypalProductId || null,
         paypalPlanIdMonthly || null,
         paypalPlanIdYearly || null,
-        JSON.stringify(enabledModules),
+        JSON.stringify(modulesNorm),
         isActive !== false,
         sortOrder ?? 0,
       ]
     );
 
     const newId = result.rows[0].id as number;
-    void logAdminAction(req.userId!, 'plan.create', 'subscription_plan', newId, { name, slug });
+    void logAdminAction(req.userId!, 'plan.create', 'subscription_plan', newId, {
+      name,
+      slug,
+      enabledModulesKeysOn: SUBSCRIPTION_MODULE_KEYS.filter((k) => modulesNorm[k]),
+    });
+    invalidateAdminStatsCache();
     res.status(201).json({ id: newId });
   } catch (e: any) {
     if (e.code === '23505') {
@@ -117,50 +133,84 @@ export const updateSubscriptionPlan = async (req: AuthRequest, res: Response) =>
 
     const updates: string[] = [];
     const values: unknown[] = [];
+    const changedFields: string[] = [];
+    const auditPatch: Record<string, unknown> = {};
 
     if (name !== undefined) {
+      changedFields.push('name');
       updates.push(`name = $${values.length + 1}`);
       values.push(String(name).slice(0, 255));
+      auditPatch.name = String(name).slice(0, 255);
     }
     if (slug !== undefined) {
+      changedFields.push('slug');
       updates.push(`slug = $${values.length + 1}`);
       values.push(String(slug).toLowerCase().replace(/\s+/g, '-').slice(0, 80));
+      auditPatch.slug = String(slug).toLowerCase().replace(/\s+/g, '-').slice(0, 80);
     }
     if (description !== undefined) {
+      changedFields.push('description');
       updates.push(`description = $${values.length + 1}`);
       values.push(description);
+      auditPatch.description = description;
     }
     if (priceMonthly !== undefined) {
+      changedFields.push('price_monthly');
       updates.push(`price_monthly = $${values.length + 1}`);
       values.push(priceMonthly);
+      auditPatch.priceMonthly = priceMonthly;
     }
     if (priceYearly !== undefined) {
+      changedFields.push('price_yearly');
       updates.push(`price_yearly = $${values.length + 1}`);
       values.push(priceYearly);
+      auditPatch.priceYearly = priceYearly;
     }
     if (currency !== undefined) {
+      changedFields.push('currency');
       updates.push(`currency = $${values.length + 1}`);
       values.push(String(currency).slice(0, 3));
+      auditPatch.currency = String(currency).slice(0, 3);
+    }
+    if (paypalProductId !== undefined) {
+      changedFields.push('paypal_product_id');
+      updates.push(`paypal_product_id = $${values.length + 1}`);
+      values.push(paypalProductId || null);
+      auditPatch.paypalProductId = paypalProductId || null;
     }
     if (paypalPlanIdMonthly !== undefined) {
+      changedFields.push('paypal_plan_id_monthly');
       updates.push(`paypal_plan_id_monthly = $${values.length + 1}`);
       values.push(paypalPlanIdMonthly || null);
+      auditPatch.paypalPlanIdMonthly = paypalPlanIdMonthly || null;
     }
     if (paypalPlanIdYearly !== undefined) {
+      changedFields.push('paypal_plan_id_yearly');
       updates.push(`paypal_plan_id_yearly = $${values.length + 1}`);
       values.push(paypalPlanIdYearly || null);
+      auditPatch.paypalPlanIdYearly = paypalPlanIdYearly || null;
     }
     if (enabledModules !== undefined) {
+      const modulesNorm = normalizeEnabledModulesObject(enabledModules);
+      if (!enabledModulesHasAtLeastOne(modulesNorm)) {
+        return res.status(400).json({ message: 'Seleccione al menos un módulo para el plan' });
+      }
+      changedFields.push('enabled_modules');
       updates.push(`enabled_modules = $${values.length + 1}::jsonb`);
-      values.push(JSON.stringify(enabledModules));
+      values.push(JSON.stringify(modulesNorm));
+      auditPatch.enabledModulesKeysOn = SUBSCRIPTION_MODULE_KEYS.filter((k) => modulesNorm[k]);
     }
     if (isActive !== undefined) {
+      changedFields.push('is_active');
       updates.push(`is_active = $${values.length + 1}`);
       values.push(!!isActive);
+      auditPatch.isActive = !!isActive;
     }
     if (sortOrder !== undefined) {
+      changedFields.push('sort_order');
       updates.push(`sort_order = $${values.length + 1}`);
       values.push(sortOrder);
+      auditPatch.sortOrder = sortOrder;
     }
 
     if (updates.length === 0) {
@@ -175,7 +225,11 @@ export const updateSubscriptionPlan = async (req: AuthRequest, res: Response) =>
       values
     );
 
-    void logAdminAction(req.userId!, 'plan.update', 'subscription_plan', id, { body: req.body });
+    void logAdminAction(req.userId!, 'plan.update', 'subscription_plan', id, {
+      changedFields,
+      patch: auditPatch,
+    });
+    invalidateAdminStatsCache();
     res.json({ success: true });
   } catch (e: any) {
     console.error('updateSubscriptionPlan', e);
@@ -231,6 +285,7 @@ export const deleteSubscriptionPlan = async (req: AuthRequest, res: Response) =>
 
     await query(`DELETE FROM subscription_plans WHERE id = $1`, [id]);
     void logAdminAction(req.userId!, 'plan.delete', 'subscription_plan', id, {});
+    invalidateAdminStatsCache();
     res.json({ success: true });
   } catch (e: any) {
     console.error('deleteSubscriptionPlan', e);

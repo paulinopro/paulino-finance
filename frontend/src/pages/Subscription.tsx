@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CreditCard, Check, Loader2, Receipt } from 'lucide-react';
+import { CreditCard, Check, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { subscriptionClientService, SubscriptionPaymentItem } from '../services/subscriptionClientService';
+import { subscriptionClientService } from '../services/subscriptionClientService';
 import { useSubscription } from '../context/SubscriptionContext';
 import { useAuth } from '../context/AuthContext';
 import { SUBSCRIPTION_MODULE_KEYS, subscriptionModuleLabelEs } from '../constants/subscriptionModules';
@@ -14,25 +14,6 @@ const Subscription: React.FC = () => {
   const [plans, setPlans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkoutPlan, setCheckoutPlan] = useState<number | null>(null);
-  const [payments, setPayments] = useState<SubscriptionPaymentItem[]>([]);
-  const [paymentsLoading, setPaymentsLoading] = useState(true);
-
-  const loadPayments = useCallback(async () => {
-    if (user?.isSuperAdmin) {
-      setPayments([]);
-      setPaymentsLoading(false);
-      return;
-    }
-    setPaymentsLoading(true);
-    try {
-      const list = await subscriptionClientService.getPaymentHistory();
-      setPayments(list);
-    } catch {
-      setPayments([]);
-    } finally {
-      setPaymentsLoading(false);
-    }
-  }, [user?.isSuperAdmin]);
 
   useEffect(() => {
     subscriptionClientService
@@ -41,10 +22,6 @@ const Subscription: React.FC = () => {
       .catch(() => toast.error('No se pudieron cargar los planes'))
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    void loadPayments();
-  }, [loadPayments]);
 
   const startPaypal = async (planId: number, billingCycle: 'monthly' | 'yearly') => {
     const base = window.location.origin;
@@ -71,14 +48,13 @@ const Subscription: React.FC = () => {
     if (q.get('paypal') === 'return') {
       toast.success('Si completaste el pago en PayPal, tu plan se actualizará en breve.');
       refetch();
-      void loadPayments();
       window.history.replaceState({}, '', '/subscription');
     }
     if (q.get('paypal') === 'cancel') {
       toast('Pago cancelado');
       window.history.replaceState({}, '', '/subscription');
     }
-  }, [refetch, loadPayments]);
+  }, [refetch]);
 
   const fmtDateTime = (iso: string | null | undefined) => {
     if (!iso) return '—';
@@ -194,13 +170,13 @@ const Subscription: React.FC = () => {
                     )}
                   </div>
 
-                  <ul className="space-y-2 text-sm text-dark-300">
+                  <ul className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-dark-300">
                     {p.enabledModules &&
                       typeof p.enabledModules === 'object' &&
                       SUBSCRIPTION_MODULE_KEYS.filter((k) => !!p.enabledModules?.[k]).map((k) => (
-                        <li key={k} className="flex items-center gap-2">
+                        <li key={k} className="flex items-center gap-2 min-w-0">
                           <Check className="h-4 w-4 shrink-0 text-emerald-500" />
-                          {subscriptionModuleLabelEs(k)}
+                          <span className="min-w-0 break-words leading-snug">{subscriptionModuleLabelEs(k)}</span>
                         </li>
                       ))}
                   </ul>
@@ -234,63 +210,6 @@ const Subscription: React.FC = () => {
             );
           })}
         </div>
-      )}
-
-      {!user?.isSuperAdmin && (
-        <section className="space-y-3" aria-labelledby="subscription-payments-heading">
-          <h2 id="subscription-payments-heading" className="flex items-center gap-2 text-lg font-semibold text-white sm:text-xl">
-            <Receipt className="h-5 w-5 text-primary-400 shrink-0" aria-hidden />
-            Historial de pagos
-          </h2>
-          {paymentsLoading ? (
-            <div className="flex justify-center py-10 text-dark-400">
-              <Loader2 className="h-7 w-7 animate-spin" />
-            </div>
-          ) : payments.length === 0 ? (
-            <div className="card-view text-center py-10 text-dark-400 text-sm">
-              No hay pagos registrados aún. Tras un cobro, aparecerá aquí automáticamente.
-            </div>
-          ) : (
-            <div className="card-view overflow-x-auto p-0 sm:p-0">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-dark-600/80 bg-dark-900/50 text-[0.7rem] uppercase tracking-wider text-dark-500">
-                    <th className="px-4 py-3 font-medium sm:px-5">Fecha de pago</th>
-                    <th className="px-2 py-3 font-medium">Plan</th>
-                    <th className="px-2 py-3 font-medium">Importe</th>
-                    <th className="px-2 py-3 font-medium">Periodo facturado</th>
-                    <th className="px-4 py-3 font-medium sm:pr-5 text-right">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payments.map((p) => (
-                    <tr key={p.id} className="border-b border-dark-700/50 last:border-0 text-dark-200">
-                      <td className="px-4 py-3 sm:px-5 whitespace-nowrap tabular-nums text-dark-300">
-                        {fmtDateTime(p.paidAt)}
-                      </td>
-                      <td className="px-2 py-3 text-dark-200">{p.planName || '—'}</td>
-                      <td className="px-2 py-3 tabular-nums">
-                        {new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' }).format(
-                          parseFloat(p.amount) || 0
-                        )}
-                      </td>
-                      <td className="px-2 py-3 text-xs sm:text-sm text-dark-300">
-                        {p.periodStart || p.periodEnd ? (
-                          <>
-                            {fmtDateTime(p.periodStart)} → {fmtDateTime(p.periodEnd)}
-                          </>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="px-4 py-3 sm:pr-5 text-right text-xs capitalize text-dark-400">{p.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
       )}
 
       {user?.isSuperAdmin && (

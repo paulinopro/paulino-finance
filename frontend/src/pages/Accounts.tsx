@@ -7,10 +7,17 @@ import { Plus, Edit, Trash2, Wallet, Search, X, ArrowLeftRight, Copy } from 'luc
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { LIST_CARD_SHELL, listCardAccentNeutral, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { TABLE_PAGE_SIZE_ACCOUNTS } from '../constants/pagination';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
+import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
+import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
+
+const MONEY_2DP: Intl.NumberFormatOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
 /** Texto para compartir datos de cuenta bancaria. NOMBRE y CEDULA solo si hay datos en el perfil. */
 function buildBankAccountCopyText(
@@ -118,19 +125,38 @@ const Accounts: React.FC = () => {
     fetchAccounts();
   }, [fetchAccounts]);
 
+  const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
+    user?.id,
+    'accounts'
+  );
+
+  const { ordered: orderedAccounts, setOrderByIds } = usePersistedIdOrder<BankAccount>({
+    module: 'accounts',
+    userId: user?.id,
+    sourceItems: accounts,
+  });
+  const commitAccountOrder = useCallback(
+    (next: BankAccount[]) => {
+      setOrderByIds(next.map((a) => a.id));
+    },
+    [setOrderByIds]
+  );
+
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
   }, [searchTerm, bankFilter]);
-  const accountTotalPages = Math.max(1, Math.ceil(accounts.length / TABLE_PAGE_SIZE));
+  const accountTotalPages = Math.max(1, Math.ceil(orderedAccounts.length / TABLE_PAGE_SIZE_ACCOUNTS));
   const accountPageSafe = Math.min(listPage, accountTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, accountTotalPages));
   }, [accountTotalPages]);
   const pagedAccounts = useMemo(() => {
-    const start = (accountPageSafe - 1) * TABLE_PAGE_SIZE;
-    return accounts.slice(start, start + TABLE_PAGE_SIZE);
-  }, [accounts, accountPageSafe]);
+    const start = (accountPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS;
+    return orderedAccounts.slice(start, start + TABLE_PAGE_SIZE_ACCOUNTS);
+  }, [orderedAccounts, accountPageSafe]);
+  const accountListStart = (accountPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS;
+  const listDnd = useListOrderPageDnd(pagedAccounts, accountListStart, orderedAccounts, commitAccountOrder);
 
   const copyBankAccountDetails = async (account: BankAccount) => {
     const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
@@ -252,7 +278,8 @@ const Accounts: React.FC = () => {
         title="Cuentas financieras"
         subtitle="Bancos, efectivo y billeteras — un solo lugar"
         actions={
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto shrink-0 items-stretch sm:items-center justify-end">
+            <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
             <button
               type="button"
               onClick={() => setShowTransferModal(true)}
@@ -285,16 +312,16 @@ const Accounts: React.FC = () => {
       />
 
       {/* Summary */}
-      {summary && (
+      {summaryBarVisible && summary && (
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Balance Total DOP</p>
-              <p className="text-2xl font-bold text-white">{summary.totalBalanceDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">Balance Total (DOP)</p>
+              <p className="text-2xl font-bold text-white">{summary.totalBalanceDop.toLocaleString('es-DO', MONEY_2DP)} DOP</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Balance Total USD</p>
-              <p className="text-2xl font-bold text-white">{summary.totalBalanceUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
+              <p className="text-dark-400 text-sm mb-1">Balance Total (USD)</p>
+              <p className="text-2xl font-bold text-white">{summary.totalBalanceUsd.toLocaleString('es-DO', MONEY_2DP)} USD</p>
             </div>
             <div>
               <p className="text-dark-400 text-sm mb-1">Cantidad de Cuentas</p>
@@ -352,110 +379,122 @@ const Accounts: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
-          {pagedAccounts.map((account) => (
-            <motion.article
-              key={account.id}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={[LIST_CARD_SHELL, listCardAccentNeutral()].join(' ')}
-            >
-              <div className="flex flex-row gap-3 justify-between items-start">
-                <div className="min-w-0 flex-1 space-y-2 pr-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
-                      <span aria-hidden>{account.accountKind === 'bank' ? '🏦' : '💵'}</span>
-                      <Wallet className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                      {account.accountType}
-                    </span>
-                    <span className="text-xs text-dark-500 sm:text-sm">{account.currencyType}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
+            {pagedAccounts.map((account) => (
+              <motion.article
+                key={account.id}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                onDragOver={listDnd.onDragOver}
+                onDrop={listDnd.onDrop(account.id)}
+                className={[
+                  LIST_CARD_SHELL,
+                  listCardAccentNeutral(),
+                  listDnd.dragId === account.id ? 'opacity-60' : '',
+                ].join(' ')}
+              >
+                <div className="flex flex-row gap-3 justify-between items-start">
+                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
+                        <span aria-hidden>{account.accountKind === 'bank' ? '🏦' : '💵'}</span>
+                        <Wallet className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
+                        {account.accountType}
+                      </span>
+                      <span className="text-xs text-dark-500 sm:text-sm">{account.currencyType}</span>
+                    </div>
+                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{account.bankName}</h3>
+                    {account.accountNumber && (
+                      <span className="inline-flex max-w-full truncate rounded-md bg-primary-600/15 px-2 py-0.5 text-xs font-medium text-primary-200 ring-1 ring-primary-500/25">
+                        {account.accountNumber}
+                      </span>
+                    )}
                   </div>
-                  <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{account.bankName}</h3>
-                  {account.accountNumber && (
-                    <span className="inline-flex max-w-full truncate rounded-md bg-primary-600/15 px-2 py-0.5 text-xs font-medium text-primary-200 ring-1 ring-primary-500/25">
-                      {account.accountNumber}
-                    </span>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  {account.accountKind === 'bank' && (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <ListOrderDragHandle
+                      itemId={account.id}
+                      onDragStart={listDnd.onDragStart}
+                      onDragEnd={listDnd.onDragEnd}
+                      disabled={pagedAccounts.length < 2}
+                    />
+                    {account.accountKind === 'bank' && (
+                      <button
+                        type="button"
+                        onClick={() => copyBankAccountDetails(account)}
+                        className={listCardBtnEdit}
+                        title="Copiar datos de la cuenta"
+                        aria-label="Copiar datos de la cuenta"
+                      >
+                        <Copy className="h-5 w-5" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => copyBankAccountDetails(account)}
+                      onClick={() => {
+                        setEditingAccount(account);
+                        setFormData({
+                          bankName: account.bankName,
+                          accountType: account.accountType,
+                          accountNumber: account.accountNumber || '',
+                          balanceDop: account.balanceDop.toString(),
+                          balanceUsd: account.balanceUsd.toString(),
+                          currencyType: account.currencyType,
+                          accountKind: account.accountKind || 'bank',
+                        });
+                        setShowModal(true);
+                      }}
                       className={listCardBtnEdit}
-                      title="Copiar datos de la cuenta"
-                      aria-label="Copiar datos de la cuenta"
+                      title="Editar"
+                      aria-label="Editar cuenta"
                     >
-                      <Copy className="h-5 w-5" />
+                      <Edit className="h-5 w-5" />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingAccount(account);
-                      setFormData({
-                        bankName: account.bankName,
-                        accountType: account.accountType,
-                        accountNumber: account.accountNumber || '',
-                        balanceDop: account.balanceDop.toString(),
-                        balanceUsd: account.balanceUsd.toString(),
-                        currencyType: account.currencyType,
-                        accountKind: account.accountKind || 'bank',
-                      });
-                      setShowModal(true);
-                    }}
-                    className={listCardBtnEdit}
-                    title="Editar"
-                    aria-label="Editar cuenta"
-                  >
-                    <Edit className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(account.id)}
-                    className={listCardBtnDanger}
-                    title="Eliminar"
-                    aria-label="Eliminar cuenta"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(account.id)}
+                      className={listCardBtnDanger}
+                      title="Eliminar"
+                      aria-label="Eliminar cuenta"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
-                <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
-                  {(account.currencyType === 'DOP' || account.currencyType === 'DUAL') && (
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Balance DOP</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {account.balanceDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">DOP</span>
-                      </p>
-                    </div>
-                  )}
-                  {(account.currencyType === 'USD' || account.currencyType === 'DUAL') && (
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Balance USD</p>
-                      <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {account.balanceUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">USD</span>
-                      </p>
-                    </div>
-                  )}
+                <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
+                    {(account.currencyType === 'DOP' || account.currencyType === 'DUAL') && (
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Balance DOP</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                          {account.balanceDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                          <span className="text-xs font-normal text-dark-400">DOP</span>
+                        </p>
+                      </div>
+                    )}
+                    {(account.currencyType === 'USD' || account.currencyType === 'DUAL') && (
+                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Balance USD</p>
+                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
+                          {account.balanceUsd.toLocaleString('es-DO', MONEY_2DP)}{' '}
+                          <span className="text-xs font-normal text-dark-400">USD</span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </motion.article>
-          ))}
-        </div>
-        <TablePagination
-          currentPage={accountPageSafe}
-          totalPages={accountTotalPages}
-          totalItems={accounts.length}
-          itemsPerPage={TABLE_PAGE_SIZE}
-          onPageChange={setListPage}
-          itemLabel="cuentas"
-          variant="card"
-        />
+              </motion.article>
+            ))}
+          </div>
+          <TablePagination
+            currentPage={accountPageSafe}
+            totalPages={accountTotalPages}
+            totalItems={orderedAccounts.length}
+            itemsPerPage={TABLE_PAGE_SIZE_ACCOUNTS}
+            onPageChange={setListPage}
+            itemLabel="cuentas"
+            variant="card"
+          />
         </div>
       )}
 

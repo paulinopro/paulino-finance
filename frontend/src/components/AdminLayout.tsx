@@ -6,7 +6,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   LogOut,
-  Shield,
+  LayoutDashboard,
+  Users,
+  Settings,
   Layers,
   ListTree,
   Stethoscope,
@@ -17,7 +19,9 @@ import { clearSuperAdminClientView, setSuperAdminClientViewOn } from '../constan
 const SIDEBAR_COLLAPSED_KEY = 'paulino-admin-sidebar-collapsed';
 
 const NAV = [
-  { to: '/admin', label: 'Usuarios', icon: Shield, isActive: (p: string) => p === '/admin' || p.startsWith('/admin/users/') },
+  { to: '/admin', label: 'Resumen', icon: LayoutDashboard, isActive: (p: string) => p === '/admin' || p === '/admin/' },
+  { to: '/admin/users', label: 'Usuarios', icon: Users, isActive: (p: string) => p === '/admin/users' || p.startsWith('/admin/users/') },
+  { to: '/admin/settings', label: 'Configuración', icon: Settings, isActive: (p: string) => p === '/admin/settings' },
   { to: '/admin/audit', label: 'Auditoría', icon: ListTree, isActive: (p: string) => p === '/admin/audit' },
   { to: '/admin/system', label: 'Estado', icon: Stethoscope, isActive: (p: string) => p === '/admin/system' },
   {

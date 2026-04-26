@@ -6,15 +6,28 @@ import { assignPlanToUser, getSubscriptionDetailsForUser, getSubscriptionPayment
 import { logAdminAction } from '../services/adminAuditService';
 import { invalidateMaintenanceModeCache } from '../middleware/maintenanceMode';
 import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import {
+  ADMIN_STATS_TTL_MS,
+  getAdminStatsCacheEntry,
+  invalidateAdminStatsCache,
+  setAdminStatsCacheEntry,
+} from './adminStatsCacheStore';
 
 const SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'cancelled', 'expired', 'past_due']);
 const USERS_EXPORT_MAX = 10_000;
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 type ParsedUserListFilters = {
   search: string;
   isActive: 'true' | 'false' | null;
   planId: 'none' | number | null;
   subscriptionStatus: string | null;
+  createdFrom: string | null;
+  createdTo: string | null;
+  /** Rango calendario (YYYY-MM-DD) en UTC para solapar con el periodo de facturación */
+  billingPeriodFrom: string | null;
+  billingPeriodTo: string | null;
 };
 
 function parseUserListFilters(req: { query: Record<string, unknown> }): ParsedUserListFilters {
@@ -30,7 +43,24 @@ function parseUserListFilters(req: { query: Record<string, unknown> }): ParsedUs
   }
   const st = String(req.query.subscriptionStatus || '').trim().toLowerCase();
   const subscriptionStatus = st && SUBSCRIPTION_STATUSES.has(st) ? st : null;
-  return { search, isActive, planId, subscriptionStatus };
+  const cf = String(req.query.createdFrom || '').trim();
+  const ct = String(req.query.createdTo || '').trim();
+  const createdFrom = ISO_DATE.test(cf) ? cf : null;
+  const createdTo = ISO_DATE.test(ct) ? ct : null;
+  const bpf = String(req.query.billingPeriodFrom || '').trim();
+  const bpt = String(req.query.billingPeriodTo || '').trim();
+  const billingPeriodFrom = ISO_DATE.test(bpf) ? bpf : null;
+  const billingPeriodTo = ISO_DATE.test(bpt) ? bpt : null;
+  return {
+    search,
+    isActive,
+    planId,
+    subscriptionStatus,
+    createdFrom,
+    createdTo,
+    billingPeriodFrom,
+    billingPeriodTo,
+  };
 }
 
 /**
@@ -66,12 +96,48 @@ function buildUserListWhere(f: ParsedUserListFilters): { whereSql: string; value
     values.push(f.subscriptionStatus);
     p++;
   }
+  if (f.createdFrom) {
+    cond.push(`u.created_at >= $${p}::date`);
+    values.push(f.createdFrom);
+    p++;
+  }
+  if (f.createdTo) {
+    cond.push(`u.created_at < ($${p}::date + INTERVAL '1 day')`);
+    values.push(f.createdTo);
+    p++;
+  }
+
+  if (f.billingPeriodFrom || f.billingPeriodTo) {
+    cond.push('us.id IS NOT NULL');
+    cond.push('us.current_period_start IS NOT NULL');
+    cond.push('us.current_period_end IS NOT NULL');
+    const startUtc = `(us.current_period_start AT TIME ZONE 'UTC')::date`;
+    const endUtc = `(us.current_period_end AT TIME ZONE 'UTC')::date`;
+    if (f.billingPeriodFrom && f.billingPeriodTo) {
+      cond.push(`${startUtc} <= $${p}::date`);
+      values.push(f.billingPeriodTo);
+      p++;
+      cond.push(`${endUtc} >= $${p}::date`);
+      values.push(f.billingPeriodFrom);
+      p++;
+    } else if (f.billingPeriodFrom) {
+      cond.push(`${endUtc} >= $${p}::date`);
+      values.push(f.billingPeriodFrom);
+      p++;
+    } else if (f.billingPeriodTo) {
+      cond.push(`${startUtc} <= $${p}::date`);
+      values.push(f.billingPeriodTo);
+      p++;
+    }
+  }
 
   const whereSql = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
   return { whereSql, values };
 }
 
 function mapUserListRow(u: Record<string, unknown>) {
+  const t0 = u.current_period_start;
+  const t1 = u.current_period_end;
   return {
     id: u.id,
     email: u.email,
@@ -84,6 +150,8 @@ function mapUserListRow(u: Record<string, unknown>) {
     subscriptionPlan: u.plan_slug || 'free',
     subscriptionPlanName: u.plan_name || null,
     subscriptionStatus: (u.subscription_status as string) || (u.is_super_admin ? 'n/a' : 'sin suscripción'),
+    currentPeriodStart: t0 ? new Date(t0 as string).toISOString() : null,
+    currentPeriodEnd: t1 ? new Date(t1 as string).toISOString() : null,
   };
 }
 
@@ -94,6 +162,10 @@ function csvEscape(s: string): string {
 
 export const getAdminStats = async (_req: AuthRequest, res: Response) => {
   try {
+    const cached = getAdminStatsCacheEntry();
+    if (cached && Date.now() - cached.t < ADMIN_STATS_TTL_MS) {
+      return res.json(cached.payload);
+    }
     const r = await query(
       `SELECT
         (SELECT COUNT(*)::int FROM users) AS total_users,
@@ -102,19 +174,73 @@ export const getAdminStats = async (_req: AuthRequest, res: Response) => {
         (SELECT COUNT(*)::int FROM user_subscriptions) AS with_subscription,
         (SELECT COUNT(*)::int FROM users WHERE is_super_admin = true) AS super_admins,
         (SELECT COUNT(*)::int FROM users WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days')) AS new_last_7d,
-        (SELECT COUNT(*)::int FROM admin_audit_log WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL '24 hours')) AS audit_last_24h
+        (SELECT COUNT(*)::int FROM users WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL '30 days')) AS new_last_30d,
+        (SELECT COUNT(*)::int FROM admin_audit_log WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL '24 hours')) AS audit_last_24h,
+        (SELECT COUNT(*)::int FROM user_subscriptions WHERE LOWER(COALESCE(status, '')) = 'active') AS sub_active,
+        (SELECT COUNT(*)::int FROM user_subscriptions WHERE LOWER(COALESCE(status, '')) = 'trialing') AS sub_trialing,
+        (SELECT COUNT(*)::int FROM user_subscriptions WHERE LOWER(COALESCE(status, '')) = 'cancelled') AS sub_cancelled,
+        (SELECT COUNT(*)::int FROM user_subscriptions WHERE LOWER(COALESCE(status, '')) = 'expired') AS sub_expired,
+        (SELECT COUNT(*)::int FROM user_subscriptions WHERE LOWER(COALESCE(status, '')) = 'past_due') AS sub_past_due,
+        (SELECT COUNT(*)::int FROM users u WHERE NOT EXISTS (SELECT 1 FROM user_subscriptions s WHERE s.user_id = u.id)) AS users_no_subscription
       `
     );
     const row = r.rows[0];
-    res.json({
+    const pr = await query(
+      `SELECT sp.id, sp.name, COUNT(us.user_id)::int AS user_count
+       FROM subscription_plans sp
+       LEFT JOIN user_subscriptions us ON us.plan_id = sp.id
+       GROUP BY sp.id, sp.name
+       ORDER BY sp.sort_order ASC, sp.id ASC`
+    );
+    const paySummary = await query(
+      `SELECT
+         COUNT(*)::int AS total_count,
+         COUNT(*) FILTER (WHERE paid_at >= (CURRENT_TIMESTAMP - INTERVAL '30 days'))::int AS count_30d
+       FROM subscription_payments
+       WHERE LOWER(COALESCE(status, '')) = 'completed'`
+    );
+    const payRow = paySummary.rows[0] as { total_count?: number; count_30d?: number } | undefined;
+    const payByCur = await query(
+      `SELECT currency, COALESCE(SUM(amount), 0)::numeric AS total
+       FROM subscription_payments
+       WHERE paid_at >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+         AND LOWER(COALESCE(status, '')) = 'completed'
+       GROUP BY currency
+       ORDER BY currency ASC`
+    );
+    const payload = {
       totalUsers: row?.total_users ?? 0,
       activeUsers: row?.active_users ?? 0,
       disabledUsers: row?.disabled_users ?? 0,
       withSubscription: row?.with_subscription ?? 0,
       superAdmins: row?.super_admins ?? 0,
       newLast7d: row?.new_last_7d ?? 0,
+      newLast30d: row?.new_last_30d ?? 0,
       auditEventsLast24h: row?.audit_last_24h ?? 0,
-    });
+      subscriptionByStatus: {
+        active: row?.sub_active ?? 0,
+        trialing: row?.sub_trialing ?? 0,
+        cancelled: row?.sub_cancelled ?? 0,
+        expired: row?.sub_expired ?? 0,
+        pastDue: row?.sub_past_due ?? 0,
+      },
+      usersWithoutSubscription: row?.users_no_subscription ?? 0,
+      planDistribution: pr.rows.map((p: { id: number; name: string; user_count: number }) => ({
+        planId: p.id,
+        planName: p.name,
+        userCount: p.user_count,
+      })),
+      subscriptionPayments: {
+        totalRecorded: payRow?.total_count ?? 0,
+        last30dCount: payRow?.count_30d ?? 0,
+        last30dAmountByCurrency: payByCur.rows.map((c: { currency: string; total: string }) => ({
+          currency: c.currency,
+          total: parseFloat(String(c.total)) || 0,
+        })),
+      },
+    };
+    setAdminStatsCacheEntry({ t: Date.now(), payload });
+    res.json(payload);
   } catch (e: any) {
     console.error('getAdminStats error', e);
     res.status(500).json({ message: 'Error al cargar estadísticas' });
@@ -330,7 +456,8 @@ export const listUsers = async (req: AuthRequest, res: Response) => {
     const pl = values.length;
     const baseSelect = `SELECT u.id, u.email, u.first_name, u.last_name, u.created_at, u.is_super_admin, u.is_active,
                   us.plan_id AS plan_id,
-                  sp.slug AS plan_slug, sp.name AS plan_name, us.status AS subscription_status`;
+                  sp.slug AS plan_slug, sp.name AS plan_name, us.status AS subscription_status,
+                  us.current_period_start, us.current_period_end`;
 
     const dataValues = [...values, limit, offset];
     const result = await query(
@@ -365,7 +492,8 @@ async function listUsersAsCsv(req: AuthRequest, res: Response) {
   const result = await query(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.created_at, u.is_super_admin, u.is_active,
             us.plan_id AS plan_id,
-            sp.slug AS plan_slug, sp.name AS plan_name, us.status AS subscription_status
+            sp.slug AS plan_slug, sp.name AS plan_name, us.status AS subscription_status,
+            us.current_period_start, us.current_period_end
      ${baseFrom}
      ${whereSql}
      ORDER BY u.created_at DESC
@@ -374,7 +502,7 @@ async function listUsersAsCsv(req: AuthRequest, res: Response) {
   );
 
   const header =
-    'id,email,firstName,lastName,createdAt,isSuperAdmin,isActive,planId,plan_slug,plan_name,subscription_status\n';
+    'id,email,firstName,lastName,createdAt,isSuperAdmin,isActive,planId,plan_slug,plan_name,subscription_status,currentPeriodStart,currentPeriodEnd\n';
   const lines = result.rows.map((u: any) => {
     const o = mapUserListRow(u);
     return [
@@ -389,6 +517,8 @@ async function listUsersAsCsv(req: AuthRequest, res: Response) {
       o.subscriptionPlan,
       o.subscriptionPlanName || '',
       o.subscriptionStatus,
+      o.currentPeriodStart || '',
+      o.currentPeriodEnd || '',
     ]
       .map((c) => csvEscape(String(c)))
       .join(',');
@@ -690,19 +820,23 @@ export const updateUserAdmin = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    void logAdminAction(req.userId!, 'user.update', 'user', targetId, {
-      isActive,
-      subscriptionPlan,
-      subscriptionStatus,
-      planId: planId !== undefined && planId !== null ? planId : undefined,
-      billingInterval:
-        planId == null
-          ? undefined
-          : billingInterval === 'yearly'
-            ? 'yearly'
-            : 'monthly',
-    });
+    const userAudit: Record<string, unknown> = {};
+    if (typeof isActive === 'boolean') userAudit.isActive = isActive;
+    if (subscriptionPlan !== undefined) {
+      userAudit.subscriptionPlan = String(subscriptionPlan).slice(0, 50);
+    }
+    if (subscriptionStatus !== undefined) {
+      userAudit.subscriptionStatus = String(subscriptionStatus).slice(0, 50);
+    }
+    if (planId !== undefined && planId !== null) {
+      userAudit.planId = parseInt(String(planId), 10);
+      if (billingInterval === 'yearly' || billingInterval === 'monthly') {
+        userAudit.billingInterval = billingInterval;
+      }
+    }
+    void logAdminAction(req.userId!, 'user.update', 'user', targetId, userAudit);
 
+    invalidateAdminStatsCache();
     res.json({ success: true });
   } catch (error: any) {
     console.error('updateUserAdmin error:', error);
