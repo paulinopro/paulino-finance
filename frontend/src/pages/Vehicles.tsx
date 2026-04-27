@@ -17,6 +17,7 @@ import {
 } from '../utils/listCard';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { todayYmdLocal, formatDateDdMmYyyy } from '../utils/dateUtils';
@@ -60,6 +61,8 @@ interface VehicleExpense {
 
 const Vehicles: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: vehiclePageSize, setPageSize: setVehiclePageSize, pageSizeOptions: vehiclePageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:vehicles', TABLE_PAGE_SIZE);
   const vehicleModalRef = useRef<HTMLDivElement>(null);
   const expenseModalRef = useRef<HTMLDivElement>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -316,16 +319,16 @@ const Vehicles: React.FC = () => {
   const [vehicleListPage, setVehicleListPage] = useState(1);
   useEffect(() => {
     setVehicleListPage(1);
-  }, [searchTerm]);
-  const vehicleTotalPages = Math.max(1, Math.ceil(filteredVehicles.length / TABLE_PAGE_SIZE));
+  }, [searchTerm, vehiclePageSize]);
+  const vehicleTotalPages = Math.max(1, Math.ceil(filteredVehicles.length / vehiclePageSize));
   const vehiclePageSafe = Math.min(vehicleListPage, vehicleTotalPages);
   useEffect(() => {
     setVehicleListPage((p) => Math.min(p, vehicleTotalPages));
   }, [vehicleTotalPages]);
   const pagedVehicles = useMemo(() => {
-    const start = (vehiclePageSafe - 1) * TABLE_PAGE_SIZE;
-    return filteredVehicles.slice(start, start + TABLE_PAGE_SIZE);
-  }, [filteredVehicles, vehiclePageSafe]);
+    const start = (vehiclePageSafe - 1) * vehiclePageSize;
+    return filteredVehicles.slice(start, start + vehiclePageSize);
+  }, [filteredVehicles, vehiclePageSafe, vehiclePageSize]);
 
   const spendKindPresets = [
     'Mantenimiento',
@@ -521,10 +524,12 @@ const Vehicles: React.FC = () => {
               currentPage={vehiclePageSafe}
               totalPages={vehicleTotalPages}
               totalItems={filteredVehicles.length}
-              itemsPerPage={TABLE_PAGE_SIZE}
+              itemsPerPage={vehiclePageSize}
               onPageChange={setVehicleListPage}
               itemLabel="vehículos"
               variant="card"
+              pageSizeOptions={vehiclePageSizeOptions}
+              onPageSizeChange={setVehiclePageSize}
             />
             </>
           )}

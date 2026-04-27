@@ -5,10 +5,13 @@ import { ExpenseCategory } from '../types';
 import { Plus, Trash2, Tag, Search, Pencil, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 
 const Categories: React.FC = () => {
+  const { pageSize: catPageSize, setPageSize: setCatPageSize, pageSizeOptions: catPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:categories', TABLE_PAGE_SIZE);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -99,16 +102,16 @@ const Categories: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm]);
-  const catTotalPages = Math.max(1, Math.ceil(filteredCategories.length / TABLE_PAGE_SIZE));
+  }, [searchTerm, catPageSize]);
+  const catTotalPages = Math.max(1, Math.ceil(filteredCategories.length / catPageSize));
   const catPageSafe = Math.min(listPage, catTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, catTotalPages));
   }, [catTotalPages]);
   const pagedCategories = useMemo(() => {
-    const start = (catPageSafe - 1) * TABLE_PAGE_SIZE;
-    return filteredCategories.slice(start, start + TABLE_PAGE_SIZE);
-  }, [filteredCategories, catPageSafe]);
+    const start = (catPageSafe - 1) * catPageSize;
+    return filteredCategories.slice(start, start + catPageSize);
+  }, [filteredCategories, catPageSafe, catPageSize]);
 
   if (loading) {
     return (
@@ -244,10 +247,12 @@ const Categories: React.FC = () => {
           currentPage={catPageSafe}
           totalPages={catTotalPages}
           totalItems={filteredCategories.length}
-          itemsPerPage={TABLE_PAGE_SIZE}
+          itemsPerPage={catPageSize}
           onPageChange={setListPage}
           itemLabel="categorías"
           variant="card"
+          pageSizeOptions={catPageSizeOptions}
+          onPageSizeChange={setCatPageSize}
         />
         </div>
       )}

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import api from '../services/api';
 import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import toast from 'react-hot-toast';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
@@ -195,6 +196,8 @@ function ProjectionHtmlMonthLabels({
 }
 
 const Projections: React.FC = () => {
+  const { pageSize: projectionPageSize, setPageSize: setProjectionPageSize, pageSizeOptions: projectionPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:projections', TABLE_PAGE_SIZE);
   const [projections, setProjections] = useState<MonthlyProjection[]>([]);
   const [summary, setSummary] = useState<ProjectionSummary | null>(null);
   const [currentBalance, setCurrentBalance] = useState(0);
@@ -256,14 +259,14 @@ const Projections: React.FC = () => {
 
   useEffect(() => {
     setProjectionPage(1);
-  }, [months]);
+  }, [months, projectionPageSize]);
 
-  const projectionTotalPages = Math.max(1, Math.ceil(projections.length / TABLE_PAGE_SIZE));
+  const projectionTotalPages = Math.max(1, Math.ceil(projections.length / projectionPageSize));
   const projectionPageSafe = Math.min(projectionPage, projectionTotalPages);
   const pagedProjections = useMemo(() => {
-    const start = (projectionPageSafe - 1) * TABLE_PAGE_SIZE;
-    return projections.slice(start, start + TABLE_PAGE_SIZE);
-  }, [projections, projectionPageSafe]);
+    const start = (projectionPageSafe - 1) * projectionPageSize;
+    return projections.slice(start, start + projectionPageSize);
+  }, [projections, projectionPageSafe, projectionPageSize]);
 
   useEffect(() => {
     setProjectionPage((p) => Math.min(p, projectionTotalPages));
@@ -591,10 +594,12 @@ const Projections: React.FC = () => {
             currentPage={projectionPageSafe}
             totalPages={projectionTotalPages}
             totalItems={projections.length}
-            itemsPerPage={TABLE_PAGE_SIZE}
+            itemsPerPage={projectionPageSize}
             onPageChange={setProjectionPage}
             itemLabel="meses"
             variant="card"
+            pageSizeOptions={projectionPageSizeOptions}
+            onPageSizeChange={setProjectionPageSize}
           />
         </div>
       </motion.div>

@@ -7,6 +7,7 @@ import { BankAccount } from '../types';
 import { Plus, Edit, Trash2, Search, X, Target, CheckCircle, Calendar, Banknote, History, Wallet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TABLE_PAGE_SIZE_GOALS } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { LIST_CARD_SHELL, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
@@ -103,6 +104,8 @@ function goalCanAddAbono(goal: FinancialGoal): boolean {
 
 const FinancialGoals: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: goalsPageSize, setPageSize: setGoalsPageSize, pageSizeOptions: goalsPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:financialGoals', TABLE_PAGE_SIZE_GOALS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'financial_goals'
@@ -458,17 +461,17 @@ const FinancialGoals: React.FC = () => {
   const [goalsListPage, setGoalsListPage] = useState(1);
   useEffect(() => {
     setGoalsListPage(1);
-  }, [searchTerm, statusFilter]);
-  const goalsMainTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_GOALS));
+  }, [searchTerm, statusFilter, goalsPageSize]);
+  const goalsMainTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / goalsPageSize));
   const goalsMainPageSafe = Math.min(goalsListPage, goalsMainTotalPages);
   useEffect(() => {
     setGoalsListPage((p) => Math.min(p, goalsMainTotalPages));
   }, [goalsMainTotalPages]);
   const pagedGoals = useMemo(() => {
-    const start = (goalsMainPageSafe - 1) * TABLE_PAGE_SIZE_GOALS;
-    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_GOALS);
-  }, [orderedFiltered, goalsMainPageSafe]);
-  const goalListStart = (goalsMainPageSafe - 1) * TABLE_PAGE_SIZE_GOALS;
+    const start = (goalsMainPageSafe - 1) * goalsPageSize;
+    return orderedFiltered.slice(start, start + goalsPageSize);
+  }, [orderedFiltered, goalsMainPageSafe, goalsPageSize]);
+  const goalListStart = (goalsMainPageSafe - 1) * goalsPageSize;
   const listDnd = useListOrderPageDnd(pagedGoals, goalListStart, orderedFiltered, commitGoalOrder);
 
   const goalsSummaryKpis = useMemo(() => {
@@ -727,10 +730,12 @@ const FinancialGoals: React.FC = () => {
             currentPage={goalsMainPageSafe}
             totalPages={goalsMainTotalPages}
             totalItems={orderedFiltered.length}
-            itemsPerPage={TABLE_PAGE_SIZE_GOALS}
+            itemsPerPage={goalsPageSize}
             onPageChange={setGoalsListPage}
             itemLabel="metas"
             variant="card"
+            pageSizeOptions={goalsPageSizeOptions}
+            onPageSizeChange={setGoalsPageSize}
           />
         </div>
       )}

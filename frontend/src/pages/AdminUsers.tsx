@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { adminService, AdminUserRow, AdminSubscriptionPlanSummary } from '../services/adminService';
 import { useAuth } from '../context/AuthContext';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
 import PageHeader from '../components/PageHeader';
@@ -45,7 +46,8 @@ const AdminUsers: React.FC = () => {
   const [savingPlanUserId, setSavingPlanUserId] = useState<number | null>(null);
   const [assignPlanBilling, setAssignPlanBilling] = useState<Record<number, 'monthly' | 'yearly'>>({});
 
-  const limit = TABLE_PAGE_SIZE;
+  const { pageSize: limit, setPageSize: setUsersPageLimit, pageSizeOptions: usersPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:adminUsers', TABLE_PAGE_SIZE);
 
   const searchApplied = searchTerm.trim();
 
@@ -60,7 +62,7 @@ const AdminUsers: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, fActive, fPlan, fSub, fCreatedFrom, fCreatedTo, fBillingFrom, fBillingTo]);
+  }, [searchTerm, fActive, fPlan, fSub, fCreatedFrom, fCreatedTo, fBillingFrom, fBillingTo, limit]);
 
   const listParams = {
     page,
@@ -526,6 +528,8 @@ const AdminUsers: React.FC = () => {
                 itemLabel="usuarios"
                 disabled={loading}
                 variant="card"
+                pageSizeOptions={usersPageSizeOptions}
+                onPageSizeChange={setUsersPageLimit}
               />
             )}
           </div>

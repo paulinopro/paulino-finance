@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Download, ListTree, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { adminService, type AdminAuditEvent } from '../services/adminService';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
 
@@ -29,14 +30,17 @@ function formatDetails(details: unknown): string {
   }
 }
 
+const ADMIN_AUDIT_DEFAULT_PAGE_SIZE = 30;
+
 const AdminAudit: React.FC = () => {
+  const { pageSize: limit, setPageSize: setAuditPageLimit, pageSizeOptions: auditPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:adminAudit', ADMIN_AUDIT_DEFAULT_PAGE_SIZE);
   const [events, setEvents] = useState<AdminAuditEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState('');
   const [actionInput, setActionInput] = useState('');
-  const limit = 30;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +58,7 @@ const AdminAudit: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, action]);
+  }, [page, action, limit]);
 
   useEffect(() => {
     void load();
@@ -65,6 +69,10 @@ const AdminAudit: React.FC = () => {
     setPage(1);
     setAction(actionInput.trim());
   };
+
+  useEffect(() => {
+    setPage(1);
+  }, [limit]);
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -185,6 +193,8 @@ const AdminAudit: React.FC = () => {
           itemLabel="eventos"
           disabled={loading}
           variant="card"
+          pageSizeOptions={auditPageSizeOptions}
+          onPageSizeChange={setAuditPageLimit}
         />
       </motion.div>
     </div>

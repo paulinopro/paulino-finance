@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { LIST_CARD_SHELL, listCardAccentNeutral, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { TABLE_PAGE_SIZE_ACCOUNTS } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
@@ -54,6 +55,8 @@ function buildBankAccountCopyText(
 
 const Accounts: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: accountPageSize, setPageSize: setAccountPageSize, pageSizeOptions: accountPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:accounts', TABLE_PAGE_SIZE_ACCOUNTS);
   const modalPanelRef = useRef<HTMLDivElement>(null);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,17 +148,17 @@ const Accounts: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm, bankFilter]);
-  const accountTotalPages = Math.max(1, Math.ceil(orderedAccounts.length / TABLE_PAGE_SIZE_ACCOUNTS));
+  }, [searchTerm, bankFilter, accountPageSize]);
+  const accountTotalPages = Math.max(1, Math.ceil(orderedAccounts.length / accountPageSize));
   const accountPageSafe = Math.min(listPage, accountTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, accountTotalPages));
   }, [accountTotalPages]);
   const pagedAccounts = useMemo(() => {
-    const start = (accountPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS;
-    return orderedAccounts.slice(start, start + TABLE_PAGE_SIZE_ACCOUNTS);
-  }, [orderedAccounts, accountPageSafe]);
-  const accountListStart = (accountPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS;
+    const start = (accountPageSafe - 1) * accountPageSize;
+    return orderedAccounts.slice(start, start + accountPageSize);
+  }, [orderedAccounts, accountPageSafe, accountPageSize]);
+  const accountListStart = (accountPageSafe - 1) * accountPageSize;
   const listDnd = useListOrderPageDnd(pagedAccounts, accountListStart, orderedAccounts, commitAccountOrder);
 
   const copyBankAccountDetails = async (account: BankAccount) => {
@@ -490,10 +493,12 @@ const Accounts: React.FC = () => {
             currentPage={accountPageSafe}
             totalPages={accountTotalPages}
             totalItems={orderedAccounts.length}
-            itemsPerPage={TABLE_PAGE_SIZE_ACCOUNTS}
+            itemsPerPage={accountPageSize}
             onPageChange={setListPage}
             itemLabel="cuentas"
             variant="card"
+            pageSizeOptions={accountPageSizeOptions}
+            onPageSizeChange={setAccountPageSize}
           />
         </div>
       )}

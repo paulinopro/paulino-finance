@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { LIST_CARD_SHELL, listCardAccentPayable, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { formatDateForInput, formatDateDdMmYyyy } from '../utils/dateUtils';
 import { TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
@@ -54,6 +55,8 @@ function todayYmd(): string {
 
 const AccountsPayable: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: apPageSize, setPageSize: setApPageSize, pageSizeOptions: apPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:accountsPayable', TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'accounts_payable'
@@ -402,17 +405,17 @@ const AccountsPayable: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm, statusFilter]);
-  const apTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE));
+  }, [searchTerm, statusFilter, apPageSize]);
+  const apTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / apPageSize));
   const apPageSafe = Math.min(listPage, apTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, apTotalPages));
   }, [apTotalPages]);
   const pagedAccountsPayable = useMemo(() => {
-    const start = (apPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE;
-    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE);
-  }, [orderedFiltered, apPageSafe]);
-  const apListStart = (apPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE;
+    const start = (apPageSafe - 1) * apPageSize;
+    return orderedFiltered.slice(start, start + apPageSize);
+  }, [orderedFiltered, apPageSafe, apPageSize]);
+  const apListStart = (apPageSafe - 1) * apPageSize;
   const listDnd = useListOrderPageDnd(pagedAccountsPayable, apListStart, orderedFiltered, commitApOrder);
 
   const payableSummaryKpis = useMemo(() => {
@@ -684,10 +687,12 @@ const AccountsPayable: React.FC = () => {
             currentPage={apPageSafe}
             totalPages={apTotalPages}
             totalItems={orderedFiltered.length}
-            itemsPerPage={TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE}
+            itemsPerPage={apPageSize}
             onPageChange={setListPage}
             itemLabel="cuentas"
             variant="card"
+            pageSizeOptions={apPageSizeOptions}
+            onPageSizeChange={setApPageSize}
           />
         </div>
       )}

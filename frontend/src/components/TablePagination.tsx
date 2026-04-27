@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const PAGE_WINDOW = 5;
@@ -27,6 +27,9 @@ export type TablePaginationProps = {
   /** Texto al final del resumen, p. ej. "notificaciones", "gastos", "meses" */
   itemLabel: string;
   disabled?: boolean;
+  /** Si se pasa, se muestra un selector «Por página» y el pie puede verse aunque solo haya una página. */
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (size: number) => void;
   /**
    * card: envoltorio `card-view` (Historial de Notificaciones).
    * embedded: solo el contenido interno (modales / bloques ya dentro de una tarjeta).
@@ -48,14 +51,21 @@ const TablePagination: React.FC<TablePaginationProps> = ({
   onPageChange,
   itemLabel,
   disabled = false,
+  pageSizeOptions,
+  onPageSizeChange,
   variant = 'card',
   className = '',
 }) => {
-  if (totalPages <= 1) return null;
+  const pageSizeFieldId = useId();
+  const showPageSize =
+    Boolean(onPageSizeChange) && Array.isArray(pageSizeOptions) && pageSizeOptions.length > 0;
+  const showPageNav = totalPages > 1;
+
+  if (totalItems <= 0 || (!showPageNav && !showPageSize)) return null;
 
   const start = (currentPage - 1) * itemsPerPage + 1;
   const end = Math.min(currentPage * itemsPerPage, totalItems);
-  const pages = getVisiblePaginationPages(totalPages, currentPage);
+  const pages = showPageNav ? getVisiblePaginationPages(totalPages, currentPage) : [];
 
   const chevronSize = variant === 'compact' ? 18 : 20;
   const shellPad = variant === 'compact' ? 'p-2 sm:p-3' : variant === 'embedded' ? '' : 'p-3 sm:p-5';
@@ -63,8 +73,8 @@ const TablePagination: React.FC<TablePaginationProps> = ({
 
   const summaryClass =
     variant === 'compact'
-      ? 'text-center text-[0.7rem] leading-relaxed text-dark-400 sm:text-left sm:text-xs'
-      : 'text-center text-xs leading-relaxed text-dark-400 sm:text-left sm:text-sm';
+      ? 'min-w-0 flex-1 text-left text-[0.7rem] leading-relaxed text-dark-400 sm:text-xs'
+      : 'min-w-0 flex-1 text-left text-xs leading-relaxed text-dark-400 sm:text-sm';
 
   const navRowClass =
     variant === 'compact'
@@ -90,46 +100,79 @@ const TablePagination: React.FC<TablePaginationProps> = ({
       ? 'flex min-h-[40px] min-w-0 flex-1 items-center justify-center gap-0.5 overflow-x-auto px-0.5 py-0.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin] sm:min-h-[44px] sm:gap-1'
       : 'flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto px-1 py-0.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]';
 
+  const pageSizeSelectClass =
+    variant === 'compact'
+      ? 'rounded-lg border border-dark-600 bg-dark-800 py-1.5 pl-2 pr-7 text-xs text-white focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50'
+      : 'rounded-lg border border-dark-600 bg-dark-800 py-2 pl-2.5 pr-8 text-sm text-white focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50';
+
+  const pageSizeLabelClass =
+    variant === 'compact' ? 'text-[0.7rem] text-dark-400 sm:text-xs' : 'text-xs text-dark-400 sm:text-sm';
+
   const content = (
     <div className="flex flex-col gap-3 sm:gap-4">
-      <p className={summaryClass}>
-        Mostrando {start}–{end} de {totalItems} {itemLabel}
-      </p>
-      <div className={navRowClass}>
-        <button
-          type="button"
-          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-          disabled={currentPage === 1 || disabled}
-          aria-label="Página anterior"
-          className={prevNextBtnClass}
-        >
-          <ChevronLeft size={chevronSize} className="shrink-0" />
-          <span className="hidden sm:inline">Anterior</span>
-        </button>
-        <div className={scrollPagesClass} role="navigation" aria-label="Páginas">
-          {pages.map((pageNum) => (
-            <button
-              key={pageNum}
-              type="button"
-              onClick={() => onPageChange(pageNum)}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <p className={summaryClass}>
+          Mostrando {start}–{end} de {totalItems} {itemLabel}
+        </p>
+        {showPageSize && (
+          <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+            <label htmlFor={pageSizeFieldId} className={`whitespace-nowrap ${pageSizeLabelClass}`}>
+              Por página
+            </label>
+            <select
+              id={pageSizeFieldId}
+              className={pageSizeSelectClass}
+              value={itemsPerPage}
               disabled={disabled}
-              className={numBtnClass(currentPage === pageNum)}
+              aria-label="Registros por página"
+              onChange={(e) => onPageSizeChange?.(parseInt(e.target.value, 10))}
             >
-              {pageNum}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-          disabled={currentPage === totalPages || disabled}
-          aria-label="Página siguiente"
-          className={prevNextBtnClass}
-        >
-          <span className="hidden sm:inline">Siguiente</span>
-          <ChevronRight size={chevronSize} className="shrink-0" />
-        </button>
+              {pageSizeOptions!.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
+      {showPageNav && (
+        <div className={navRowClass}>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1 || disabled}
+            aria-label="Página anterior"
+            className={prevNextBtnClass}
+          >
+            <ChevronLeft size={chevronSize} className="shrink-0" />
+            <span className="hidden sm:inline">Anterior</span>
+          </button>
+          <div className={scrollPagesClass} role="navigation" aria-label="Páginas">
+            {pages.map((pageNum) => (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => onPageChange(pageNum)}
+                disabled={disabled}
+                className={numBtnClass(currentPage === pageNum)}
+              >
+                {pageNum}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages || disabled}
+            aria-label="Página siguiente"
+            className={prevNextBtnClass}
+          >
+            <span className="hidden sm:inline">Siguiente</span>
+            <ChevronRight size={chevronSize} className="shrink-0" />
+          </button>
+        </div>
+      )}
     </div>
   );
 

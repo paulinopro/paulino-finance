@@ -7,6 +7,7 @@ import { BankAccount, Income, IncomeFrequency, IncomeNature, IncomeRecurrenceTyp
 import { Plus, Edit, Trash2, TrendingUp, Search, X, ArrowUp, ArrowDown, ArrowUpDown, CheckCircle, Circle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
@@ -126,7 +127,10 @@ const IncomePage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const itemsPerPage = TABLE_PAGE_SIZE;
+  const { pageSize: itemsPerPage, setPageSize: setItemsPerPage, pageSizeOptions } = usePersistedTablePageSize(
+    'pf:pageSize:income',
+    TABLE_PAGE_SIZE
+  );
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [formData, setFormData] = useState({
     description: '',
@@ -143,7 +147,7 @@ const IncomePage: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterNature, filterRecurrence, filterFrequency]);
+  }, [searchTerm, filterNature, filterRecurrence, filterFrequency, itemsPerPage]);
 
   useEffect(() => {
     if (filterRecurrence === 'non_recurrent') {
@@ -693,6 +697,8 @@ const IncomePage: React.FC = () => {
             itemLabel="ingresos"
             disabled={loading}
             variant="card"
+            pageSizeOptions={pageSizeOptions}
+            onPageSizeChange={setItemsPerPage}
           />
         </div>
       )}

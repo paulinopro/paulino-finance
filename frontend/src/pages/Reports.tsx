@@ -13,6 +13,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import {
@@ -165,6 +166,8 @@ function formatSummaryMetric(key: string, value: unknown): string {
 }
 
 const Reports: React.FC = () => {
+  const { pageSize: reportTablePageSize, setPageSize: setReportTablePageSize, pageSizeOptions: reportTablePageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:reports', TABLE_PAGE_SIZE);
   const [reportType, setReportType] = useState<ReportTypeId>('expenses');
   const [periodKey, setPeriodKey] = useState<ReportPeriodKey>('this_month');
   const [customFrom, setCustomFrom] = useState('');
@@ -184,12 +187,12 @@ const Reports: React.FC = () => {
     return [];
   }, [reportData, reportType]);
 
-  const detailTotalPages = Math.max(1, Math.ceil(detailRows.length / TABLE_PAGE_SIZE));
+  const detailTotalPages = Math.max(1, Math.ceil(detailRows.length / reportTablePageSize));
   const detailPageClamped = Math.min(reportDetailPage, detailTotalPages);
   const detailSlice = useMemo(() => {
-    const start = (detailPageClamped - 1) * TABLE_PAGE_SIZE;
-    return detailRows.slice(start, start + TABLE_PAGE_SIZE);
-  }, [detailRows, detailPageClamped]);
+    const start = (detailPageClamped - 1) * reportTablePageSize;
+    return detailRows.slice(start, start + reportTablePageSize);
+  }, [detailRows, detailPageClamped, reportTablePageSize]);
 
   useEffect(() => {
     setReportDetailPage(1);
@@ -203,16 +206,21 @@ const Reports: React.FC = () => {
     setCompPages({ expenses: 1, loans: 1, cards: 1, accounts: 1 });
   }, [reportType, reportData]);
 
+  useEffect(() => {
+    setReportDetailPage(1);
+    setCompPages({ expenses: 1, loans: 1, cards: 1, accounts: 1 });
+  }, [reportTablePageSize]);
+
   const compData = reportType === 'comprehensive' && reportData?.data ? reportData.data : null;
   const compExpenseRows = useMemo(() => compData?.expenses ?? [], [compData]);
   const compLoanRows = useMemo(() => compData?.loans ?? [], [compData]);
   const compCardRows = useMemo(() => compData?.cards ?? [], [compData]);
   const compAccountRows = useMemo(() => compData?.accounts ?? [], [compData]);
 
-  const compExpenseTotalPages = Math.max(1, Math.ceil(compExpenseRows.length / TABLE_PAGE_SIZE));
-  const compLoanTotalPages = Math.max(1, Math.ceil(compLoanRows.length / TABLE_PAGE_SIZE));
-  const compCardTotalPages = Math.max(1, Math.ceil(compCardRows.length / TABLE_PAGE_SIZE));
-  const compAccountTotalPages = Math.max(1, Math.ceil(compAccountRows.length / TABLE_PAGE_SIZE));
+  const compExpenseTotalPages = Math.max(1, Math.ceil(compExpenseRows.length / reportTablePageSize));
+  const compLoanTotalPages = Math.max(1, Math.ceil(compLoanRows.length / reportTablePageSize));
+  const compCardTotalPages = Math.max(1, Math.ceil(compCardRows.length / reportTablePageSize));
+  const compAccountTotalPages = Math.max(1, Math.ceil(compAccountRows.length / reportTablePageSize));
 
   const compExpensePageClamped = Math.min(compPages.expenses, compExpenseTotalPages);
   const compLoanPageClamped = Math.min(compPages.loans, compLoanTotalPages);
@@ -222,34 +230,34 @@ const Reports: React.FC = () => {
   const compExpenseSlice = useMemo(
     () =>
       compExpenseRows.slice(
-        (compExpensePageClamped - 1) * TABLE_PAGE_SIZE,
-        compExpensePageClamped * TABLE_PAGE_SIZE
+        (compExpensePageClamped - 1) * reportTablePageSize,
+        compExpensePageClamped * reportTablePageSize
       ),
-    [compExpenseRows, compExpensePageClamped]
+    [compExpenseRows, compExpensePageClamped, reportTablePageSize]
   );
   const compLoanSlice = useMemo(
     () =>
       compLoanRows.slice(
-        (compLoanPageClamped - 1) * TABLE_PAGE_SIZE,
-        compLoanPageClamped * TABLE_PAGE_SIZE
+        (compLoanPageClamped - 1) * reportTablePageSize,
+        compLoanPageClamped * reportTablePageSize
       ),
-    [compLoanRows, compLoanPageClamped]
+    [compLoanRows, compLoanPageClamped, reportTablePageSize]
   );
   const compCardSlice = useMemo(
     () =>
       compCardRows.slice(
-        (compCardPageClamped - 1) * TABLE_PAGE_SIZE,
-        compCardPageClamped * TABLE_PAGE_SIZE
+        (compCardPageClamped - 1) * reportTablePageSize,
+        compCardPageClamped * reportTablePageSize
       ),
-    [compCardRows, compCardPageClamped]
+    [compCardRows, compCardPageClamped, reportTablePageSize]
   );
   const compAccountSlice = useMemo(
     () =>
       compAccountRows.slice(
-        (compAccountPageClamped - 1) * TABLE_PAGE_SIZE,
-        compAccountPageClamped * TABLE_PAGE_SIZE
+        (compAccountPageClamped - 1) * reportTablePageSize,
+        compAccountPageClamped * reportTablePageSize
       ),
-    [compAccountRows, compAccountPageClamped]
+    [compAccountRows, compAccountPageClamped, reportTablePageSize]
   );
 
   const { fromDate, toDate } = useMemo(() => {
@@ -877,11 +885,13 @@ const Reports: React.FC = () => {
                       currentPage={compExpensePageClamped}
                       totalPages={compExpenseTotalPages}
                       totalItems={compExpenseRows.length}
-                      itemsPerPage={TABLE_PAGE_SIZE}
+                      itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, expenses: p }))}
                       itemLabel="gastos"
                       disabled={loading}
                       variant="card"
+                      pageSizeOptions={reportTablePageSizeOptions}
+                      onPageSizeChange={setReportTablePageSize}
                     />
                   </div>
                 </div>
@@ -946,11 +956,13 @@ const Reports: React.FC = () => {
                       currentPage={compLoanPageClamped}
                       totalPages={compLoanTotalPages}
                       totalItems={compLoanRows.length}
-                      itemsPerPage={TABLE_PAGE_SIZE}
+                      itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, loans: p }))}
                       itemLabel="préstamos"
                       disabled={loading}
                       variant="card"
+                      pageSizeOptions={reportTablePageSizeOptions}
+                      onPageSizeChange={setReportTablePageSize}
                     />
                   </div>
                 </div>
@@ -1026,11 +1038,13 @@ const Reports: React.FC = () => {
                       currentPage={compCardPageClamped}
                       totalPages={compCardTotalPages}
                       totalItems={compCardRows.length}
-                      itemsPerPage={TABLE_PAGE_SIZE}
+                      itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, cards: p }))}
                       itemLabel="tarjetas"
                       disabled={loading}
                       variant="card"
+                      pageSizeOptions={reportTablePageSizeOptions}
+                      onPageSizeChange={setReportTablePageSize}
                     />
                   </div>
                 </div>
@@ -1089,11 +1103,13 @@ const Reports: React.FC = () => {
                       currentPage={compAccountPageClamped}
                       totalPages={compAccountTotalPages}
                       totalItems={compAccountRows.length}
-                      itemsPerPage={TABLE_PAGE_SIZE}
+                      itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, accounts: p }))}
                       itemLabel="cuentas"
                       disabled={loading}
                       variant="card"
+                      pageSizeOptions={reportTablePageSizeOptions}
+                      onPageSizeChange={setReportTablePageSize}
                     />
                   </div>
                 </div>
@@ -1105,11 +1121,13 @@ const Reports: React.FC = () => {
                 currentPage={detailPageClamped}
                 totalPages={detailTotalPages}
                 totalItems={detailRows.length}
-                itemsPerPage={TABLE_PAGE_SIZE}
+                itemsPerPage={reportTablePageSize}
                 onPageChange={setReportDetailPage}
                 itemLabel="filas"
                 disabled={loading}
                 variant="card"
+                pageSizeOptions={reportTablePageSizeOptions}
+                onPageSizeChange={setReportTablePageSize}
               />
             )}
           </div>

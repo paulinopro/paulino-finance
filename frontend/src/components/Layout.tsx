@@ -39,6 +39,8 @@ import type { AppNotification } from '../types';
 import toast from 'react-hot-toast';
 import OfflineBanner from './OfflineBanner';
 import TablePagination from './TablePagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import MobileTabBar from './MobileTabBar';
 import SystemNotificationBody from './SystemNotificationBody';
 import { useForegroundPushNotifications } from '../hooks/useForegroundPushNotifications';
@@ -125,6 +127,8 @@ const Layout: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationPage, setNotificationPage] = useState(1);
   const [notificationTotalPages, setNotificationTotalPages] = useState(1);
+  const { pageSize: headerNotifLimit, setPageSize: setHeaderNotifLimit, pageSizeOptions: headerNotifPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:layoutNotifications', TABLE_PAGE_SIZE);
   const [publicMaintenanceMode, setPublicMaintenanceMode] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
@@ -144,9 +148,13 @@ const Layout: React.FC = () => {
     } catch (error) {
       console.error('Error fetching notifications:', error);
     }
-  }, [notificationPage]);
+  }, [notificationPage, headerNotifLimit]);
 
   const { user, logout, impersonatedBy, stopImpersonation } = useAuth();
+
+  useEffect(() => {
+    setNotificationPage(1);
+  }, [headerNotifLimit]);
   const {
     hasModule,
     subscription,
@@ -640,9 +648,11 @@ const Layout: React.FC = () => {
                     currentPage={notificationPage}
                     totalPages={notificationTotalPages}
                     totalItems={unreadCount}
-                    itemsPerPage={10}
+                    itemsPerPage={headerNotifLimit}
                     onPageChange={setNotificationPage}
                     itemLabel="notificaciones"
+                    pageSizeOptions={headerNotifPageSizeOptions}
+                    onPageSizeChange={setHeaderNotifLimit}
                   />
                   <div className="p-4 border-t border-dark-700">
                     <Link

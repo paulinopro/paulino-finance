@@ -11,6 +11,7 @@ import {
   subscriptionModuleLabelEs,
 } from '../constants/subscriptionModules';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
 
@@ -23,6 +24,8 @@ const emptyModules = () => {
 };
 
 const AdminSubscriptionPlans: React.FC = () => {
+  const { pageSize: adminPlansPageSize, setPageSize: setAdminPlansPageSize, pageSizeOptions: adminPlansPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:adminSubscriptionPlans', TABLE_PAGE_SIZE);
   const editModalRef = useRef<HTMLDivElement>(null);
   const createModalRef = useRef<HTMLDivElement>(null);
   const [plans, setPlans] = useState<any[]>([]);
@@ -54,16 +57,16 @@ const AdminSubscriptionPlans: React.FC = () => {
   const [plansPage, setPlansPage] = useState(1);
   useEffect(() => {
     setPlansPage(1);
-  }, [plans.length]);
-  const plansTotalPages = Math.max(1, Math.ceil(plans.length / TABLE_PAGE_SIZE));
+  }, [plans.length, adminPlansPageSize]);
+  const plansTotalPages = Math.max(1, Math.ceil(plans.length / adminPlansPageSize));
   const plansPageSafe = Math.min(plansPage, plansTotalPages);
   useEffect(() => {
     setPlansPage((p) => Math.min(p, plansTotalPages));
   }, [plansTotalPages]);
   const pagedPlans = useMemo(() => {
-    const start = (plansPageSafe - 1) * TABLE_PAGE_SIZE;
-    return plans.slice(start, start + TABLE_PAGE_SIZE);
-  }, [plans, plansPageSafe]);
+    const start = (plansPageSafe - 1) * adminPlansPageSize;
+    return plans.slice(start, start + adminPlansPageSize);
+  }, [plans, plansPageSafe, adminPlansPageSize]);
 
   const saveEdit = async () => {
     if (!editing) return;
@@ -274,10 +277,12 @@ const AdminSubscriptionPlans: React.FC = () => {
             currentPage={plansPageSafe}
             totalPages={plansTotalPages}
             totalItems={plans.length}
-            itemsPerPage={TABLE_PAGE_SIZE}
+            itemsPerPage={adminPlansPageSize}
             onPageChange={setPlansPage}
             itemLabel="planes"
             variant="card"
+            pageSizeOptions={adminPlansPageSizeOptions}
+            onPageSizeChange={setAdminPlansPageSize}
           />
         </div>
       )}

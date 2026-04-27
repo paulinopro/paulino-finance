@@ -15,6 +15,7 @@ import { Plus, Edit, Trash2, TrendingDown, CheckCircle, Circle, Search, X, Arrow
 import toast from 'react-hot-toast';
 import { ExpenseCategory } from '../types';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
@@ -121,7 +122,10 @@ const Expenses: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const itemsPerPage = TABLE_PAGE_SIZE;
+  const { pageSize: itemsPerPage, setPageSize: setItemsPerPage, pageSizeOptions } = usePersistedTablePageSize(
+    'pf:pageSize:expenses',
+    TABLE_PAGE_SIZE
+  );
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [formData, setFormData] = useState({
     description: '',
@@ -155,7 +159,7 @@ const Expenses: React.FC = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterNature, filterRecurrence, filterFrequency, categoryFilter]);
+  }, [searchTerm, filterNature, filterRecurrence, filterFrequency, categoryFilter, itemsPerPage]);
 
   useEffect(() => {
     if (filterRecurrence === 'non_recurrent') {
@@ -749,6 +753,8 @@ const Expenses: React.FC = () => {
             itemLabel="gastos"
             disabled={loading}
             variant="card"
+            pageSizeOptions={pageSizeOptions}
+            onPageSizeChange={setItemsPerPage}
           />
         </div>
       )}

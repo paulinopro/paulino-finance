@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import SystemNotificationBody from '../components/SystemNotificationBody';
 import { LIST_CARD_SHELL, listCardAccentNeutral, listCardAccentSubtle } from '../utils/listCard';
@@ -92,13 +93,16 @@ const NotificationHistory: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const itemsPerPage = TABLE_PAGE_SIZE;
+  const { pageSize: itemsPerPage, setPageSize: setItemsPerPage, pageSizeOptions } = usePersistedTablePageSize(
+    'pf:pageSize:notificationHistory',
+    TABLE_PAGE_SIZE
+  );
   /** Desktop/tablet: tarjeta en fila + cuerpo compacto; móvil: flujo vertical + cuerpo completo. */
   const isWideCardLayout = useMediaQuery('(min-width: 768px)');
 
   useEffect(() => {
     setCurrentPage(1); // Reset to first page when filters change
-  }, [filterRead, filterType]);
+  }, [filterRead, filterType, itemsPerPage]);
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -352,6 +356,8 @@ const NotificationHistory: React.FC = () => {
               itemLabel="notificaciones"
               disabled={loading}
               variant="card"
+              pageSizeOptions={pageSizeOptions}
+              onPageSizeChange={setItemsPerPage}
             />
           </>
         )}

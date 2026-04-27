@@ -21,6 +21,7 @@ import {
   listCardBtnDanger,
 } from '../utils/listCard';
 import { TABLE_PAGE_SIZE_CARDS } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
@@ -46,6 +47,8 @@ function creditCardListAccent(card: CreditCard): string {
 
 const Cards: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: cardPageSize, setPageSize: setCardPageSize, pageSizeOptions: cardPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:cards', TABLE_PAGE_SIZE_CARDS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'cards'
@@ -130,17 +133,17 @@ const Cards: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm, bankFilter]);
-  const cardTotalPages = Math.max(1, Math.ceil(orderedCards.length / TABLE_PAGE_SIZE_CARDS));
+  }, [searchTerm, bankFilter, cardPageSize]);
+  const cardTotalPages = Math.max(1, Math.ceil(orderedCards.length / cardPageSize));
   const cardPageSafe = Math.min(listPage, cardTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, cardTotalPages));
   }, [cardTotalPages]);
   const pagedCards = useMemo(() => {
-    const start = (cardPageSafe - 1) * TABLE_PAGE_SIZE_CARDS;
-    return orderedCards.slice(start, start + TABLE_PAGE_SIZE_CARDS);
-  }, [orderedCards, cardPageSafe]);
-  const cardListStart = (cardPageSafe - 1) * TABLE_PAGE_SIZE_CARDS;
+    const start = (cardPageSafe - 1) * cardPageSize;
+    return orderedCards.slice(start, start + cardPageSize);
+  }, [orderedCards, cardPageSafe, cardPageSize]);
+  const cardListStart = (cardPageSafe - 1) * cardPageSize;
   const listDnd = useListOrderPageDnd(pagedCards, cardListStart, orderedCards, commitCardOrder);
 
   const accountsForCardPayment = useMemo(() => {
@@ -565,10 +568,12 @@ const Cards: React.FC = () => {
             currentPage={cardPageSafe}
             totalPages={cardTotalPages}
             totalItems={orderedCards.length}
-            itemsPerPage={TABLE_PAGE_SIZE_CARDS}
+            itemsPerPage={cardPageSize}
             onPageChange={setListPage}
             itemLabel="tarjetas"
             variant="card"
+            pageSizeOptions={cardPageSizeOptions}
+            onPageSizeChange={setCardPageSize}
           />
         </div>
       )}

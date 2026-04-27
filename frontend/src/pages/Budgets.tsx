@@ -9,6 +9,7 @@ import { Plus, Edit, Trash2, Search, X, Calendar } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LIST_CARD_SHELL, listCardAccentFromPercent, listCardProgressColor, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { TABLE_PAGE_SIZE_BUDGETS } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
@@ -35,6 +36,8 @@ interface Budget {
 
 const Budgets: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: budgetPageSize, setPageSize: setBudgetPageSize, pageSizeOptions: budgetPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:budgets', TABLE_PAGE_SIZE_BUDGETS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'budgets'
@@ -179,17 +182,17 @@ const Budgets: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm, periodFilter]);
-  const budgetTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_BUDGETS));
+  }, [searchTerm, periodFilter, budgetPageSize]);
+  const budgetTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / budgetPageSize));
   const budgetPageSafe = Math.min(listPage, budgetTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, budgetTotalPages));
   }, [budgetTotalPages]);
   const pagedBudgets = useMemo(() => {
-    const start = (budgetPageSafe - 1) * TABLE_PAGE_SIZE_BUDGETS;
-    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_BUDGETS);
-  }, [orderedFiltered, budgetPageSafe]);
-  const budgetListStart = (budgetPageSafe - 1) * TABLE_PAGE_SIZE_BUDGETS;
+    const start = (budgetPageSafe - 1) * budgetPageSize;
+    return orderedFiltered.slice(start, start + budgetPageSize);
+  }, [orderedFiltered, budgetPageSafe, budgetPageSize]);
+  const budgetListStart = (budgetPageSafe - 1) * budgetPageSize;
   const listDnd = useListOrderPageDnd(pagedBudgets, budgetListStart, orderedFiltered, commitBudgetOrder);
 
   const budgetSummaryKpis = useMemo(() => {
@@ -443,10 +446,12 @@ const Budgets: React.FC = () => {
             currentPage={budgetPageSafe}
             totalPages={budgetTotalPages}
             totalItems={orderedFiltered.length}
-            itemsPerPage={TABLE_PAGE_SIZE_BUDGETS}
+            itemsPerPage={budgetPageSize}
             onPageChange={setListPage}
             itemLabel="presupuestos"
             variant="card"
+            pageSizeOptions={budgetPageSizeOptions}
+            onPageSizeChange={setBudgetPageSize}
           />
         </div>
       )}

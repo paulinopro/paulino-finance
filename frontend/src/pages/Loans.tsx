@@ -8,6 +8,7 @@ import { Plus, Edit, Trash2, Receipt, DollarSign, Search, X, Table, List } from 
 import toast from 'react-hot-toast';
 import AmortizationTable from '../components/AmortizationTable';
 import { TABLE_PAGE_SIZE_LOANS } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import {
@@ -35,6 +36,13 @@ function loanListAccent(loan: Loan): string {
 
 const Loans: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: loanListPageSize, setPageSize: setLoanListPageSize, pageSizeOptions: loanListPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:loans', TABLE_PAGE_SIZE_LOANS);
+  const {
+    pageSize: loanPaymentHistoryPageSize,
+    setPageSize: setLoanPaymentHistoryPageSize,
+    pageSizeOptions: loanPaymentHistoryPageSizeOptions,
+  } = usePersistedTablePageSize('pf:pageSize:loanPayments', TABLE_PAGE_SIZE_LOANS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'loans'
@@ -126,17 +134,21 @@ const Loans: React.FC = () => {
   const [loanListPage, setLoanListPage] = useState(1);
   useEffect(() => {
     setLoanListPage(1);
-  }, [searchTerm, bankFilter]);
-  const loanTotalPages = Math.max(1, Math.ceil(orderedLoans.length / TABLE_PAGE_SIZE_LOANS));
+  }, [searchTerm, bankFilter, loanListPageSize]);
+  const loanTotalPages = Math.max(1, Math.ceil(orderedLoans.length / loanListPageSize));
   const loanPageSafe = Math.min(loanListPage, loanTotalPages);
   useEffect(() => {
     setLoanListPage((p) => Math.min(p, loanTotalPages));
   }, [loanTotalPages]);
   const pagedLoans = useMemo(() => {
-    const start = (loanPageSafe - 1) * TABLE_PAGE_SIZE_LOANS;
-    return orderedLoans.slice(start, start + TABLE_PAGE_SIZE_LOANS);
-  }, [orderedLoans, loanPageSafe]);
-  const loanListStart = (loanPageSafe - 1) * TABLE_PAGE_SIZE_LOANS;
+    const start = (loanPageSafe - 1) * loanListPageSize;
+    return orderedLoans.slice(start, start + loanListPageSize);
+  }, [orderedLoans, loanPageSafe, loanListPageSize]);
+  const loanListStart = (loanPageSafe - 1) * loanListPageSize;
+
+  useEffect(() => {
+    setPaymentHistoryPage(1);
+  }, [loanPaymentHistoryPageSize]);
   const listDnd = useListOrderPageDnd(pagedLoans, loanListStart, orderedLoans, commitLoanOrder);
 
   const accountsForLoanPayment = useMemo(() => {
@@ -694,10 +706,12 @@ const Loans: React.FC = () => {
           currentPage={loanPageSafe}
           totalPages={loanTotalPages}
           totalItems={orderedLoans.length}
-          itemsPerPage={TABLE_PAGE_SIZE_LOANS}
+          itemsPerPage={loanListPageSize}
           onPageChange={setLoanListPage}
           itemLabel="préstamos"
           variant="card"
+          pageSizeOptions={loanListPageSizeOptions}
+          onPageSizeChange={setLoanListPageSize}
         />
         </div>
       )}
@@ -963,7 +977,7 @@ const Loans: React.FC = () => {
             </div>
             {(() => {
               const payments = selectedLoan.payments || [];
-              const itemsPerPage = TABLE_PAGE_SIZE_LOANS;
+              const itemsPerPage = loanPaymentHistoryPageSize;
               const totalPages = Math.max(1, Math.ceil(payments.length / itemsPerPage));
               const currentPage = Math.min(paymentHistoryPage, totalPages);
               const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1063,6 +1077,8 @@ const Loans: React.FC = () => {
                         itemLabel="pagos"
                         variant="embedded"
                         className="border-t border-dark-700 pt-3 mt-2"
+                        pageSizeOptions={loanPaymentHistoryPageSizeOptions}
+                        onPageSizeChange={setLoanPaymentHistoryPageSize}
                       />
                     </>
                   ) : (

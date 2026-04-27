@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { LIST_CARD_SHELL, listCardAccentReceivable, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
 import { formatDateForInput, formatDateDdMmYyyy } from '../utils/dateUtils';
 import { TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE } from '../constants/pagination';
+import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
@@ -54,6 +55,8 @@ function todayYmd(): string {
 
 const AccountsReceivable: React.FC = () => {
   const { user } = useAuth();
+  const { pageSize: arPageSize, setPageSize: setArPageSize, pageSizeOptions: arPageSizeOptions } =
+    usePersistedTablePageSize('pf:pageSize:accountsReceivable', TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'accounts_receivable'
@@ -401,17 +404,17 @@ const AccountsReceivable: React.FC = () => {
   const [listPage, setListPage] = useState(1);
   useEffect(() => {
     setListPage(1);
-  }, [searchTerm, statusFilter]);
-  const arTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE));
+  }, [searchTerm, statusFilter, arPageSize]);
+  const arTotalPages = Math.max(1, Math.ceil(orderedFiltered.length / arPageSize));
   const arPageSafe = Math.min(listPage, arTotalPages);
   useEffect(() => {
     setListPage((p) => Math.min(p, arTotalPages));
   }, [arTotalPages]);
   const pagedAccountsReceivable = useMemo(() => {
-    const start = (arPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE;
-    return orderedFiltered.slice(start, start + TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE);
-  }, [orderedFiltered, arPageSafe]);
-  const arListStart = (arPageSafe - 1) * TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE;
+    const start = (arPageSafe - 1) * arPageSize;
+    return orderedFiltered.slice(start, start + arPageSize);
+  }, [orderedFiltered, arPageSafe, arPageSize]);
+  const arListStart = (arPageSafe - 1) * arPageSize;
   const listDnd = useListOrderPageDnd(pagedAccountsReceivable, arListStart, orderedFiltered, commitArOrder);
 
   const receivableSummaryKpis = useMemo(() => {
@@ -683,10 +686,12 @@ const AccountsReceivable: React.FC = () => {
             currentPage={arPageSafe}
             totalPages={arTotalPages}
             totalItems={orderedFiltered.length}
-            itemsPerPage={TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE}
+            itemsPerPage={arPageSize}
             onPageChange={setListPage}
             itemLabel="cuentas"
             variant="card"
+            pageSizeOptions={arPageSizeOptions}
+            onPageSizeChange={setArPageSize}
           />
         </div>
       )}
