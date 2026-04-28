@@ -8,6 +8,7 @@ import {
   recalculateReceivableStatus,
   incomeDescriptionForReceivable,
 } from '../services/accountsPaymentLinkSync';
+import { deleteCalendarEventsForRelated } from '../services/calendarService';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -399,6 +400,7 @@ export const deleteAccountReceivablePayment = async (req: AuthRequest, res: Resp
     const incomeId = payRow.rows[0].income_id as number | null;
     if (incomeId) {
       await query(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
+      await deleteCalendarEventsForRelated(userId, incomeId, ['INCOME']);
     }
 
     await query(
@@ -659,7 +661,9 @@ export const deleteAccountReceivable = async (req: AuthRequest, res: Response) =
       [id]
     );
     for (const row of incRows.rows) {
-      await query(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [row.income_id, userId]);
+      const incId = row.income_id as number;
+      await query(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [incId, userId]);
+      await deleteCalendarEventsForRelated(userId, incId, ['INCOME']);
     }
 
     const result = await query(

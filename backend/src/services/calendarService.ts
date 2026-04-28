@@ -1,5 +1,12 @@
 import { query } from '../config/database';
-import { getFixedIncomeOccurrenceDates, dateToYmdLocal, toYmdFromPgDate } from '../utils/dateUtils';
+import {
+  getFixedIncomeOccurrenceDates,
+  getExpenseOccurrenceDatesInPeriod,
+  dateToYmdLocal,
+  toYmdFromPgDate,
+  parseYmdLocal,
+} from '../utils/dateUtils';
+import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
 
 export interface CalendarEvent {
   id: number;
@@ -15,6 +22,83 @@ export interface CalendarEvent {
   recurrencePattern?: string;
   color: string;
   notes?: string;
+}
+
+/** Alinea filas del calendario con las fechas calculadas de la serie (elimina huérfanas al acortar vigencia). */
+async function syncRecurringCalendarSlotRange(
+  userId: number,
+  eventType: 'INCOME' | 'RECURRING_EXPENSE',
+  relatedType: string,
+  relatedId: number,
+  rangeStartStr: string,
+  rangeEndStr: string,
+  datesInRange: string[],
+  buildRow: (dateStr: string) => {
+    title: string;
+    amount: number;
+    currency: string;
+    status: 'PENDING' | 'PAID' | 'RECEIVED' | 'OVERDUE' | 'CANCELLED';
+    color: string;
+  }
+): Promise<void> {
+  const existing = await query(
+    `SELECT id, event_date FROM calendar_events
+     WHERE user_id = $1 AND event_type = $2 AND related_id = $3
+       AND event_date >= $4::date AND event_date <= $5::date`,
+    [userId, eventType, relatedId, rangeStartStr, rangeEndStr]
+  );
+  const want = new Set(datesInRange);
+  for (const r of existing.rows) {
+    const ed = toYmdFromPgDate(r.event_date);
+    if (!want.has(ed)) {
+      await query(`DELETE FROM calendar_events WHERE id = $1`, [r.id]);
+    }
+  }
+
+  for (const dateStr of datesInRange) {
+    const existingEvent = await query(
+      `SELECT id FROM calendar_events
+       WHERE user_id = $1 AND event_type = $2 AND related_id = $3 AND event_date = $4::date`,
+      [userId, eventType, relatedId, dateStr]
+    );
+    if (existingEvent.rows.length === 0) {
+      const b = buildRow(dateStr);
+      await query(
+        `INSERT INTO calendar_events
+         (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color, is_recurring)
+         VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, true)
+         ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
+        [
+          userId,
+          eventType,
+          relatedId,
+          relatedType,
+          dateStr,
+          b.title,
+          b.amount,
+          b.currency,
+          b.status,
+          b.color,
+        ]
+      );
+    }
+  }
+}
+
+/**
+ * Elimina filas en `calendar_events` ligadas a un origen borrado.
+ * La tabla no referencia por FK a ingresos/gastos/préstamos/tarjetas; sin esto quedarían eventos huérfanos.
+ */
+export async function deleteCalendarEventsForRelated(
+  userId: number,
+  relatedId: number,
+  eventTypes: string[]
+): Promise<void> {
+  if (eventTypes.length === 0) return;
+  await query(
+    `DELETE FROM calendar_events WHERE user_id = $1 AND related_id = $2 AND event_type = ANY($3::varchar[])`,
+    [userId, relatedId, eventTypes]
+  );
 }
 
 export interface CalendarEventInput {
@@ -101,8 +185,8 @@ export const getCalendarEvents = async (
  */
 export const generateCalendarEvents = async (userId: number, startDate: string, endDate: string): Promise<void> => {
   try {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseYmdLocal(startDate);
+    const end = parseYmdLocal(endDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -220,7 +304,8 @@ export const generateCalendarEvents = async (userId: number, startDate: string, 
 
     // Get income events
     const incomeResult = await query(
-      `SELECT id, description, amount, currency, date, frequency, receipt_day, recurrence_type
+      `SELECT id, description, amount, currency, date, frequency, receipt_day, recurrence_type,
+              recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND (date >= $2 OR recurrence_type = 'recurrent')`,
       [userId, startDate]
@@ -228,49 +313,38 @@ export const generateCalendarEvents = async (userId: number, startDate: string, 
 
     for (const income of incomeResult.rows) {
       if (income.recurrence_type === 'recurrent' && income.frequency) {
-        // Recurring income
-        let dates: string[] = [];
-        
-        dates = getFixedIncomeOccurrenceDates(
+        const dates = getFixedIncomeOccurrenceDates(
           {
             frequency: income.frequency,
             receipt_day: income.receipt_day,
             date: income.date,
+            recurrence_start_date: income.recurrence_start_date,
+            recurrence_end_date: income.recurrence_end_date,
           },
           start,
           end
         );
-        
-        for (const dateStr of dates) {
-          const eventDate = new Date(dateStr);
-          const isReceived = eventDate < today;
 
-          const existingEvent = await query(
-            `SELECT id FROM calendar_events 
-             WHERE user_id = $1 AND event_type = 'INCOME' 
-             AND related_id = $2 AND event_date = $3`,
-            [userId, income.id, dateStr]
-          );
-
-          if (existingEvent.rows.length === 0) {
-            await query(
-              `INSERT INTO calendar_events 
-               (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color, is_recurring)
-               VALUES ($1, 'INCOME', $2, 'INCOME', $3, $4, $5, $6, $7, $8, true)
-               ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
-              [
-                userId,
-                income.id,
-                dateStr,
-                income.description,
-                parseFloat(income.amount),
-                income.currency,
-                isReceived ? 'RECEIVED' : 'PENDING',
-                '#10b981',
-              ]
-            );
+        await syncRecurringCalendarSlotRange(
+          userId,
+          'INCOME',
+          'INCOME',
+          income.id,
+          startDate,
+          endDate,
+          dates,
+          (dateStr) => {
+            const eventDate = new Date(dateStr + 'T12:00:00');
+            const isReceived = eventDate < today;
+            return {
+              title: income.description,
+              amount: parseFloat(income.amount),
+              currency: income.currency,
+              status: isReceived ? 'RECEIVED' : 'PENDING',
+              color: '#10b981',
+            };
           }
-        }
+        );
       } else if (income.date) {
         // One-time income
         const eventDate = toYmdFromPgDate(income.date);
@@ -306,56 +380,49 @@ export const generateCalendarEvents = async (userId: number, startDate: string, 
       }
     }
 
-    // Get recurring expenses
+    // Gastos recurrentes (todas las frecuencias con la misma expansión que flujo de caja)
     const expensesResult = await query(
-      `SELECT id, description, amount, currency, payment_day, frequency, recurrence_type
+      `SELECT id, description, amount, currency, payment_day, payment_month, frequency, recurrence_type, date,
+              recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1
-         AND recurrence_type = 'recurrent'
-         AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'`,
+       WHERE user_id = $1 AND recurrence_type = 'recurrent'`,
       [userId]
     );
 
     for (const expense of expensesResult.rows) {
-      if (expense.payment_day) {
-        let checkDate = new Date(start);
-        const paymentDay = expense.payment_day;
+      const dates = getExpenseOccurrenceDatesInPeriod(
+        {
+          frequency: expense.frequency,
+          payment_day: expense.payment_day,
+          payment_month: expense.payment_month,
+          date: expense.date,
+          recurrence_start_date: expense.recurrence_start_date,
+          recurrence_end_date: expense.recurrence_end_date,
+        },
+        start,
+        end
+      );
 
-        while (checkDate <= end) {
-          const eventDate = new Date(checkDate.getFullYear(), checkDate.getMonth(), paymentDay);
-          if (eventDate >= start && eventDate <= end) {
-            const dateStr = dateToYmdLocal(eventDate);
-            const isOverdue = eventDate < today;
-
-            const existingEvent = await query(
-              `SELECT id FROM calendar_events 
-               WHERE user_id = $1 AND event_type = 'RECURRING_EXPENSE' 
-               AND related_id = $2 AND event_date = $3`,
-              [userId, expense.id, dateStr]
-            );
-
-            if (existingEvent.rows.length === 0) {
-              await query(
-                `INSERT INTO calendar_events 
-                 (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color, is_recurring)
-                 VALUES ($1, 'RECURRING_EXPENSE', $2, 'EXPENSE', $3, $4, $5, $6, $7, $8, true)
-                 ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
-                [
-                  userId,
-                  expense.id,
-                  dateStr,
-                  expense.description,
-                  parseFloat(expense.amount),
-                  expense.currency,
-                  isOverdue ? 'OVERDUE' : 'PENDING',
-                  isOverdue ? '#ef4444' : '#f59e0b',
-                ]
-              );
-            }
-          }
-          checkDate.setMonth(checkDate.getMonth() + 1);
+      await syncRecurringCalendarSlotRange(
+        userId,
+        'RECURRING_EXPENSE',
+        'EXPENSE',
+        expense.id,
+        startDate,
+        endDate,
+        dates,
+        (dateStr) => {
+          const eventDate = new Date(dateStr + 'T12:00:00');
+          const isOverdue = eventDate < today;
+          return {
+            title: expense.description,
+            amount: parseFloat(expense.amount),
+            currency: expense.currency,
+            status: isOverdue ? 'OVERDUE' : 'PENDING',
+            color: isOverdue ? '#ef4444' : '#f59e0b',
+          };
         }
-      }
+      );
     }
   } catch (error) {
     console.error('Error generating calendar events:', error);
@@ -419,17 +486,24 @@ export const getFinancialSummary = async (
   balance: number;
   pendingPayments: number;
   overduePayments: number;
+  /** Todos los totales expresados en DOP (USD × tasa del usuario). */
+  displayCurrency: 'DOP';
 }> => {
   try {
+    const userRate = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
+    const rate = resolveExchangeRateDopUsd(userRate.rows[0]?.exchange_rate_dop_usd);
+
+    const toDop = `CASE WHEN UPPER(TRIM(COALESCE(currency, 'DOP'))) = 'USD' THEN amount * $4::numeric ELSE amount END`;
+
     const result = await query(
       `SELECT 
-        COALESCE(SUM(CASE WHEN event_type IN ('INCOME') AND status = 'RECEIVED' THEN amount ELSE 0 END), 0) as total_income,
-        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PAID' THEN amount ELSE 0 END), 0) as total_expenses,
-        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PENDING' AND event_date >= CURRENT_DATE THEN amount ELSE 0 END), 0) as pending_payments,
-        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND (status = 'OVERDUE' OR (status = 'PENDING' AND event_date < CURRENT_DATE)) THEN amount ELSE 0 END), 0) as overdue_payments
+        COALESCE(SUM(CASE WHEN event_type IN ('INCOME') AND status = 'RECEIVED' THEN ${toDop} ELSE 0 END), 0) as total_income,
+        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PAID' THEN ${toDop} ELSE 0 END), 0) as total_expenses,
+        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PENDING' AND event_date >= CURRENT_DATE THEN ${toDop} ELSE 0 END), 0) as pending_payments,
+        COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND (status = 'OVERDUE' OR (status = 'PENDING' AND event_date < CURRENT_DATE)) THEN ${toDop} ELSE 0 END), 0) as overdue_payments
        FROM calendar_events
-       WHERE user_id = $1 AND event_date >= $2 AND event_date <= $3`,
-      [userId, startDate, endDate]
+       WHERE user_id = $1 AND event_date >= $2::date AND event_date <= $3::date`,
+      [userId, startDate, endDate, rate]
     );
 
     const row = result.rows[0];
@@ -443,6 +517,7 @@ export const getFinancialSummary = async (
       balance,
       pendingPayments: parseFloat(row.pending_payments || 0),
       overduePayments: parseFloat(row.overdue_payments || 0),
+      displayCurrency: 'DOP',
     };
   } catch (error) {
     console.error('Error getting financial summary:', error);

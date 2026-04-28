@@ -9,6 +9,7 @@ import {
 import { applyBalanceDelta } from '../services/accountBalance';
 import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
 import { dateToYmdLocal } from '../utils/dateUtils';
+import { deleteCalendarEventsForRelated } from '../services/calendarService';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -555,6 +556,8 @@ export const deleteLoan = async (req: AuthRequest, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Loan not found' });
     }
+
+    await deleteCalendarEventsForRelated(userId, loanId, ['LOAN_PAYMENT']);
 
     res.json({
       success: true,

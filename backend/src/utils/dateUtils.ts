@@ -28,6 +28,22 @@ export function toYmdFromPgDate(value: unknown): string {
 }
 
 /**
+ * Parsea `YYYY-MM-DD` como inicio del día en hora local (no UTC).
+ * Evita el desfase de `new Date('YYYY-MM-DD')`, que en ECMAScript es medianoche UTC.
+ */
+export function parseYmdLocal(ymd: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd).trim());
+  if (!m) {
+    const d = new Date(ymd);
+    if (!isNaN(d.getTime())) {
+      d.setHours(0, 0, 0, 0);
+    }
+    return d;
+  }
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+}
+
+/**
  * Get user timezone from database
  */
 export const getUserTimezone = async (userId: number): Promise<string> => {
@@ -239,7 +255,33 @@ export type FixedIncomeRow = {
   frequency: string | null;
   receipt_day?: number | null;
   date?: unknown;
+  /** Primera fecha en que aplica la serie (inclusive). Opcional. */
+  recurrence_start_date?: unknown;
+  /** Última fecha en que aplica la serie (inclusive). Opcional. */
+  recurrence_end_date?: unknown;
 };
+
+/** Recorta ocurrencias YYYY-MM-DD por vigencia opcional de la serie recurrente. */
+export function filterOccurrencesByRecurrenceWindow(
+  dates: string[],
+  recurrenceStart: unknown,
+  recurrenceEnd: unknown
+): string[] {
+  const start =
+    recurrenceStart != null && recurrenceStart !== ''
+      ? toYmdFromPgDate(recurrenceStart)
+      : null;
+  const end =
+    recurrenceEnd != null && recurrenceEnd !== ''
+      ? toYmdFromPgDate(recurrenceEnd)
+      : null;
+  if (!start && !end) return dates;
+  return dates.filter((d) => {
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    return true;
+  });
+}
 
 /**
  * Fechas de ocurrencia de un ingreso fijo en [periodStart, periodEnd] (inclusive).
@@ -258,37 +300,34 @@ export const getFixedIncomeOccurrenceDates = (
   const pe = new Date(periodEnd);
   pe.setHours(23, 59, 59, 999);
 
-  if (fq === 'monthly' && row.receipt_day != null) {
-    return calculateMonthlyRecurringDates(parseInt(String(row.receipt_day), 10), ps, pe);
-  }
+  let dates: string[] = [];
 
-  if ((fq === 'daily' || fq === 'weekly' || fq === 'biweekly') && row.date) {
+  if (fq === 'monthly' && row.receipt_day != null) {
+    dates = calculateMonthlyRecurringDates(parseInt(String(row.receipt_day), 10), ps, pe);
+  } else if ((fq === 'daily' || fq === 'weekly' || fq === 'biweekly') && row.date) {
     const anchor = new Date(row.date as string);
     if (isNaN(anchor.getTime())) return [];
     const legacyFq = fq === 'daily' ? 'DAILY' : fq === 'weekly' ? 'WEEKLY' : 'BIWEEKLY';
     const raw = calculateRecurringDates(anchor, legacyFq, pe);
     const lo = dateToYmdLocal(ps);
     const hi = dateToYmdLocal(pe);
-    return raw.filter((d) => d >= lo && d <= hi);
-  }
-
-  if (fq === 'semi_monthly') {
-    return calculateSemiMonthlyRecurringDates(ps, pe);
-  }
-
-  if (fq === 'annual' && row.date) {
+    dates = raw.filter((d) => d >= lo && d <= hi);
+  } else if (fq === 'semi_monthly') {
+    dates = calculateSemiMonthlyRecurringDates(ps, pe);
+  } else if (fq === 'annual' && row.date) {
     const anchor = new Date(row.date as string);
-    return calculateAnnualRecurringDates(anchor, ps, pe);
-  }
-
-  if ((fq === 'quarterly' || fq === 'semi_annual') && row.date) {
+    dates = calculateAnnualRecurringDates(anchor, ps, pe);
+  } else if ((fq === 'quarterly' || fq === 'semi_annual') && row.date) {
     const anchor = new Date(row.date as string);
-    return fq === 'quarterly'
-      ? calculateQuarterlyRecurringDates(anchor, ps, pe)
-      : calculateSemiAnnualRecurringDates(anchor, ps, pe);
+    dates =
+      fq === 'quarterly'
+        ? calculateQuarterlyRecurringDates(anchor, ps, pe)
+        : calculateSemiAnnualRecurringDates(anchor, ps, pe);
+  } else {
+    return [];
   }
 
-  return [];
+  return filterOccurrencesByRecurrenceWindow(dates, row.recurrence_start_date, row.recurrence_end_date);
 };
 
 /**
@@ -334,6 +373,8 @@ export type ExpenseScheduleRow = {
   payment_day?: number | null;
   payment_month?: number | null;
   date?: unknown;
+  recurrence_start_date?: unknown;
+  recurrence_end_date?: unknown;
 };
 
 /**
@@ -349,7 +390,15 @@ export function getExpenseOccurrenceDatesInPeriod(
   if (!fq) return [];
 
   if (fq === 'monthly' && row.payment_day != null) {
-    return calculateMonthlyRecurringDates(parseInt(String(row.payment_day), 10), periodStart, periodEnd);
+    return filterOccurrencesByRecurrenceWindow(
+      calculateMonthlyRecurringDates(
+        parseInt(String(row.payment_day), 10),
+        periodStart,
+        periodEnd
+      ),
+      row.recurrence_start_date,
+      row.recurrence_end_date
+    );
   }
 
   if (fq === 'annual' && row.payment_month != null && row.payment_day != null) {
@@ -370,11 +419,21 @@ export function getExpenseOccurrenceDatesInPeriod(
         dates.push(dateToYmdLocal(eventDate));
       }
     }
-    return dates;
+    return filterOccurrencesByRecurrenceWindow(
+      dates,
+      row.recurrence_start_date,
+      row.recurrence_end_date
+    );
   }
 
   return getFixedIncomeOccurrenceDates(
-    { frequency: row.frequency, receipt_day: row.payment_day, date: row.date },
+    {
+      frequency: row.frequency,
+      receipt_day: row.payment_day,
+      date: row.date,
+      recurrence_start_date: row.recurrence_start_date,
+      recurrence_end_date: row.recurrence_end_date,
+    },
     periodStart,
     periodEnd
   );

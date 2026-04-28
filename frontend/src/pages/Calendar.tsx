@@ -18,6 +18,8 @@ import {
   Clock,
   X,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -122,6 +124,26 @@ const Calendar: React.FC = () => {
   const calendarRef = useRef<FullCalendar>(null);
   const eventDetailModalRef = useRef<HTMLDivElement>(null);
   const isMobileCalendar = useMediaQuery('(max-width: 767px)');
+
+  const [showSummaryWidgets, setShowSummaryWidgets] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('pf:calendar:showSummary') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSummaryWidgets = () => {
+    setShowSummaryWidgets((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('pf:calendar:showSummary', next ? 'true' : 'false');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   /**
    * Las vistas list usan `buttonTextKey: 'list'`. El locale `es` define `list: 'Agenda'`, que gana
@@ -304,6 +326,17 @@ const Calendar: React.FC = () => {
           <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end">
             <button
               type="button"
+              onClick={toggleSummaryWidgets}
+              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              aria-pressed={showSummaryWidgets}
+              title={showSummaryWidgets ? 'Ocultar tarjetas de resumen' : 'Mostrar tarjetas de resumen'}
+            >
+              {showSummaryWidgets ? <EyeOff size={18} /> : <Eye size={18} />}
+              <span className="hidden xs:inline">{showSummaryWidgets ? 'Ocultar resumen' : 'Mostrar resumen'}</span>
+              <span className="xs:hidden">Resumen</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setShowFilters(!showFilters)}
               className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
             >
@@ -321,58 +354,66 @@ const Calendar: React.FC = () => {
           </div>
         </div>
 
-        {/* Financial Summary */}
-        {summary && (
+        {/* Financial Summary — eventos del rango visible; ingresos solo «Recibido», gastos solo «Pagado» */}
+        {showSummaryWidgets && summary && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6"
+            className="mb-6 space-y-2"
           >
-            <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <TrendingUp className="text-green-400" size={20} />
-                <span className="text-dark-400 text-sm">Ingresos</span>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="bg-dark-700 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <TrendingUp className="text-green-400" size={20} />
+                  <span className="text-dark-400 text-sm">Ingresos recibidos</span>
+                </div>
+                <p className="text-white font-semibold text-lg">
+                  {formatCurrency(summary.totalIncome, summary.displayCurrency ?? 'DOP')}
+                </p>
               </div>
-              <p className="text-white font-semibold text-lg">
-                {formatCurrency(summary.totalIncome)}
-              </p>
-            </div>
-            <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <TrendingDown className="text-red-400" size={20} />
-                <span className="text-dark-400 text-sm">Gastos</span>
+              <div className="bg-dark-700 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <TrendingDown className="text-red-400" size={20} />
+                  <span className="text-dark-400 text-sm">Gastos pagados</span>
+                </div>
+                <p className="text-white font-semibold text-lg">
+                  {formatCurrency(summary.totalExpenses, summary.displayCurrency ?? 'DOP')}
+                </p>
               </div>
-              <p className="text-white font-semibold text-lg">
-                {formatCurrency(summary.totalExpenses)}
-              </p>
-            </div>
-            <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <DollarSign className={summary.balance >= 0 ? 'text-green-400' : 'text-red-400'} size={20} />
-                <span className="text-dark-400 text-sm">Balance</span>
+              <div className="bg-dark-700 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <DollarSign className={summary.balance >= 0 ? 'text-green-400' : 'text-red-400'} size={20} />
+                  <span className="text-dark-400 text-sm">Balance</span>
+                </div>
+                <p className={`font-semibold text-lg ${summary.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {formatCurrency(summary.balance, summary.displayCurrency ?? 'DOP')}
+                </p>
               </div>
-              <p className={`font-semibold text-lg ${summary.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {formatCurrency(summary.balance)}
-              </p>
-            </div>
-            <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <Clock className="text-yellow-400" size={20} />
-                <span className="text-dark-400 text-sm">Pendientes</span>
+              <div className="bg-dark-700 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Clock className="text-yellow-400" size={20} />
+                  <span className="text-dark-400 text-sm">Pendientes</span>
+                </div>
+                <p className="text-white font-semibold text-lg">
+                  {formatCurrency(summary.pendingPayments, summary.displayCurrency ?? 'DOP')}
+                </p>
+                <p className="text-dark-500 text-xs mt-1">Pagos futuros en el período (hoy o después).</p>
               </div>
-              <p className="text-white font-semibold text-lg">
-                {formatCurrency(summary.pendingPayments)}
-              </p>
-            </div>
-            <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <AlertCircle className="text-red-400" size={20} />
-                <span className="text-dark-400 text-sm">Vencidos</span>
+              <div className="bg-dark-700 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <AlertCircle className="text-red-400" size={20} />
+                  <span className="text-dark-400 text-sm">Vencidos</span>
+                </div>
+                <p className="text-red-400 font-semibold text-lg">
+                  {formatCurrency(summary.overduePayments, summary.displayCurrency ?? 'DOP')}
+                </p>
+                <p className="text-dark-500 text-xs mt-1">Estado vencido o pendiente con fecha pasada.</p>
               </div>
-              <p className="text-red-400 font-semibold text-lg">
-                {formatCurrency(summary.overduePayments)}
-              </p>
             </div>
+            <p className="text-dark-500 text-xs px-0.5">
+              Suma de eventos del calendario en el rango visible. Montos en DOP; USD se convierte con tu tasa en
+              ajustes. No incluye ingresos pendientes de recibir ni gastos aún no pagados en los totales de arriba.
+            </p>
           </motion.div>
         )}
 

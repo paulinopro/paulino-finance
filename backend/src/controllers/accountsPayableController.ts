@@ -8,6 +8,7 @@ import {
   recalculatePayableStatus,
   expenseDescriptionForPayable,
 } from '../services/accountsPaymentLinkSync';
+import { deleteCalendarEventsForRelated } from '../services/calendarService';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -418,6 +419,7 @@ export const deleteAccountPayablePayment = async (req: AuthRequest, res: Respons
     const expenseId = payRow.rows[0].expense_id as number | null;
     if (expenseId) {
       await query(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
+      await deleteCalendarEventsForRelated(userId, expenseId, ['RECURRING_EXPENSE', 'EXPENSE']);
     }
 
     await query(
@@ -679,7 +681,9 @@ export const deleteAccountPayable = async (req: AuthRequest, res: Response) => {
       [id]
     );
     for (const row of expRows.rows) {
-      await query(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [row.expense_id, userId]);
+      const expId = row.expense_id as number;
+      await query(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [expId, userId]);
+      await deleteCalendarEventsForRelated(userId, expId, ['RECURRING_EXPENSE', 'EXPENSE']);
     }
 
     const result = await query(

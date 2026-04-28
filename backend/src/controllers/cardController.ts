@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { query } from '../config/database';
+import { deleteCalendarEventsForRelated } from '../services/calendarService';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta } from '../services/accountBalance';
 import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
@@ -330,6 +331,8 @@ export const deleteCard = async (req: AuthRequest, res: Response) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Card not found' });
     }
+
+    await deleteCalendarEventsForRelated(userId, cardId, ['CARD_PAYMENT']);
 
     res.json({
       success: true,

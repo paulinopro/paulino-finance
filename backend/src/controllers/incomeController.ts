@@ -9,6 +9,9 @@ import {
   deleteReceivablePaymentByIncomeId,
 } from '../services/accountsPaymentLinkSync';
 import { FREQUENCY_VALUES, normalizeFrequency, type Nature, type RecurrenceType } from '../constants/incomeExpenseTaxonomy';
+import { parseRecurrenceBoundaryFromBody } from '../utils/recurrenceBoundary';
+import { deleteCalendarEventsForRelated } from '../services/calendarService';
+import { toYmdFromPgDate } from '../utils/dateUtils';
 
 /** Ingresos recurrentes: valida frecuencia y campos de calendario (independiente de nature fijo/variable). */
 function validateRecurrentIncomeSchedule(
@@ -125,7 +128,8 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
     // Get paginated results
     let queryText = `
       SELECT id, description, amount, currency, nature, recurrence_type, frequency,
-              receipt_day, date, bank_account_id, is_received, created_at, updated_at
+              receipt_day, date, bank_account_id, is_received,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at
        FROM income
        ${whereClause}
        ORDER BY created_at DESC
@@ -147,6 +151,8 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
       date: row.date,
       bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
       isReceived: Boolean(row.is_received),
+      recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+      recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
@@ -199,7 +205,8 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
 
     const result = await query(
       `SELECT id, description, amount, currency, nature, recurrence_type, frequency,
-              receipt_day, date, bank_account_id, is_received, created_at, updated_at
+              receipt_day, date, bank_account_id, is_received,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at
        FROM income
        WHERE id = $1 AND user_id = $2`,
       [incomeId, userId]
@@ -224,6 +231,8 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
         date: row.date,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
         isReceived: Boolean(row.is_received),
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -276,16 +285,27 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
   const amt = parseFloat(String(amount));
   const initialReceived = typeof isReceived === 'boolean' ? isReceived : false;
 
+  let recurrenceStartDate: string | null = null;
+  let recurrenceEndDate: string | null = null;
+  if (recurrenceType === 'recurrent') {
+    const rb = parseRecurrenceBoundaryFromBody(req.body as Record<string, unknown>);
+    if (rb.error) {
+      return res.status(400).json({ message: rb.error });
+    }
+    recurrenceStartDate = rb.start;
+    recurrenceEndDate = rb.end;
+  }
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
 
     const result = await client.query(
       `INSERT INTO income 
-       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency,
-                 receipt_day, date, bank_account_id, is_received, created_at, updated_at`,
+                 receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
       [
         userId,
         description,
@@ -298,6 +318,8 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
         date || null,
         bankAccountId,
         initialReceived,
+        recurrenceType === 'recurrent' ? recurrenceStartDate : null,
+        recurrenceType === 'recurrent' ? recurrenceEndDate : null,
       ]
     );
 
@@ -336,6 +358,8 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
         date: row.date,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
         isReceived: Boolean(row.is_received),
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -355,7 +379,8 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   const { description, amount, currency, frequency, receiptDay, date } = req.body;
 
   const oldResult = await query(
-    `SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received
+    `SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received,
+            recurrence_start_date, recurrence_end_date
      FROM income WHERE id = $1 AND user_id = $2`,
     [incomeId, userId]
   );
@@ -435,6 +460,17 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   const receiptDayForDb =
     newRecurrence === 'recurrent' && newFrequencyStored === 'monthly' ? newReceiptDay : null;
 
+  let recurrenceStartForDb: string | null = null;
+  let recurrenceEndForDb: string | null = null;
+  if (newRecurrence === 'recurrent') {
+    const rb = parseRecurrenceBoundaryFromBody(req.body as Record<string, unknown>);
+    if (rb.error) {
+      return res.status(400).json({ message: rb.error });
+    }
+    recurrenceStartForDb = rb.start;
+    recurrenceEndForDb = rb.end;
+  }
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
@@ -461,10 +497,12 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
            date = $8,
            bank_account_id = $9,
            is_received = $10,
+           recurrence_start_date = $11,
+           recurrence_end_date = $12,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11 AND user_id = $12
+       WHERE id = $13 AND user_id = $14
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency,
-                 receipt_day, date, bank_account_id, is_received, created_at, updated_at`,
+                 receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
       [
         newDesc,
         newAmount,
@@ -476,6 +514,8 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
         newDate,
         newBankId,
         newIsReceived,
+        newRecurrence === 'recurrent' ? recurrenceStartForDb : null,
+        newRecurrence === 'recurrent' ? recurrenceEndForDb : null,
         incomeId,
         userId,
       ]
@@ -518,6 +558,8 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
         date: row.date,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
         isReceived: Boolean(row.is_received),
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -569,6 +611,8 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
     if (del.rows.length === 0) {
       return res.status(404).json({ message: 'Income item not found' });
     }
+
+    await deleteCalendarEventsForRelated(userId, incomeId, ['INCOME']);
 
     res.json({
       success: true,

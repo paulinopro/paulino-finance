@@ -18,6 +18,8 @@ import {
   type RecurrenceType,
   type Frequency,
 } from '../constants/incomeExpenseTaxonomy';
+import { parseRecurrenceBoundaryFromBody } from '../utils/recurrenceBoundary';
+import { toYmdFromPgDate } from '../utils/dateUtils';
 
 function validateExpenseSchedule(
   recurrenceType: RecurrenceType,
@@ -176,7 +178,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
              e.category,
              e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-             e.bank_account_id, e.created_at, e.updated_at,
+             e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
       FROM expenses e
       LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
@@ -223,6 +225,8 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
           row.vehicle_id != null
             ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
             : null,
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -278,7 +282,7 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
       `SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
               e.category,
               e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-              e.bank_account_id, e.created_at, e.updated_at,
+              e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
               v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
        FROM expenses e
        LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
@@ -325,6 +329,8 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
           row.vehicle_id != null
             ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
             : null,
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -367,16 +373,27 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
   const bankAccountId = parseBankAccountIdFromBody(req.body, 'create', null);
   const initialPaid = typeof isPaid === 'boolean' ? isPaid : false;
 
+  let recurrenceStartDate: string | null = null;
+  let recurrenceEndDate: string | null = null;
+  if (tx.recurrenceType === 'recurrent') {
+    const rb = parseRecurrenceBoundaryFromBody(body);
+    if (rb.error) {
+      return res.status(400).json({ message: rb.error });
+    }
+    recurrenceStartDate = rb.start;
+    recurrenceEndDate = rb.end;
+  }
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
 
     const result = await client.query(
       `INSERT INTO expenses 
-       (user_id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, bank_account_id, is_paid)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (user_id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, bank_account_id, is_paid, recurrence_start_date, recurrence_end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category,
-                 payment_day, payment_month, date, is_paid, bank_account_id, created_at, updated_at, last_paid_month, last_paid_year`,
+                 payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at, last_paid_month, last_paid_year`,
       [
         userId,
         description,
@@ -391,6 +408,8 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         date || null,
         bankAccountId,
         initialPaid,
+        tx.recurrenceType === 'recurrent' ? recurrenceStartDate : null,
+        tx.recurrenceType === 'recurrent' ? recurrenceEndDate : null,
       ]
     );
 
@@ -467,6 +486,8 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         date: row.date,
         isPaid: row.is_paid,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -487,7 +508,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
 
   const oldResult = await query(
     `SELECT id, description, amount, currency, nature, recurrence_type, frequency, category,
-            payment_day, payment_month, date, is_paid, bank_account_id
+            payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date
      FROM expenses WHERE id = $1 AND user_id = $2`,
     [expenseId, userId]
   );
@@ -549,6 +570,17 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
     });
   }
 
+  let recurrenceStartForDb: string | null = null;
+  let recurrenceEndForDb: string | null = null;
+  if (tx.recurrenceType === 'recurrent') {
+    const rb = parseRecurrenceBoundaryFromBody(body);
+    if (rb.error) {
+      return res.status(400).json({ message: rb.error });
+    }
+    recurrenceStartForDb = rb.start;
+    recurrenceEndForDb = rb.end;
+  }
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
@@ -582,10 +614,12 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
            date = $10,
            is_paid = $11,
            bank_account_id = $12,
+           recurrence_start_date = $13,
+           recurrence_end_date = $14,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $13 AND user_id = $14
+       WHERE id = $15 AND user_id = $16
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category,
-                 payment_day, payment_month, date, is_paid, bank_account_id, created_at, updated_at`,
+                 payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
       [
         newDesc,
         newAmount,
@@ -599,6 +633,8 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
         newDate,
         newIsPaid,
         newBankId,
+        tx.recurrenceType === 'recurrent' ? recurrenceStartForDb : null,
+        tx.recurrenceType === 'recurrent' ? recurrenceEndForDb : null,
         expenseId,
         userId,
       ]
@@ -658,6 +694,8 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
         date: row.date,
         isPaid: row.is_paid,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },

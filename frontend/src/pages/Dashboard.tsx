@@ -870,7 +870,9 @@ const Dashboard: React.FC = () => {
         >
           <h2 className="dashboard-panel-title">Progreso de Préstamos</h2>
           <div className="space-y-4">
-            {stats.debtProgress.map((loan) => (
+            {stats.debtProgress.map((loan) => {
+              const progBar = Math.min(100, loan.progress || 0);
+              return (
               <div key={loan.id} className="dashboard-debt-row">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <h3 className="font-medium text-white">
@@ -883,19 +885,21 @@ const Dashboard: React.FC = () => {
                 <div className="mb-2 h-2.5 w-full overflow-hidden rounded-full bg-dark-700/90 ring-1 ring-white/5">
                   <div
                     className="h-2.5 rounded-full bg-gradient-to-r from-primary-600 to-primary-400 shadow-sm transition-all duration-300"
-                    style={{ width: `${loan.progress}%` }}
+                    style={{ width: `${progBar}%` }}
                   />
                 </div>
                 <div className="flex flex-col gap-1 text-sm xs:flex-row xs:items-center xs:justify-between">
                   <span className="text-dark-400">
-                    Pagado: {loan.totalPaid.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}
+                    Total pagado: {loan.totalPaid.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}
                   </span>
                   <span className="text-dark-400">
-                    Restante: {loan.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {loan.currency}
+                    Restante (capital): {loan.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                    {loan.currency}
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </motion.div>
       )}

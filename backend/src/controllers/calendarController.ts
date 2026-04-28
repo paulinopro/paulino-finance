@@ -55,6 +55,7 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Start and end dates are required' });
     }
 
+    await generateCalendarEvents(userId, start as string, end as string);
     const summary = await getFinancialSummary(userId, start as string, end as string);
 
     res.json({ success: true, summary });

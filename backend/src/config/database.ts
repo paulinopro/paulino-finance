@@ -632,6 +632,36 @@ const createTables = async () => {
   `);
 
   await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'recurrence_start_date'
+      ) THEN
+        ALTER TABLE income ADD COLUMN recurrence_start_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'recurrence_end_date'
+      ) THEN
+        ALTER TABLE income ADD COLUMN recurrence_end_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'recurrence_start_date'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN recurrence_start_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'recurrence_end_date'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN recurrence_end_date DATE;
+      END IF;
+    END $$;
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS account_transfers (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

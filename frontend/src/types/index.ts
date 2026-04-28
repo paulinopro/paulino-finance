@@ -143,6 +143,8 @@ export interface FinancialSummary {
   balance: number;
   pendingPayments: number;
   overduePayments: number;
+  /** Si viene del API, los montos ya están unificados en esta moneda. */
+  displayCurrency?: 'DOP';
 }
 
 /** Tipo fijo/variable — API `nature` */
@@ -173,6 +175,10 @@ export interface Income {
   bankAccountId?: number | null;
   /** Ingreso acreditado en la cuenta (actualiza saldo al marcar «Recibido» si hay cuenta vinculada) */
   isReceived: boolean;
+  /** Primera fecha en que la serie recurrente aplica en calendario/proyecciones (inclusive). */
+  recurrenceStartDate?: string | null;
+  /** Última fecha en que aplica (inclusive). */
+  recurrenceEndDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -211,6 +217,8 @@ export interface Expense {
   /** Si el gasto está vinculado a un vehículo (origen módulo Vehículos) */
   vehicleId?: number | null;
   vehicleLabel?: string | null;
+  recurrenceStartDate?: string | null;
+  recurrenceEndDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -301,8 +309,11 @@ export interface DashboardStats {
     loanName: string;
     bankName?: string;
     totalAmount: number;
+    /** Suma de `loan_payments.amount` (incluye interés). */
     totalPaid: number;
+    /** Capital pendiente: `totalAmount` − suma de `principal_amount` (como en /loans). */
     remaining: number;
+    /** Porcentaje de cuotas pagadas (paidInstallments / totalInstallments), tope 100. */
     progress: number;
     paidInstallments: number;
     totalInstallments: number;

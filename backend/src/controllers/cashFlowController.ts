@@ -183,7 +183,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     });
 
     const fixedIncomeResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date, nature
+      `SELECT amount, currency, frequency, receipt_day, date, nature, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND (${INCOME_RECURRENT_ROWS})`,
       [userId]
@@ -195,7 +195,13 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
       const frequency = row.frequency;
       
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        {
+          frequency,
+          receipt_day: row.receipt_day,
+          date: row.date,
+          recurrence_start_date: row.recurrence_start_date,
+          recurrence_end_date: row.recurrence_end_date,
+        },
         start,
         end
       );
@@ -221,7 +227,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     });
 
     const recurringExpensesExpandedResult = await query(
-      `SELECT amount, currency, frequency, payment_day, payment_month, date
+      `SELECT amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1
          AND (
@@ -241,6 +247,8 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
           payment_day: row.payment_day,
           payment_month: row.payment_month,
           date: row.date,
+          recurrence_start_date: row.recurrence_start_date,
+          recurrence_end_date: row.recurrence_end_date,
         },
         start,
         end
@@ -327,7 +335,13 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
       const amountDop = toDop(amount, row.currency, exchangeRate);
       const frequency = row.frequency;
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        {
+          frequency,
+          receipt_day: row.receipt_day,
+          date: row.date,
+          recurrence_start_date: row.recurrence_start_date,
+          recurrence_end_date: row.recurrence_end_date,
+        },
         start,
         end
       );
@@ -372,6 +386,8 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
           payment_day: row.payment_day,
           payment_month: row.payment_month,
           date: row.date,
+          recurrence_start_date: row.recurrence_start_date,
+          recurrence_end_date: row.recurrence_end_date,
         },
         start,
         end

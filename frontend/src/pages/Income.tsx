@@ -141,6 +141,8 @@ const IncomePage: React.FC = () => {
     frequency: 'monthly' as IncomeFrequency | '',
     receiptDay: '',
     date: '',
+    recurrenceStartDate: '',
+    recurrenceEndDate: '',
     bankAccountId: '',
     isReceived: false,
   });
@@ -222,6 +224,8 @@ const IncomePage: React.FC = () => {
         payload.frequency = null;
         payload.receiptDay = null;
         payload.date = formData.date;
+        payload.recurrenceStartDate = null;
+        payload.recurrenceEndDate = null;
       } else {
         const fq = (formData.frequency || 'monthly') as IncomeFrequency;
         payload.frequency = fq;
@@ -235,6 +239,8 @@ const IncomePage: React.FC = () => {
           payload.receiptDay = null;
           payload.date = formData.date || null;
         }
+        payload.recurrenceStartDate = formData.recurrenceStartDate.trim() || null;
+        payload.recurrenceEndDate = formData.recurrenceEndDate.trim() || null;
       }
 
       if (editingIncome) {
@@ -284,6 +290,8 @@ const IncomePage: React.FC = () => {
       frequency: 'monthly',
       receiptDay: '',
       date: '',
+      recurrenceStartDate: '',
+      recurrenceEndDate: '',
       bankAccountId: '',
       isReceived: false,
     });
@@ -669,6 +677,8 @@ const IncomePage: React.FC = () => {
                                   frequency: rec === 'recurrent' ? fq : '',
                                   receiptDay: item.receiptDay?.toString() || '',
                                   date: formatDateForInput(item.date),
+                                  recurrenceStartDate: formatDateForInput(item.recurrenceStartDate),
+                                  recurrenceEndDate: formatDateForInput(item.recurrenceEndDate),
                                   bankAccountId: item.bankAccountId != null ? String(item.bankAccountId) : '',
                                   isReceived: item.isReceived ?? false,
                                 });
@@ -823,6 +833,8 @@ const IncomePage: React.FC = () => {
                         recurrenceType: v,
                         frequency: v === 'non_recurrent' ? '' : prev.frequency || 'monthly',
                         receiptDay: v === 'non_recurrent' ? '' : prev.receiptDay,
+                        recurrenceStartDate: v === 'non_recurrent' ? '' : prev.recurrenceStartDate,
+                        recurrenceEndDate: v === 'non_recurrent' ? '' : prev.recurrenceEndDate,
                       }));
                     }}
                     className="input w-full"
@@ -875,9 +887,37 @@ const IncomePage: React.FC = () => {
                         Se consideran dos pagos por mes: día <strong className="text-white">15</strong> y día{' '}
                         <strong className="text-white">30</strong> (o el último día del mes si es menor).
                       </p>
-                      <p className="mt-2 text-xs text-dark-500">No requiere fecha de inicio.</p>
+                      <p className="mt-2 text-xs text-dark-500">
+                        Puede acotar la vigencia de la serie con los campos siguientes (opcional).
+                      </p>
                     </div>
                   )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-dark-600/50 mt-2">
+                    <div>
+                      <label className="label">Inicio de vigencia (opcional)</label>
+                      <input
+                        type="date"
+                        value={formData.recurrenceStartDate}
+                        onChange={(e) => setFormData({ ...formData, recurrenceStartDate: e.target.value })}
+                        className="input w-full"
+                      />
+                      <p className="text-xs text-dark-500 mt-1">
+                        Primera fecha en que el calendario y las proyecciones incluyen la serie (inclusive).
+                      </p>
+                    </div>
+                    <div>
+                      <label className="label">Fin de vigencia (opcional)</label>
+                      <input
+                        type="date"
+                        value={formData.recurrenceEndDate}
+                        onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                        className="input w-full"
+                      />
+                      <p className="text-xs text-dark-500 mt-1">
+                        Última fecha en que aplica (inclusive). Vacío si la serie no tiene fin definido.
+                      </p>
+                    </div>
+                  </div>
                 </>
               )}
               {formData.recurrenceType === 'non_recurrent' && (

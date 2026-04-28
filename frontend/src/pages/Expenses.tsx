@@ -138,6 +138,8 @@ const Expenses: React.FC = () => {
     paymentDay: '',
     paymentMonth: '',
     date: '',
+    recurrenceStartDate: '',
+    recurrenceEndDate: '',
     bankAccountId: '' as string,
     isPaid: false,
   });
@@ -254,6 +256,14 @@ const Expenses: React.FC = () => {
         data.bankAccountId = null;
       }
 
+      if (recurrenceType === 'recurrent' && !vehicleOneoff) {
+        data.recurrenceStartDate = formData.recurrenceStartDate.trim() || null;
+        data.recurrenceEndDate = formData.recurrenceEndDate.trim() || null;
+      } else {
+        data.recurrenceStartDate = null;
+        data.recurrenceEndDate = null;
+      }
+
       if (editingExpense) {
         await api.put(`/expenses/${editingExpense.id}`, data);
         toast.success('Gasto actualizado');
@@ -303,6 +313,8 @@ const Expenses: React.FC = () => {
       paymentDay: '',
       paymentMonth: '',
       date: '',
+      recurrenceStartDate: '',
+      recurrenceEndDate: '',
       bankAccountId: '',
       isPaid: false,
     });
@@ -725,6 +737,8 @@ const Expenses: React.FC = () => {
                                   paymentDay: expense.paymentDay?.toString() || '',
                                   paymentMonth: expense.paymentMonth?.toString() || '',
                                   date: formatDateForInput(expense.date),
+                                  recurrenceStartDate: formatDateForInput(expense.recurrenceStartDate),
+                                  recurrenceEndDate: formatDateForInput(expense.recurrenceEndDate),
                                   bankAccountId: expense.bankAccountId != null ? String(expense.bankAccountId) : '',
                                   isPaid: Boolean(expense.isPaid),
                                 });
@@ -882,6 +896,8 @@ const Expenses: React.FC = () => {
                         ...prev,
                         recurrenceType: v,
                         frequency: v === 'non_recurrent' ? '' : prev.frequency || 'monthly',
+                        recurrenceStartDate: v === 'non_recurrent' ? '' : prev.recurrenceStartDate,
+                        recurrenceEndDate: v === 'non_recurrent' ? '' : prev.recurrenceEndDate,
                       }));
                     }}
                     className="input w-full"
@@ -962,6 +978,34 @@ const Expenses: React.FC = () => {
                     />
                   </div>
                 )}
+              {formData.recurrenceType === 'recurrent' && editingExpense?.vehicleId == null && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-dark-600/50 mt-2">
+                  <div>
+                    <label className="label">Inicio de vigencia (opcional)</label>
+                    <input
+                      type="date"
+                      value={formData.recurrenceStartDate}
+                      onChange={(e) => setFormData({ ...formData, recurrenceStartDate: e.target.value })}
+                      className="input w-full"
+                    />
+                    <p className="text-xs text-dark-500 mt-1">
+                      Primera fecha en que el calendario y las proyecciones incluyen la serie (inclusive).
+                    </p>
+                  </div>
+                  <div>
+                    <label className="label">Fin de vigencia (opcional)</label>
+                    <input
+                      type="date"
+                      value={formData.recurrenceEndDate}
+                      onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
+                      className="input w-full"
+                    />
+                    <p className="text-xs text-dark-500 mt-1">
+                      Última fecha en que aplica (inclusive). Vacío si la serie no tiene fin definido.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="flex space-x-4 pt-4">
                 <button type="submit" className="btn-primary flex-1">{editingExpense ? 'Actualizar' : 'Crear'}</button>
                 <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="btn-secondary flex-1">Cancelar</button>

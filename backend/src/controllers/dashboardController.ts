@@ -32,6 +32,22 @@ function mergeCategoryTotals(target: { [key: string]: number }, delta: { [key: s
   }
 }
 
+function fixedIncomeScheduleFromRow(row: {
+  frequency: string | null;
+  receipt_day: unknown;
+  date: unknown;
+  recurrence_start_date?: unknown;
+  recurrence_end_date?: unknown;
+}) {
+  return {
+    frequency: row.frequency,
+    receipt_day: row.receipt_day as number | null | undefined,
+    date: row.date,
+    recurrence_start_date: row.recurrence_start_date,
+    recurrence_end_date: row.recurrence_end_date,
+  };
+}
+
 /** Suma por categoría y total DOP para gastos `EXPENSE_RECURRING_OTHER_FREQ` en [periodStart, periodEnd]. */
 function otherFreqExpenseTotalsInPeriod(
   rows: Array<{
@@ -42,6 +58,8 @@ function otherFreqExpenseTotalsInPeriod(
     payment_day: unknown;
     payment_month: unknown;
     date: unknown;
+    recurrence_start_date?: unknown;
+    recurrence_end_date?: unknown;
   }>,
   periodStart: Date,
   periodEnd: Date,
@@ -58,6 +76,8 @@ function otherFreqExpenseTotalsInPeriod(
         payment_day: row.payment_day as number | null | undefined,
         payment_month: row.payment_month as number | null | undefined,
         date: row.date,
+        recurrence_start_date: row.recurrence_start_date,
+        recurrence_end_date: row.recurrence_end_date,
       },
       periodStart,
       periodEnd
@@ -404,7 +424,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     });
 
     const otherFreqStats = await query(
-      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
       [userId]
@@ -431,7 +451,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     });
 
     const fixedIncomeStatsResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date
+      `SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
@@ -441,7 +461,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency: row.frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         monthStart,
         monthEnd
       );
@@ -453,10 +473,12 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       totalExpensesDop += amount;
     });
 
-    // Debt progress (loans)
+    // Debt progress (loans) — alineado a loanController: saldo restante = capital pendiente; progreso = cuotas pagadas / total.
     const loansResult = await query(
       `SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.paid_installments, l.total_installments,
-              COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
+              COALESCE(SUM(lp.amount), 0) as total_paid,
+              COALESCE(SUM(lp.principal_amount), 0) as total_principal_paid,
+              l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
        WHERE l.user_id = $1 AND l.status = 'ACTIVE'
@@ -467,15 +489,19 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     const debtProgress = loansResult.rows.map((loan) => {
       const totalPaid = parseFloat(loan.total_paid);
       const totalAmount = parseFloat(loan.total_amount);
-      const progress = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
+      const totalPrincipalPaid = parseFloat(loan.total_principal_paid || 0);
+      const remaining = totalAmount - totalPrincipalPaid;
+      const totalInst = loan.total_installments;
+      const progressPct =
+        totalInst > 0 ? Math.min(100, (loan.paid_installments / totalInst) * 100) : 0;
       return {
         id: loan.id,
         loanName: loan.loan_name,
         bankName: loan.bank_name,
         totalAmount: totalAmount,
         totalPaid: totalPaid,
-        remaining: totalAmount - totalPaid,
-        progress: Math.round(progress * 100) / 100,
+        remaining,
+        progress: Math.round(progressPct * 100) / 100,
         paidInstallments: loan.paid_installments,
         totalInstallments: loan.total_installments,
         currency: loan.currency,
@@ -538,7 +564,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const fixedIncomeResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date
+      `SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
@@ -547,10 +573,9 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
-      
+
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         monthStart,
         monthEnd
       );
@@ -574,7 +599,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const otherFreqMonth = await query(
-      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
       [userId]
@@ -669,10 +694,9 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
-      
+
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         prevMonthStart,
         prevMonthEnd
       );
@@ -783,7 +807,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     yearEnd.setHours(23, 59, 59, 999);
 
     const fixedIncomeResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date
+      `SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
@@ -792,10 +816,9 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         yearStart,
         yearEnd
       );
@@ -877,7 +900,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const otherFreqAnnual = await query(
-      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
       [userId]
@@ -966,10 +989,9 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         prevYearStart,
         prevYearEnd
       );
@@ -1088,7 +1110,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const fixedIncomeResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date
+      `SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
@@ -1097,11 +1119,10 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const dayStr = dateToYmdLocal(targetDateObj);
       const occ = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         targetDateObj,
         targetDateObj
       );
@@ -1145,7 +1166,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const otherFreqDayRows = await query(
-      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
       [userId]
@@ -1217,11 +1238,10 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const prevDayStr = dateToYmdLocal(prevDateObj);
       const occPrev = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         prevDateObj,
         prevDateObj
       );
@@ -1339,7 +1359,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const fixedIncomeResult = await query(
-      `SELECT amount, currency, frequency, receipt_day, date
+      `SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND ( ${INCOME_RECURRENT_ROWS} )`,
       [userId]
@@ -1348,10 +1368,9 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         startDate,
         endDate
       );
@@ -1375,7 +1394,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     });
 
     const recurringAllWeek = await query(
-      `SELECT category, amount, currency, frequency, payment_day, payment_month, date
+      `SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1
          AND (
@@ -1467,10 +1486,9 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
       const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
-      const frequency = row.frequency;
       
       const dates = getFixedIncomeOccurrenceDates(
-        { frequency, receipt_day: row.receipt_day, date: row.date },
+        fixedIncomeScheduleFromRow(row),
         prevStartDate,
         prevEndDate
       );
