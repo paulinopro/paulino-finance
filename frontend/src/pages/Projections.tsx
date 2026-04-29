@@ -313,7 +313,8 @@ const Projections: React.FC = () => {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="metrics-cq">
+        <div className="metrics-summary-strip">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -398,6 +399,7 @@ const Projections: React.FC = () => {
               </div>
             </div>
           </motion.div>
+        </div>
         </div>
       )}
 
@@ -536,7 +538,7 @@ const Projections: React.FC = () => {
         className="card"
       >
         <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Proyecciones Mensuales</h2>
-        <div className="space-y-4">
+        <>
           <div className="table-responsive table-stack">
             <table className="w-full">
               <thead>
@@ -591,6 +593,7 @@ const Projections: React.FC = () => {
             </table>
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={projectionPageSafe}
             totalPages={projectionTotalPages}
             totalItems={projections.length}
@@ -601,7 +604,7 @@ const Projections: React.FC = () => {
             pageSizeOptions={projectionPageSizeOptions}
             onPageSizeChange={setProjectionPageSize}
           />
-        </div>
+        </>
       </motion.div>
     </div>
   );

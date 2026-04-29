@@ -489,7 +489,7 @@ const Expenses: React.FC = () => {
           <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Gasto</button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div className="card overflow-hidden">
             <div className="table-responsive table-stack">
               <table className="w-full">
@@ -759,6 +759,7 @@ const Expenses: React.FC = () => {
             </div>
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={currentPage}
             totalPages={totalPages}
             totalItems={total}
@@ -770,7 +771,7 @@ const Expenses: React.FC = () => {
             pageSizeOptions={pageSizeOptions}
             onPageSizeChange={setItemsPerPage}
           />
-        </div>
+        </>
       )}
 
       {showModal && (

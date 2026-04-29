@@ -125,8 +125,8 @@ const Subscription: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className={[LIST_CARD_SHELL, isCurrent ? 'border-l-emerald-500' : listCardAccentNeutral()].join(' ')}
               >
-                <div className="flex flex-row gap-3 justify-between items-start">
-                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-[min(100%,12rem)] flex-1 space-y-2 pr-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                         <CreditCard className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -138,15 +138,16 @@ const Subscription: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <h2 className="text-balance text-xl font-bold leading-snug text-white sm:text-2xl">{p.name}</h2>
+                    <h2 className="break-words text-xl font-bold leading-snug text-white sm:text-2xl">{p.name}</h2>
                     {p.description && <p className="text-sm text-dark-400">{p.description}</p>}
                   </div>
                   <CreditCard className="h-8 w-8 shrink-0 text-primary-500" aria-hidden />
                 </div>
 
                 <div className="mt-4 flex flex-col gap-4 border-t border-dark-700/80 pt-4">
-                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                  <div className="metrics-cq">
+                    <div className="metrics-row-2">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Mensual</p>
                       <p className="mt-0.5 text-lg font-bold tabular-nums text-white sm:text-xl">
                         {p.currency}{' '}
@@ -161,13 +162,14 @@ const Subscription: React.FC = () => {
                       </p>
                     </div>
                     {Number(p.priceYearly) > 0 && (
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Anual</p>
                         <p className="mt-0.5 text-sm font-semibold text-dark-200 sm:text-base">
                           {p.currency} {p.priceYearly} <span className="text-xs font-normal text-dark-500">/ año</span>
                         </p>
                       </div>
                     )}
+                  </div>
                   </div>
 
                   <ul className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-dark-300">

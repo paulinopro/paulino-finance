@@ -47,6 +47,7 @@ import { useForegroundPushNotifications } from '../hooks/useForegroundPushNotifi
 import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useMobileTabBarVisible } from '../hooks/useMobileTabBarVisible';
 import { allowSuperAdminClientView } from '../constants/superAdminClientView';
+import { LAYOUT_DESKTOP_SHELL_MEDIA } from '../constants/layout';
 
 const SIDEBAR_COLLAPSED_KEY = 'paulino-sidebar-collapsed';
 
@@ -118,8 +119,8 @@ const Layout: React.FC = () => {
       return false;
     }
   });
-  const [isLg, setIsLg] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  const [isDesktopShell, setIsDesktopShell] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(LAYOUT_DESKTOP_SHELL_MEDIA).matches
   );
   const [expandedMenus, setExpandedMenus] = useState<{ [key: string]: boolean }>({});
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -299,8 +300,8 @@ const Layout: React.FC = () => {
   }, [location.pathname, subLoading, subscriptionLoadError, user, subscription, hasModule, navigate]);
 
   useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const onChange = () => setIsLg(mq.matches);
+    const mq = window.matchMedia(LAYOUT_DESKTOP_SHELL_MEDIA);
+    const onChange = () => setIsDesktopShell(mq.matches);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
@@ -392,11 +393,11 @@ const Layout: React.FC = () => {
     }
   };
 
-  /** Menú visible: móvil = drawer abierto; escritorio = no colapsado */
-  const sidebarVisible = isLg ? !sidebarCollapsed : sidebarOpen;
+  /** Menú visible: teléfono = drawer; tablet+ = barra lateral según colapso */
+  const sidebarVisible = isDesktopShell ? !sidebarCollapsed : sidebarOpen;
 
   const toggleSidebar = () => {
-    if (isLg) {
+    if (isDesktopShell) {
       setSidebarCollapsedPersist(!sidebarCollapsed);
     } else {
       setSidebarOpen((o) => !o);
@@ -404,7 +405,7 @@ const Layout: React.FC = () => {
   };
 
   const closeMobileDrawer = () => {
-    if (!isLg) setSidebarOpen(false);
+    if (!isDesktopShell) setSidebarOpen(false);
   };
 
   const renderMenuItem = (item: MenuItem, level: number = 0) => {
@@ -487,7 +488,7 @@ const Layout: React.FC = () => {
             <button
               type="button"
               onClick={closeMobileDrawer}
-              className="lg:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
+              className="md:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
               aria-label="Cerrar menú"
             >
               <X size={22} />
@@ -499,7 +500,7 @@ const Layout: React.FC = () => {
           </nav>
 
           <div
-            className="p-3 sm:p-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-4 shrink-0 border-dark-700"
+            className="p-3 sm:p-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-4 shrink-0 border-dark-700"
           >
             <Link
               to="/profile"
@@ -531,8 +532,8 @@ const Layout: React.FC = () => {
         </div>
       </aside>
 
-      {/* Overlay: solo móvil cuando el drawer está abierto */}
-      {!isLg && sidebarOpen && (
+      {/* Overlay: solo vista compacta cuando el drawer está abierto */}
+      {!isDesktopShell && sidebarOpen && (
         <button
           type="button"
           aria-label="Cerrar menú"
@@ -543,7 +544,7 @@ const Layout: React.FC = () => {
 
       {/* Main content */}
       <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 transition-[padding] duration-300 ease-in-out ${isLg && !sidebarCollapsed ? 'lg:pl-64' : ''
+        className={`flex-1 flex flex-col min-w-0 min-h-0 transition-[padding] duration-300 ease-in-out ${isDesktopShell && !sidebarCollapsed ? 'md:pl-64' : ''
           }`}
       >
         {/* Top bar */}
@@ -721,7 +722,7 @@ const Layout: React.FC = () => {
         {/* Page content */}
         <main
           className={`flex-1 min-w-0 p-3 xs:p-4 sm:p-6 overflow-y-auto overflow-x-hidden ${showMobileTabBar
-            ? 'pb-24 lg:pb-[max(1.5rem,env(safe-area-inset-bottom))]'
+            ? 'pb-24 md:pb-[max(1.5rem,env(safe-area-inset-bottom))]'
             : 'pb-[max(1.5rem,env(safe-area-inset-bottom))]'
             }`}
         >

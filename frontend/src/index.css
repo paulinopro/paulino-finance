@@ -81,6 +81,68 @@
     @apply w-full min-w-0;
   }
 
+  /**
+   * Métricas dentro de tarjetas / paneles: rejilla que crece en filas según el ancho disponible.
+   * Sin scroll horizontal en los cards.
+   * Uso: .metrics-cq > .metrics-row-* > .metrics-cell (y .metrics-cell-span-2 si aplica).
+   */
+  .metrics-cq {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .metrics-row-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+    gap: 0.75rem;
+  }
+
+  .metrics-row-2 > .metrics-cell,
+  .metrics-row-2 > .metrics-cell-span-2 {
+    min-width: 0;
+  }
+
+  .metrics-row-2 > .metrics-cell-span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .metrics-row-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.25rem), 1fr));
+    gap: 0.75rem;
+  }
+
+  .metrics-row-3 > .metrics-cell {
+    min-width: 0;
+  }
+
+  .metrics-row-4 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: 0.75rem;
+  }
+
+  .metrics-row-4 > .metrics-cell {
+    min-width: 0;
+  }
+
+  /** Franja de tarjetas de resumen (dashboard, flujo, proyecciones, metas): misma idea, sin scroll */
+  .metrics-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    gap: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .metrics-summary-strip {
+      gap: 1.5rem;
+    }
+  }
+
+  .metrics-summary-strip > * {
+    min-width: 0;
+  }
+
   /* Contenedor típico para gráficos Recharts */
   .chart-box {
     @apply w-full min-w-0 min-h-[220px] sm:min-h-[280px] overflow-x-auto overscroll-x-contain;
@@ -94,11 +156,11 @@
 
   /* Modales: hoja inferior en móvil, centrado desde sm */
   .modal-overlay {
-    @apply fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 overflow-y-auto overscroll-contain;
+    @apply fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4 md:px-6 overflow-y-auto overscroll-contain;
   }
 
   .modal-sheet {
-    @apply w-full max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-t-2xl sm:rounded-xl pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl;
+    @apply w-full max-h-[92dvh] sm:max-h-[90vh] md:max-h-[min(90vh,48rem)] overflow-y-auto overflow-x-hidden rounded-t-2xl sm:rounded-xl pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl;
   }
 
   /**
@@ -567,6 +629,28 @@
 
 .calendar-container .fc-list-event:hover {
   background-color: var(--fc-neutral-bg-color);
+}
+
+/* Tablets: barra de FullCalendar con wrap sin forzar una sola columna como en móvil */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .calendar-container .fc-header-toolbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    row-gap: 0.5rem;
+    justify-content: center;
+  }
+  .calendar-container .fc-toolbar-chunk {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.25rem;
+  }
+  .calendar-container .fc-toolbar-title {
+    font-size: 1.25rem !important;
+    width: 100%;
+    text-align: center;
+    order: -1;
+  }
 }
 
 /* Mismo breakpoint que Calendar.tsx (vistas tipo agenda en <768px) */

@@ -518,8 +518,8 @@ const Reports: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="card overflow-hidden border-t-4 border-t-primary-500/35 shadow-lg shadow-dark-900/20"
         >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6 gap-y-2">
-            <div className="min-w-0">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6 gap-y-2">
+            <div className="min-w-[min(100%,12rem)]">
               <p className="text-xs font-medium uppercase tracking-wider text-primary-400/90 mb-1">
                 Resultado
               </p>

@@ -520,7 +520,8 @@ const FinancialGoals: React.FC = () => {
 
       {summaryBarVisible && (
         <div className="card-view">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="metrics-cq">
+            <div className="metrics-summary-strip">
             <div>
               <p className="text-dark-400 text-sm mb-1">Objetivo total (DOP)</p>
               <p className="text-2xl font-bold text-white">
@@ -540,6 +541,7 @@ const FinancialGoals: React.FC = () => {
             <div>
               <p className="text-dark-400 text-sm mb-1">Cantidad de Metas</p>
               <p className="text-2xl font-bold text-white">{goalsSummaryKpis.count}</p>
+            </div>
             </div>
           </div>
         </div>
@@ -577,7 +579,7 @@ const FinancialGoals: React.FC = () => {
           <p className="text-dark-400">No hay metas financieras</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 xl:gap-6">
             {pagedGoals.map((goal) => {
               const canAbono = goalCanAddAbono(goal);
@@ -596,8 +598,8 @@ const FinancialGoals: React.FC = () => {
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                    <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-3">
+                    <div className="order-2 min-w-[min(100%,12rem)] flex-1 space-y-2 xl:order-1 xl:pr-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Target className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -610,7 +612,7 @@ const FinancialGoals: React.FC = () => {
                         </span>
                         {goal.status === 'COMPLETED' && <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />}
                       </div>
-                      <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{goal.name}</h3>
+                      <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">{goal.name}</h3>
                       {goal.description && <p className="text-sm text-dark-400">{goal.description}</p>}
                       {goal.targetDate && (
                         <p className="inline-flex items-center gap-1.5 text-xs text-dark-500">
@@ -619,7 +621,7 @@ const FinancialGoals: React.FC = () => {
                         </p>
                       )}
                     </div>
-                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={goal.id}
                         onDragStart={listDnd.onDragStart}
@@ -685,22 +687,23 @@ const FinancialGoals: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="grid w-full max-w-md grid-cols-1 gap-2 xs:grid-cols-3 sm:max-w-none">
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cq w-full max-w-md sm:max-w-none">
+                      <div className="metrics-row-3">
+                        <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Meta</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                           {goal.targetAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
                           <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Actual</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-400 sm:text-base">
                           {goal.currentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
                           <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-primary-400 sm:text-base">
                           {goal.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
@@ -708,6 +711,7 @@ const FinancialGoals: React.FC = () => {
                         </p>
                       </div>
                     </div>
+                  </div>
 
                     <div>
                       <label className="mb-1 block text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Estado</label>
@@ -727,6 +731,7 @@ const FinancialGoals: React.FC = () => {
             })}
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={goalsMainPageSafe}
             totalPages={goalsMainTotalPages}
             totalItems={orderedFiltered.length}
@@ -737,7 +742,7 @@ const FinancialGoals: React.FC = () => {
             pageSizeOptions={goalsPageSizeOptions}
             onPageSizeChange={setGoalsPageSize}
           />
-        </div>
+        </>
       )}
 
       {/* Modal Meta */}
@@ -841,11 +846,11 @@ const FinancialGoals: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, bankAccountId: e.target.value })}
                   className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  <option value="">— Sin cuenta — solo progreso de la meta</option>
+                  <option value="">Sin vincular — no actualiza saldos</option>
                   {accountsForGoalCurrency.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.bankName} · {a.currencyType}
-                      {a.accountKind !== 'bank' ? ` · ${a.accountKind}` : ''}
+                      {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
+                      {formatBankAccountOptionLabel(a)}
                     </option>
                   ))}
                 </select>

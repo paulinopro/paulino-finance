@@ -56,7 +56,7 @@ export interface MobileTabBarProps {
   onTabLinkPress: () => void;
 }
 
-/** Navegación inferior en móvil (oculto desde lg). Respeta módulos de suscripción; Menú abre el drawer. */
+/** Navegación inferior solo en vista compacta (<768px). Desde tablet el menú lateral cubre la navegación. */
 const MobileTabBar: React.FC<MobileTabBarProps> = ({
   hasModule,
   onMenuPress,
@@ -67,7 +67,7 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({
 
   return (
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch justify-around gap-0 border-t border-dark-700 bg-dark-800/95 backdrop-blur-sm pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.25)]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch justify-around gap-0 border-t border-dark-700 bg-dark-800/95 backdrop-blur-sm pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.25)]"
       role="navigation"
       aria-label="Navegación principal"
     >

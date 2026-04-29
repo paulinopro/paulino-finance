@@ -168,7 +168,7 @@ const Categories: React.FC = () => {
           <p className="text-dark-400">No hay categorías</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {pagedCategories.map((category) => (
             <motion.div
@@ -244,6 +244,7 @@ const Categories: React.FC = () => {
           ))}
         </div>
         <TablePagination
+          className="mt-4 sm:mt-5"
           currentPage={catPageSafe}
           totalPages={catTotalPages}
           totalItems={filteredCategories.length}
@@ -254,7 +255,7 @@ const Categories: React.FC = () => {
           pageSizeOptions={catPageSizeOptions}
           onPageSizeChange={setCatPageSize}
         />
-        </div>
+        </>
       )}
     </div>
   );

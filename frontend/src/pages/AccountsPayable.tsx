@@ -14,6 +14,7 @@ import { TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
+import { NotesHtmlPreview } from '../components/NotesHtmlPreview';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
@@ -539,7 +540,7 @@ const AccountsPayable: React.FC = () => {
           <p className="text-dark-400">No hay cuentas por pagar</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
             {pagedAccountsPayable.map((account) => {
               const totalPaid = account.totalPaid ?? 0;
@@ -562,8 +563,8 @@ const AccountsPayable: React.FC = () => {
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                    <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-3">
+                    <div className="order-2 min-w-[min(100%,12rem)] flex-1 space-y-2 xl:order-1 xl:pr-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Calendar className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -573,14 +574,14 @@ const AccountsPayable: React.FC = () => {
                           {getStatusText(account.status)}
                         </span>
                       </div>
-                      <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{account.description}</h3>
+                      <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">{account.description}</h3>
                       {account.category && (
                         <span className="inline-flex max-w-full truncate rounded-md bg-primary-600/15 px-2 py-0.5 text-xs font-medium text-primary-200 ring-1 ring-primary-500/25">
                           {account.category}
                         </span>
                       )}
                     </div>
-                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={account.id}
                         onDragStart={listDnd.onDragStart}
@@ -654,29 +655,32 @@ const AccountsPayable: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cq">
+                      <div className="metrics-row-2">
+                      <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Monto</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                           {account.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
                           <span className="text-xs font-normal text-dark-400">{account.currency}</span>
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                      <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
                         <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{formatDateDdMmYyyy(account.dueDate)}</p>
                       </div>
                       {account.paidDate && (
-                        <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3 xs:col-span-2">
+                        <div className="metrics-cell-span-2 rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                           <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Último pago / cierre</p>
                           <p className="mt-0.5 text-sm font-semibold text-emerald-400 sm:text-base">{formatDateDdMmYyyy(account.paidDate)}</p>
                         </div>
                       )}
                     </div>
+                  </div>
                     {account.notes && (
-                      <p className="rounded-xl border border-dark-600/50 bg-dark-900/20 px-3 py-2 text-sm text-dark-300">
-                        <span className="text-dark-500">Notas:</span> {account.notes}
-                      </p>
+                      <div className="rounded-xl border border-dark-600/50 bg-dark-900/20 px-3 py-2 text-sm">
+                        <span className="text-dark-500">Notas:</span>
+                        <NotesHtmlPreview html={account.notes} className="mt-1 text-dark-300" />
+                      </div>
                     )}
                   </div>
                 </motion.article>
@@ -684,6 +688,7 @@ const AccountsPayable: React.FC = () => {
             })}
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={apPageSafe}
             totalPages={apTotalPages}
             totalItems={orderedFiltered.length}
@@ -694,7 +699,7 @@ const AccountsPayable: React.FC = () => {
             pageSizeOptions={apPageSizeOptions}
             onPageSizeChange={setApPageSize}
           />
-        </div>
+        </>
       )}
 
       {/* Modal crear/editar */}

@@ -541,7 +541,7 @@ const Loans: React.FC = () => {
           <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Préstamo</button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 xl:gap-6">
           {pagedLoans.map((loan) => {
             const prog = Math.min(100, loan.progress || 0);
@@ -560,8 +560,8 @@ const Loans: React.FC = () => {
                   .filter(Boolean)
                   .join(' ')}
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                  <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-3">
+                  <div className="order-2 min-w-[min(100%,12rem)] flex-1 space-y-2 xl:order-1 xl:pr-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                         <Receipt className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -569,10 +569,10 @@ const Loans: React.FC = () => {
                       </span>
                       <span className={`text-xs font-medium sm:text-sm ${getStatusColor(loan.status)}`}>{getStatusText(loan.status)}</span>
                     </div>
-                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">{loan.loanName}</h3>
+                    <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">{loan.loanName}</h3>
                     {loan.bankName && <p className="text-sm text-dark-400">{loan.bankName}</p>}
                   </div>
-                  <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                  <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                     <ListOrderDragHandle
                       itemId={loan.id}
                       onDragStart={listDnd.onDragStart}
@@ -637,27 +637,28 @@ const Loans: React.FC = () => {
                 </div>
 
                 <div className="mt-4 flex flex-col gap-4 border-t border-dark-700/80 pt-4">
-                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-2 sm:gap-3">
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                  <div className="metrics-cq">
+                    <div className="metrics-row-2">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Monto total</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         {loan.totalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
                         <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
                       </p>
                     </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Tasa</p>
                       <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">
                         {loan.interestRate}% <span className="text-xs font-normal text-dark-400">{loan.interestRateType === 'ANNUAL' ? 'Anual' : 'Mensual'}</span>
                       </p>
                     </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuotas</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         {loan.paidInstallments}/{loan.totalInstallments}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuota</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         {loan.installmentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
@@ -665,7 +666,7 @@ const Loans: React.FC = () => {
                       </p>
                     </div>
                     {loan.remainingBalance !== undefined && (
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3 xs:col-span-2">
+                      <div className="metrics-cell-span-2 rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
                           {loan.remainingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
@@ -673,6 +674,7 @@ const Loans: React.FC = () => {
                         </p>
                       </div>
                     )}
+                    </div>
                   </div>
 
                   <div>
@@ -703,6 +705,7 @@ const Loans: React.FC = () => {
           })}
         </div>
         <TablePagination
+          className="mt-4 sm:mt-5"
           currentPage={loanPageSafe}
           totalPages={loanTotalPages}
           totalItems={orderedLoans.length}
@@ -713,7 +716,7 @@ const Loans: React.FC = () => {
           pageSizeOptions={loanListPageSizeOptions}
           onPageSizeChange={setLoanListPageSize}
         />
-        </div>
+        </>
       )}
 
       {/* Loan Modal */}

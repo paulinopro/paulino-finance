@@ -283,7 +283,7 @@ const NotificationHistory: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <h3 className="text-balance break-words text-base font-bold uppercase leading-snug text-[#3bbcff] sm:text-lg md:line-clamp-2 md:text-[0.9375rem] md:leading-tight">
+                        <h3 className="break-words text-base font-bold uppercase leading-snug text-[#3bbcff] sm:text-lg md:line-clamp-2 md:text-[0.9375rem] md:leading-tight">
                           {notification.title}
                         </h3>
                       </div>
@@ -346,8 +346,12 @@ const NotificationHistory: React.FC = () => {
                 </motion.article>
               );
             })}
-
+          </>
+        )}
+      </div>
+      {!loading && filteredNotifications.length > 0 && (
             <TablePagination
+              className="mt-4 sm:mt-5"
               currentPage={currentPage}
               totalPages={totalPages}
               totalItems={total}
@@ -359,9 +363,7 @@ const NotificationHistory: React.FC = () => {
               pageSizeOptions={pageSizeOptions}
               onPageSizeChange={setItemsPerPage}
             />
-          </>
-        )}
-      </div>
+      )}
     </div>
   );
 };

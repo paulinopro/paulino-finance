@@ -293,7 +293,8 @@ const CashFlow: React.FC = () => {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="metrics-cq">
+        <div className="metrics-summary-strip">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -390,6 +391,7 @@ const CashFlow: React.FC = () => {
               </div>
             </div>
           </motion.div>
+        </div>
         </div>
       )}
 

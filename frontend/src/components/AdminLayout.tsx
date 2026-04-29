@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import OfflineBanner from './OfflineBanner';
 import { clearSuperAdminClientView, setSuperAdminClientViewOn } from '../constants/superAdminClientView';
+import { LAYOUT_DESKTOP_SHELL_MEDIA } from '../constants/layout';
 
 const SIDEBAR_COLLAPSED_KEY = 'paulino-admin-sidebar-collapsed';
 
@@ -45,8 +46,8 @@ const AdminLayout: React.FC = () => {
       return false;
     }
   });
-  const [isLg, setIsLg] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  const [isDesktopShell, setIsDesktopShell] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(LAYOUT_DESKTOP_SHELL_MEDIA).matches
   );
   const location = useLocation();
   const navigate = useNavigate();
@@ -57,8 +58,8 @@ const AdminLayout: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const onChange = () => setIsLg(mq.matches);
+    const mq = window.matchMedia(LAYOUT_DESKTOP_SHELL_MEDIA);
+    const onChange = () => setIsDesktopShell(mq.matches);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
@@ -72,18 +73,18 @@ const AdminLayout: React.FC = () => {
     }
   };
 
-  const sidebarVisible = isLg ? !sidebarCollapsed : sidebarOpen;
+  const sidebarVisible = isDesktopShell ? !sidebarCollapsed : sidebarOpen;
   const toggleSidebar = useCallback(() => {
-    if (isLg) {
+    if (isDesktopShell) {
       setSidebarCollapsedPersist(!sidebarCollapsed);
     } else {
       setSidebarOpen((o) => !o);
     }
-  }, [isLg, sidebarCollapsed]);
+  }, [isDesktopShell, sidebarCollapsed]);
 
   const closeMobileDrawer = useCallback(() => {
-    if (!isLg) setSidebarOpen(false);
-  }, [isLg]);
+    if (!isDesktopShell) setSidebarOpen(false);
+  }, [isDesktopShell]);
 
   const handleLogout = () => {
     logout();
@@ -108,7 +109,7 @@ const AdminLayout: React.FC = () => {
             <button
               type="button"
               onClick={closeMobileDrawer}
-              className="lg:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
+              className="md:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
               aria-label="Cerrar menú"
             >
               <X size={22} />
@@ -134,7 +135,7 @@ const AdminLayout: React.FC = () => {
               );
             })}
           </nav>
-          <div className="p-3 sm:p-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-4 shrink-0 border-amber-900/25">
+          <div className="p-3 sm:p-4 border-t pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-4 shrink-0 border-amber-900/25">
             <Link
               to="/profile"
               onClick={closeMobileDrawer}
@@ -173,7 +174,7 @@ const AdminLayout: React.FC = () => {
           </div>
         </div>
       </aside>
-      {!isLg && sidebarOpen && (
+      {!isDesktopShell && sidebarOpen && (
         <button
           type="button"
           aria-label="Cerrar menú"
@@ -183,7 +184,7 @@ const AdminLayout: React.FC = () => {
       )}
       <div
         className={`flex-1 flex flex-col min-w-0 min-h-0 transition-[padding] duration-300 ease-in-out ${
-          isLg && !sidebarCollapsed ? 'lg:pl-64' : ''
+          isDesktopShell && !sidebarCollapsed ? 'md:pl-64' : ''
         }`}
       >
         <header className="sticky top-0 z-30 backdrop-blur-sm px-3 sm:px-4 py-2 flex items-center justify-between gap-2 min-h-[2.75rem] sm:min-h-[3rem] pt-[max(0.5rem,env(safe-area-inset-top))] bg-slate-900/90 border-b border-amber-900/25">

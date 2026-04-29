@@ -46,7 +46,7 @@ const PwaUpdatePrompt: React.FC = () => {
   return (
     <div
       className={`fixed left-0 right-0 z-[100] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 pointer-events-none ${
-        mobileTabBar ? 'bottom-16 lg:bottom-0' : 'bottom-0'
+        mobileTabBar ? 'bottom-16 md:bottom-0' : 'bottom-0'
       }`}
       role="status"
       aria-live="polite"

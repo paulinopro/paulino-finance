@@ -427,7 +427,8 @@ const Vehicles: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
         {/* Vehicles List */}
-        <div className="space-y-4 lg:col-span-1">
+        <div className="lg:col-span-1">
+          <div className="space-y-4">
           {filteredVehicles.length === 0 ? (
             <div className="card-view text-center py-12 sm:py-16">
               <Car className="mx-auto text-dark-400 mb-4" size={48} />
@@ -455,8 +456,8 @@ const Vehicles: React.FC = () => {
                 ].join(' ')}
                 onClick={() => setSelectedVehicle(vehicle)}
               >
-                <div className="flex flex-row gap-3 justify-between items-start">
-                  <div className="min-w-0 flex-1 space-y-2 pr-1">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-[min(100%,12rem)] flex-1 space-y-2 pr-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                         <Car className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -466,7 +467,7 @@ const Vehicles: React.FC = () => {
                         <span className="text-xs text-dark-500 sm:text-sm">{vehicle.year}</span>
                       )}
                     </div>
-                    <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">
+                    <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">
                       {vehicle.make} {vehicle.model}
                     </h3>
                     {vehicle.licensePlate && (
@@ -503,24 +504,31 @@ const Vehicles: React.FC = () => {
                   </div>
                 </div>
                 <div className="mt-4 flex flex-col gap-2 border-t border-dark-700/80 pt-4">
-                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                  <div className="metrics-cq">
+                    <div className="metrics-row-2">
+                      <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Kilometraje</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         {vehicle.mileage.toLocaleString('es-DO')} km
                       </p>
                     </div>
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Gastos totales</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
                         ${vehicle.totalExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
                       </p>
                     </div>
                   </div>
+                  </div>
                 </div>
               </motion.article>
             ))}
+            </>
+          )}
+          </div>
+          {filteredVehicles.length > 0 && (
             <TablePagination
+              className="mt-4 sm:mt-5"
               currentPage={vehiclePageSafe}
               totalPages={vehicleTotalPages}
               totalItems={filteredVehicles.length}
@@ -531,7 +539,6 @@ const Vehicles: React.FC = () => {
               pageSizeOptions={vehiclePageSizeOptions}
               onPageSizeChange={setVehiclePageSize}
             />
-            </>
           )}
         </div>
 
@@ -541,13 +548,13 @@ const Vehicles: React.FC = () => {
             <div className="space-y-6">
               {/* Vehicle Info */}
               <div className={[LIST_CARD_SHELL, listCardAccentNeutral()].join(' ')}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 space-y-2">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-[min(100%,12rem)] space-y-2">
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                       <Car className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
                       Detalle
                     </span>
-                    <h2 className="text-balance text-xl font-bold text-white sm:text-2xl">
+                    <h2 className="break-words text-xl font-bold text-white sm:text-2xl">
                       {selectedVehicle.make} {selectedVehicle.model}
                     </h2>
                   </div>
@@ -563,27 +570,28 @@ const Vehicles: React.FC = () => {
                     Agregar Gasto
                   </button>
                 </div>
-                <div className="mt-4 grid grid-cols-1 gap-2 border-t border-dark-700/80 pt-4 xs:grid-cols-2 md:grid-cols-4 sm:gap-3">
+                <div className="metrics-cq mt-4 border-t border-dark-700/80 pt-4">
+                  <div className="metrics-row-4">
                   {selectedVehicle.year && (
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Año</p>
                       <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{selectedVehicle.year}</p>
                     </div>
                   )}
                   {selectedVehicle.licensePlate && (
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Placa</p>
                       <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{selectedVehicle.licensePlate}</p>
                     </div>
                   )}
-                  <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                  <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                     <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Kilometraje</p>
                     <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                       {selectedVehicle.mileage.toLocaleString('es-DO')} km
                     </p>
                   </div>
                   {selectedVehicle.purchasePrice && (
-                    <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                       <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Precio de compra</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         ${selectedVehicle.purchasePrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
@@ -591,6 +599,7 @@ const Vehicles: React.FC = () => {
                       </p>
                     </div>
                   )}
+                </div>
                 </div>
                 {selectedVehicle.notes && (
                   <p className="mt-4 rounded-xl border border-dark-600/50 bg-dark-900/20 px-3 py-2 text-sm text-dark-300">

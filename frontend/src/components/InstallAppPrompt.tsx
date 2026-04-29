@@ -97,7 +97,7 @@ const InstallAppPrompt: React.FC = () => {
     <div
       className={`fixed left-0 right-0 z-[95] px-3 pointer-events-none ${
         mobileTabBar
-          ? 'max-lg:bottom-[9.5rem] lg:bottom-[5.5rem]'
+          ? 'max-md:bottom-[9.5rem] md:bottom-[5.5rem]'
           : 'bottom-[5.25rem] sm:bottom-[5.5rem]'
       }`}
       role="region"

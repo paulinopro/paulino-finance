@@ -452,7 +452,7 @@ const IncomePage: React.FC = () => {
           <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Ingreso</button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div className="card overflow-hidden">
             <div className="table-responsive table-stack">
               <table className="w-full">
@@ -699,6 +699,7 @@ const IncomePage: React.FC = () => {
             </div>
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={currentPage}
             totalPages={totalPages}
             totalItems={total}
@@ -710,7 +711,7 @@ const IncomePage: React.FC = () => {
             pageSizeOptions={pageSizeOptions}
             onPageSizeChange={setItemsPerPage}
           />
-        </div>
+        </>
       )}
 
       {showModal && (

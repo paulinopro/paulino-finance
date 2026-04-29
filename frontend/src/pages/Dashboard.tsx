@@ -210,8 +210,9 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid min-w-0 flex-1 grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:max-w-2xl">
-              <div className="rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
+            <div className="metrics-cq min-w-0 flex-1 lg:max-w-2xl">
+            <div className="metrics-row-3">
+              <div className="metrics-cell rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Ahorro</span>
                   <span
@@ -229,7 +230,7 @@ const Dashboard: React.FC = () => {
                   />
                 </div>
               </div>
-              <div className="rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
+              <div className="metrics-cell rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Deuda / ingreso</span>
                   <span
@@ -247,7 +248,7 @@ const Dashboard: React.FC = () => {
                   />
                 </div>
               </div>
-              <div className="rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
+              <div className="metrics-cell rounded-lg border border-dark-600/35 bg-dark-900/40 px-3 py-2 ring-1 ring-white/5">
                 <div className="mb-1 flex items-baseline justify-between gap-2">
                   <span className="text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">Gasto / ingreso</span>
                   <span
@@ -266,9 +267,11 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
             </div>
+            </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-dark-600/30 pt-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="metrics-cq mt-4 border-t border-dark-600/30 pt-4">
+            <div className="metrics-summary-strip">
             <div className="dashboard-stat-widget !p-3 sm:!p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -348,6 +351,7 @@ const Dashboard: React.FC = () => {
                   <AlertCircle className="h-5 w-5 text-white" />
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </motion.div>
@@ -577,7 +581,8 @@ const Dashboard: React.FC = () => {
       />
 
       {/* Summary Cards - Always visible */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="metrics-cq">
+        <div className="metrics-summary-strip">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -680,11 +685,13 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </motion.div>
+        </div>
       </div>
 
       {/* New Modules Summary */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="metrics-cq">
+          <div className="metrics-summary-strip">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -764,11 +771,13 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </motion.div>
+          </div>
         </div>
       )}
 
       {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="metrics-cq">
+          <div className="metrics-summary-strip">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -854,6 +863,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </motion.div>
+        </div>
         </div>
       )}
 

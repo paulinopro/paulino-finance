@@ -297,7 +297,7 @@ const Budgets: React.FC = () => {
           <p className="text-dark-400 text-sm sm:text-base">No hay presupuestos que coincidan.</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5 xl:gap-6">
             {pagedBudgets.map((budget) => {
               const pct = Math.min(100, budget.percentage);
@@ -321,8 +321,8 @@ const Budgets: React.FC = () => {
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                    <div className="order-2 min-w-0 flex-1 space-y-2 sm:order-1 sm:pr-1">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-3">
+                    <div className="order-2 min-w-[min(100%,12rem)] flex-1 space-y-2 xl:order-1 xl:pr-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Calendar className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
@@ -330,7 +330,7 @@ const Budgets: React.FC = () => {
                         </span>
                         <span className="text-xs text-dark-500 sm:text-sm">{periodLabel}</span>
                       </div>
-                      <h3 className="text-balance break-words text-lg font-bold leading-snug text-white sm:text-xl">
+                      <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">
                         {budget.name}
                       </h3>
                       {budget.category && (
@@ -339,7 +339,7 @@ const Budgets: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 sm:order-2 sm:w-auto">
+                    <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={budget.id}
                         onDragStart={listDnd.onDragStart}
@@ -414,8 +414,9 @@ const Budgets: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:grid-cols-2 sm:gap-3">
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                    <div className="metrics-cq">
+                      <div className="metrics-row-2">
+                        <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
                           Gastado
                         </p>
@@ -424,7 +425,7 @@ const Budgets: React.FC = () => {
                           <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
                         </p>
                       </div>
-                      <div className="rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
+                        <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
                           Restante
                         </p>
@@ -436,6 +437,7 @@ const Budgets: React.FC = () => {
                           <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
                         </p>
                       </div>
+                      </div>
                     </div>
                   </div>
                 </motion.article>
@@ -443,6 +445,7 @@ const Budgets: React.FC = () => {
             })}
           </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={budgetPageSafe}
             totalPages={budgetTotalPages}
             totalItems={orderedFiltered.length}
@@ -453,7 +456,7 @@ const Budgets: React.FC = () => {
             pageSizeOptions={budgetPageSizeOptions}
             onPageSizeChange={setBudgetPageSize}
           />
-        </div>
+        </>
       )}
 
       {/* Modal */}

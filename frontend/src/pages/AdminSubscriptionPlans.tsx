@@ -236,8 +236,9 @@ const AdminSubscriptionPlans: React.FC = () => {
       {loading ? (
         <p className="text-dark-500">Cargando…</p>
       ) : (
-        <div className="space-y-4">
-          {pagedPlans.map((p) => (
+        <>
+          <div className="space-y-4">
+            {pagedPlans.map((p) => (
             <motion.div key={p.id} className="card flex flex-wrap justify-between gap-4">
               <div>
                 <h3 className="text-lg font-semibold text-white">{p.name}</h3>
@@ -273,7 +274,9 @@ const AdminSubscriptionPlans: React.FC = () => {
               </div>
             </motion.div>
           ))}
+          </div>
           <TablePagination
+            className="mt-4 sm:mt-5"
             currentPage={plansPageSafe}
             totalPages={plansTotalPages}
             totalItems={plans.length}
@@ -284,7 +287,7 @@ const AdminSubscriptionPlans: React.FC = () => {
             pageSizeOptions={adminPlansPageSizeOptions}
             onPageSizeChange={setAdminPlansPageSize}
           />
-        </div>
+        </>
       )}
 
       {createOpen && (
