@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
+  History,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -116,6 +117,8 @@ const Calendar: React.FC = () => {
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [historyEvents, setHistoryEvents] = useState<CalendarEvent[]>([]);
   const [filters, setFilters] = useState({
     eventTypes: [] as string[],
     status: [] as string[],
@@ -219,11 +222,22 @@ const Calendar: React.FC = () => {
 
       const summaryResponse = await api.get(`/calendar/summary?start=${start}&end=${end}`);
       setSummary(summaryResponse.data.summary);
+
+      if (showHistoryPanel) {
+        try {
+          const historyResponse = await api.get(`/calendar/history?start=${start}&end=${end}`);
+          setHistoryEvents(historyResponse.data.events ?? []);
+        } catch {
+          setHistoryEvents([]);
+        }
+      } else {
+        setHistoryEvents([]);
+      }
     } catch (error: any) {
       console.error('Error fetching calendar events:', error);
       toast.error('Error al cargar eventos del calendario');
     }
-  }, [filters]);
+  }, [filters, showHistoryPanel]);
 
   useEffect(() => {
     fetchEvents();
@@ -281,8 +295,15 @@ const Calendar: React.FC = () => {
       const start = dateToYmdLocal(view.activeStart);
       const end = dateToYmdLocal(view.activeEnd);
 
-      await api.post(`/calendar/refresh?start=${start}&end=${end}`);
-      toast.success('Eventos actualizados');
+      const res = await api.post(`/calendar/refresh?start=${start}&end=${end}`);
+      const n = Number(res.data?.orphansHidden ?? res.data?.orphansPurged ?? 0);
+      if (n > 0) {
+        toast.success(
+          `Eventos actualizados. ${n} evento(s) sin origen activo ya no se muestran en el calendario (siguen en Historial).`
+        );
+      } else {
+        toast.success('Eventos actualizados');
+      }
       fetchEvents();
     } catch (error: any) {
       console.error('Error refreshing events:', error);
@@ -342,6 +363,21 @@ const Calendar: React.FC = () => {
             >
               <Filter size={18} />
               <span>Filtros</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHistoryPanel((v) => !v)}
+              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              aria-pressed={showHistoryPanel}
+              title={
+                showHistoryPanel
+                  ? 'Ocultar panel de historial archivado'
+                  : 'Mostrar historial de eventos archivados (sin origen activo)'
+              }
+            >
+              <History size={18} />
+              <span className="hidden xs:inline">{showHistoryPanel ? 'Ocultar historial' : 'Historial'}</span>
+              <span className="xs:hidden">Hist.</span>
             </button>
             <button
               type="button"
@@ -491,6 +527,48 @@ const Calendar: React.FC = () => {
                 </div>
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {showHistoryPanel && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="bg-dark-750/80 rounded-lg border border-dark-600/60 p-4 mb-6 ring-1 ring-white/[0.04]"
+          >
+            <h2 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+              <History className="h-4 w-4 text-dark-400 shrink-0" aria-hidden />
+              Historial del calendario (archivados)
+            </h2>
+            <p className="text-dark-500 text-xs mb-3 leading-relaxed">
+              Aquí ves copias de eventos que ya no se muestran en la vista principal porque el ingreso, gasto,
+              préstamo o tarjeta de origen se eliminó del sistema, o porque se archivaron al borrar ese origen. Las
+              cifras y fechas se conservan solo como referencia.
+            </p>
+            {historyEvents.length === 0 ? (
+              <p className="text-dark-500 text-sm">No hay eventos archivados en el período visible.</p>
+            ) : (
+              <ul className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {historyEvents.map((ev) => (
+                  <li
+                    key={ev.id}
+                    className="flex flex-col gap-1 rounded-lg border border-dark-600/40 bg-dark-800/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-white truncate">{ev.title}</p>
+                      <p className="text-dark-500 text-xs">
+                        {eventTypeLabels[ev.eventType] ?? ev.eventType} ·{' '}
+                        {formatCalendarDateLongEs(ev.eventDate)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 sm:text-right">
+                      <span className="text-white tabular-nums">{formatCurrency(ev.amount, ev.currency)}</span>
+                      <span className="text-dark-500 text-xs">{statusLabels[ev.status] ?? ev.status}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </motion.div>
         )}
       </div>

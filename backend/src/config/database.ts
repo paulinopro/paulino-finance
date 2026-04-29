@@ -832,16 +832,32 @@ const createTables = async () => {
       recurrence_pattern VARCHAR(50),
       color VARCHAR(7) DEFAULT '#3b82f6',
       notes TEXT,
+      show_on_calendar BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, event_type, related_id, event_date)
     )
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name = 'show_on_calendar'
+      ) THEN
+        ALTER TABLE calendar_events ADD COLUMN show_on_calendar BOOLEAN NOT NULL DEFAULT true;
+      END IF;
+    END $$;
   `);
   
   await query(`CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(event_date)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_calendar_events_type ON calendar_events(event_type)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_calendar_events_status ON calendar_events(status)`);
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_calendar_events_show_on_calendar ON calendar_events(user_id, show_on_calendar)`
+  );
 
   // Create indexes for better performance
   await query(`CREATE INDEX IF NOT EXISTS idx_credit_cards_user_id ON credit_cards(user_id)`);

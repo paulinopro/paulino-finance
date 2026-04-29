@@ -1,10 +1,13 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
+import { toYmdFromPgDate } from '../utils/dateUtils';
 import {
   getCalendarEvents,
   generateCalendarEvents,
   updateEventStatus,
   getFinancialSummary,
+  listOrphanCalendarEvents,
+  getHiddenCalendarEvents,
 } from '../services/calendarService';
 
 /**
@@ -103,11 +106,67 @@ export const refreshEvents = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Start and end dates are required' });
     }
 
-    await generateCalendarEvents(userId, start as string, end as string);
+    const { orphansHidden } = await generateCalendarEvents(userId, start as string, end as string);
 
-    res.json({ success: true, message: 'Calendar events refreshed successfully' });
+    res.json({
+      success: true,
+      message: 'Calendar events refreshed successfully',
+      orphansHidden,
+      orphansPurged: orphansHidden,
+    });
   } catch (error: any) {
     console.error('Refresh calendar events error:', error);
     res.status(500).json({ message: 'Error refreshing calendar events', error: error.message });
+  }
+};
+
+/**
+ * Lista eventos huérfanos (origen ya no existe en ingresos/gastos/préstamos/tarjetas). No modifica datos.
+ * Al cargar el calendario se ocultan automáticamente del calendario (`show_on_calendar = false`) sin borrar la fila.
+ */
+export const listOrphanEvents = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const rows = await listOrphanCalendarEvents(userId);
+    res.json({
+      success: true,
+      count: rows.length,
+      orphans: rows.map((r) => ({
+        id: r.id,
+        eventType: r.event_type,
+        relatedId: r.related_id,
+        relatedType: r.related_type,
+        eventDate: toYmdFromPgDate(r.event_date),
+        title: r.title,
+        amount: parseFloat(String(r.amount)),
+        currency: r.currency || 'DOP',
+        status: r.status,
+      })),
+    });
+  } catch (error: any) {
+    console.error('List orphan calendar events error:', error);
+    res.status(500).json({ message: 'Error listing orphan calendar events', error: error.message });
+  }
+};
+
+/**
+ * Eventos archivados en el rango (no visibles en el calendario; conservan título, monto y fecha para historial).
+ */
+export const getHistory = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { start, end } = req.query;
+
+    if (!start || !end) {
+      return res.status(400).json({ message: 'Start and end dates are required' });
+    }
+
+    await generateCalendarEvents(userId, start as string, end as string);
+    const events = await getHiddenCalendarEvents(userId, start as string, end as string);
+
+    res.json({ success: true, count: events.length, events });
+  } catch (error: any) {
+    console.error('Get calendar history error:', error);
+    res.status(500).json({ message: 'Error fetching calendar history', error: error.message });
   }
 };

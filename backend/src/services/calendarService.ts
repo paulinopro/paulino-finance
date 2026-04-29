@@ -84,10 +84,10 @@ async function syncRecurringCalendarSlotRange(
     }
   }
 }
-
+  
 /**
- * Elimina filas en `calendar_events` ligadas a un origen borrado.
- * La tabla no referencia por FK a ingresos/gastos/préstamos/tarjetas; sin esto quedarían eventos huérfanos.
+ * Deja de mostrar en el calendario financiero las filas ligadas al origen (p. ej. al borrar un ingreso).
+ * Los registros permanecen en la base para historial (`show_on_calendar = false`).
  */
 export async function deleteCalendarEventsForRelated(
   userId: number,
@@ -96,10 +96,106 @@ export async function deleteCalendarEventsForRelated(
 ): Promise<void> {
   if (eventTypes.length === 0) return;
   await query(
-    `DELETE FROM calendar_events WHERE user_id = $1 AND related_id = $2 AND event_type = ANY($3::varchar[])`,
+    `UPDATE calendar_events
+     SET show_on_calendar = false, updated_at = CURRENT_TIMESTAMP
+     WHERE user_id = $1 AND related_id = $2 AND event_type = ANY($3::varchar[])`,
     [userId, relatedId, eventTypes]
   );
 }
+
+/** Condición SQL: fila de calendario cuyo origen (ingreso/gasto/préstamo/tarjeta) ya no existe para ese usuario. */
+function orphanCalendarEventPredicate(): string {
+  return `(
+    (ce.event_type = 'INCOME' AND NOT EXISTS (
+      SELECT 1 FROM income i WHERE i.id = ce.related_id AND i.user_id = ce.user_id
+    ))
+    OR (ce.event_type IN ('RECURRING_EXPENSE', 'EXPENSE') AND NOT EXISTS (
+      SELECT 1 FROM expenses e WHERE e.id = ce.related_id AND e.user_id = ce.user_id
+    ))
+    OR (ce.event_type = 'LOAN_PAYMENT' AND NOT EXISTS (
+      SELECT 1 FROM loans l WHERE l.id = ce.related_id AND l.user_id = ce.user_id
+    ))
+    OR (ce.event_type = 'CARD_PAYMENT' AND NOT EXISTS (
+      SELECT 1 FROM credit_cards c WHERE c.id = ce.related_id AND c.user_id = ce.user_id
+    ))
+  )`;
+}
+
+/**
+ * Oculta del calendario financiero los eventos cuyo origen ya no existe (mantiene la fila para historial).
+ */
+export async function hideOrphanCalendarEvents(userId: number): Promise<number> {
+  const r = await query(
+    `UPDATE calendar_events ce
+     SET show_on_calendar = false, updated_at = CURRENT_TIMESTAMP
+     WHERE ce.user_id = $1 AND ce.show_on_calendar = true AND ${orphanCalendarEventPredicate()}`,
+    [userId]
+  );
+  return r.rowCount ?? 0;
+}
+
+/**
+ * Eventos aún huérfanos respecto al origen (el registro fuente no existe).
+ * Pueden seguir en historial con show_on_calendar = false.
+ */
+export async function listOrphanCalendarEvents(userId: number): Promise<
+  Array<{
+    id: number;
+    event_type: string;
+    related_id: number;
+    related_type: string;
+    event_date: string;
+    title: string;
+    amount: string;
+    currency: string;
+    status: string;
+  }>
+> {
+  const r = await query(
+    `SELECT ce.id, ce.event_type, ce.related_id, ce.related_type, ce.event_date, ce.title, ce.amount, ce.currency, ce.status
+     FROM calendar_events ce
+     WHERE ce.user_id = $1 AND ${orphanCalendarEventPredicate()}
+     ORDER BY ce.event_date ASC NULLS LAST, ce.id ASC`,
+    [userId]
+  );
+  return r.rows;
+}
+
+/** Eventos archivados: no se muestran en el calendario pero conservan datos para historial. */
+export const getHiddenCalendarEvents = async (
+  userId: number,
+  startDate: string,
+  endDate: string
+): Promise<CalendarEvent[]> => {
+  try {
+    const result = await query(
+      `SELECT * FROM calendar_events
+       WHERE user_id = $1 AND show_on_calendar = false
+         AND event_date >= $2 AND event_date <= $3
+       ORDER BY event_date ASC, amount DESC`,
+      [userId, startDate, endDate]
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      eventType: row.event_type,
+      relatedId: row.related_id,
+      relatedType: row.related_type,
+      eventDate: toYmdFromPgDate(row.event_date),
+      title: row.title,
+      amount: parseFloat(row.amount),
+      currency: row.currency || 'DOP',
+      status: row.status,
+      isRecurring: row.is_recurring || false,
+      recurrencePattern: row.recurrence_pattern,
+      color: row.color || '#3b82f6',
+      notes: row.notes,
+    }));
+  } catch (error) {
+    console.error('Error getting hidden calendar events:', error);
+    throw error;
+  }
+};
 
 export interface CalendarEventInput {
   eventType: 'CARD_PAYMENT' | 'LOAN_PAYMENT' | 'INCOME' | 'EXPENSE' | 'RECURRING_EXPENSE';
@@ -133,6 +229,7 @@ export const getCalendarEvents = async (
     let queryText = `
       SELECT * FROM calendar_events
       WHERE user_id = $1 
+        AND show_on_calendar = true
         AND event_date >= $2 
         AND event_date <= $3
     `;
@@ -183,8 +280,14 @@ export const getCalendarEvents = async (
 /**
  * Generate calendar events from existing financial data
  */
-export const generateCalendarEvents = async (userId: number, startDate: string, endDate: string): Promise<void> => {
+export const generateCalendarEvents = async (
+  userId: number,
+  startDate: string,
+  endDate: string
+): Promise<{ orphansHidden: number }> => {
   try {
+    const orphansHidden = await hideOrphanCalendarEvents(userId);
+
     const start = parseYmdLocal(startDate);
     const end = parseYmdLocal(endDate);
     const today = new Date();
@@ -424,6 +527,7 @@ export const generateCalendarEvents = async (userId: number, startDate: string, 
         }
       );
     }
+    return { orphansHidden };
   } catch (error) {
     console.error('Error generating calendar events:', error);
     throw error;
@@ -442,7 +546,7 @@ export const updateEventStatus = async (
     const result = await query(
       `UPDATE calendar_events 
        SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND user_id = $3
+       WHERE id = $2 AND user_id = $3 AND show_on_calendar = true
        RETURNING *`,
       [status, eventId, userId]
     );
@@ -502,7 +606,7 @@ export const getFinancialSummary = async (
         COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND status = 'PENDING' AND event_date >= CURRENT_DATE THEN ${toDop} ELSE 0 END), 0) as pending_payments,
         COALESCE(SUM(CASE WHEN event_type IN ('CARD_PAYMENT', 'LOAN_PAYMENT', 'EXPENSE', 'RECURRING_EXPENSE') AND (status = 'OVERDUE' OR (status = 'PENDING' AND event_date < CURRENT_DATE)) THEN ${toDop} ELSE 0 END), 0) as overdue_payments
        FROM calendar_events
-       WHERE user_id = $1 AND event_date >= $2::date AND event_date <= $3::date`,
+       WHERE user_id = $1 AND show_on_calendar = true AND event_date >= $2::date AND event_date <= $3::date`,
       [userId, startDate, endDate, rate]
     );
 
