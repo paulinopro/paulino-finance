@@ -10,12 +10,28 @@ import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
 import PageHeader from '../components/PageHeader';
-import { SUBSCRIPTION_STATUS_FILTER_OPTIONS, subscriptionStatusLabelEs } from '../constants/subscriptionModules';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
+import { SUBSCRIPTION_STATUS_FILTER_VALUES } from '../constants/subscriptionModules';
+import type { TFunction } from 'i18next';
 
-function formatPeriodUtc(iso: string | null | undefined): string {
+function subscriptionStatusLabel(t: TFunction, status: string | null | undefined): string {
+  if (!status) return '—';
+  const raw = String(status).trim();
+  const low = raw.toLowerCase();
+  const known = ['active', 'trialing', 'cancelled', 'expired', 'past_due'] as const;
+  if ((known as readonly string[]).includes(low)) {
+    return t(`pages.adminUsers.subscriptionStatus.${low}`);
+  }
+  if (low === 'n/a') return t('pages.adminUsers.subscriptionStatusNa');
+  if (low === 'sin suscripción') return t('pages.adminUsers.noSubscription');
+  return raw;
+}
+
+function formatPeriodUtc(iso: string | null | undefined, localeTag: string): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('es-DO', {
+    return new Date(iso).toLocaleString(localeTag, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -29,7 +45,9 @@ function formatPeriodUtc(iso: string | null | undefined): string {
 }
 
 const AdminUsers: React.FC = () => {
+  const { t } = useTranslation();
   const { setSession } = useAuth();
+  const { localeTag } = useIntlFormatting();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -56,9 +74,9 @@ const AdminUsers: React.FC = () => {
       .listSubscriptionPlans()
       .then((d) => setPlans(d.plans))
       .catch(() => {
-        toast.error('No se pudieron cargar los planes');
+        toast.error(t('toast.adminUsers.plansLoadError'));
       });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     setPage(1);
@@ -84,11 +102,11 @@ const AdminUsers: React.FC = () => {
       setUsers(list.users);
       setTotal(list.total);
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al cargar usuarios');
+      toast.error(e.response?.data?.message || t('toast.adminUsers.usersLoadError'));
     } finally {
       setLoading(false);
     }
-  }, [page, limit, searchApplied, fActive, fPlan, fSub, fCreatedFrom, fCreatedTo, fBillingFrom, fBillingTo]);
+  }, [page, limit, searchApplied, fActive, fPlan, fSub, fCreatedFrom, fCreatedTo, fBillingFrom, fBillingTo, t]);
 
   useEffect(() => {
     void load();
@@ -128,26 +146,24 @@ const AdminUsers: React.FC = () => {
         billingPeriodFrom: fBillingFrom.trim() || undefined,
         billingPeriodTo: fBillingTo.trim() || undefined,
       });
-      toast.success('Descarga de CSV iniciada');
+      toast.success(t('toast.adminUsers.csvStarted'));
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al exportar');
+      toast.error(e.response?.data?.message || t('toast.generic.exportFailed'));
     }
   };
 
   const toggleActive = async (u: AdminUserRow) => {
     if (u.isSuperAdmin) return;
     if (u.isActive) {
-      const ok = window.confirm(
-        `¿Deshabilitar la cuenta ${u.email}? No podrá iniciar sesión hasta que la reactives desde esta consola.`
-      );
+      const ok = window.confirm(t('confirm.disableUser', { email: u.email }));
       if (!ok) return;
     }
     try {
       await adminService.updateUser(u.id, { isActive: !u.isActive });
-      toast.success(u.isActive ? 'Usuario deshabilitado' : 'Usuario habilitado');
+      toast.success(u.isActive ? t('toast.adminUsers.userDisabled') : t('toast.adminUsers.userEnabled'));
       load();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error');
+      toast.error(e.response?.data?.message || t('toast.generic.fallbackError'));
     }
   };
 
@@ -157,7 +173,7 @@ const AdminUsers: React.FC = () => {
       setUsers(list.users);
       setTotal(list.total);
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al actualizar usuarios');
+      toast.error(e.response?.data?.message || t('toast.adminUsers.usersUpdateError'));
     }
   };
 
@@ -170,10 +186,10 @@ const AdminUsers: React.FC = () => {
     setSavingPlanUserId(u.id);
     try {
       await adminService.updateUser(u.id, { planId: newId, billingInterval: billing });
-      toast.success('Plan actualizado');
+      toast.success(t('toast.adminUsers.planUpdated'));
       await refreshUsers();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al asignar plan');
+      toast.error(e.response?.data?.message || t('toast.adminUsers.planAssignError'));
     } finally {
       setSavingPlanUserId(null);
     }
@@ -184,10 +200,10 @@ const AdminUsers: React.FC = () => {
     try {
       const res = await adminService.impersonate(u.id);
       setSession(res.token, res.user, res.impersonatedBy);
-      toast.success(`Sesión como ${u.email}`);
+      toast.success(t('toast.adminUsers.impersonateSuccess', { email: u.email }));
       window.location.href = '/';
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al suplantar');
+      toast.error(e.response?.data?.message || t('toast.adminUsers.impersonateError'));
     }
   };
 
@@ -199,8 +215,8 @@ const AdminUsers: React.FC = () => {
         <AdminBreadcrumbs />
 
         <PageHeader
-          title="Usuarios"
-          subtitle="Cuentas registradas, planes de suscripción y acciones de soporte (suplantar, habilitar)."
+          title={t('pages.adminUsers.title')}
+          subtitle={t('pages.adminUsers.subtitle')}
           actions={
             <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 w-full sm:w-auto">
               <button
@@ -209,14 +225,14 @@ const AdminUsers: React.FC = () => {
                 className="btn-primary inline-flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
               >
                 <Download className="w-4 h-4" />
-                Exportar CSV
+                {t('pages.adminUsers.exportCsv')}
               </button>
               <Link
                 to="/admin/system"
                 className="inline-flex items-center justify-center gap-1.5 text-sm text-amber-500/90 hover:text-amber-400 font-medium border border-amber-800/50 rounded-lg px-3 py-2 transition shrink-0 w-full sm:w-auto"
               >
                 <Stethoscope className="h-4 w-4" />
-                Estado del API
+                {t('pages.adminUsers.apiStatusLink')}
               </Link>
             </div>
           }
@@ -226,12 +242,12 @@ const AdminUsers: React.FC = () => {
         <div className="card">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="relative sm:col-span-2 lg:col-span-2">
-              <label className="text-xs text-dark-400 block mb-1">Buscar</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('common.actions.search')}</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
                 <input
                   type="text"
-                  placeholder="Email o nombre…"
+                  placeholder={t('pages.adminUsers.searchPlaceholder')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="input w-full pl-10"
@@ -241,7 +257,7 @@ const AdminUsers: React.FC = () => {
                     type="button"
                     onClick={() => setSearchTerm('')}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-dark-400 hover:text-white"
-                    aria-label="Limpiar búsqueda"
+                    aria-label={t('pages.adminUsers.clearSearchAria')}
                   >
                     <X size={18} />
                   </button>
@@ -249,27 +265,27 @@ const AdminUsers: React.FC = () => {
               </div>
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Cuenta (login)</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.filterAccountLogin')}</label>
               <select
                 className="input w-full"
                 value={fActive}
                 onChange={(e) => setFActive(e.target.value as '' | 'true' | 'false')}
               >
-                <option value="">Cualquiera</option>
-                <option value="true">Activa</option>
-                <option value="false">Deshabilitada</option>
+                <option value="">{t('pages.adminUsers.filterAny')}</option>
+                <option value="true">{t('pages.adminUsers.accountActive')}</option>
+                <option value="false">{t('pages.adminUsers.accountDisabled')}</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Plan asignado</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.filterAssignedPlan')}</label>
               <select
                 className="input w-full"
                 value={fPlan}
                 onChange={(e) => setFPlan(e.target.value)}
                 disabled={plans.length === 0}
               >
-                <option value="">Cualquiera</option>
-                <option value="none">Sin asignar</option>
+                <option value="">{t('pages.adminUsers.filterAny')}</option>
+                <option value="none">{t('pages.adminUsers.unassignedPlan')}</option>
                 {plans.map((p) => (
                   <option key={p.id} value={String(p.id)}>
                     {p.name}
@@ -278,18 +294,18 @@ const AdminUsers: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Estado suscripción</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.filterSubscriptionState')}</label>
               <select className="input w-full" value={fSub} onChange={(e) => setFSub(e.target.value)}>
-                <option value="">Cualquiera</option>
-                {SUBSCRIPTION_STATUS_FILTER_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
+                <option value="">{t('pages.adminUsers.filterAny')}</option>
+                {SUBSCRIPTION_STATUS_FILTER_VALUES.map((value) => (
+                  <option key={value} value={value}>
+                    {t(`pages.adminUsers.subscriptionStatus.${value}`)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Alta desde (registro)</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.createdFrom')}</label>
               <input
                 type="date"
                 className="input w-full"
@@ -298,7 +314,7 @@ const AdminUsers: React.FC = () => {
               />
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Alta hasta (registro)</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.createdTo')}</label>
               <input
                 type="date"
                 className="input w-full"
@@ -307,7 +323,7 @@ const AdminUsers: React.FC = () => {
               />
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Periodo facturación desde (UTC)</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.billingPeriodFromUtc')}</label>
               <input
                 type="date"
                 className="input w-full"
@@ -316,7 +332,7 @@ const AdminUsers: React.FC = () => {
               />
             </div>
             <div>
-              <label className="text-xs text-dark-400 block mb-1">Periodo facturación hasta (UTC)</label>
+              <label className="text-xs text-dark-400 block mb-1">{t('pages.adminUsers.billingPeriodToUtc')}</label>
               <input
                 type="date"
                 className="input w-full"
@@ -328,23 +344,22 @@ const AdminUsers: React.FC = () => {
           {filtersActive && (
             <div className="mt-3 flex justify-end">
               <button type="button" onClick={clearFilters} className="text-sm text-accent-400 hover:text-accent-300">
-                Limpiar filtros
+                {t('pages.adminUsers.clearFilters')}
               </button>
             </div>
           )}
           <p className="text-[0.65rem] text-dark-500 mt-3 border-t border-dark-700/80 pt-3">
-            Alta filtra por fecha de registro. Periodo de facturación: ciclo actual (UTC) que se solapa con el rango; excluye
-            usuarios sin fila de suscripción o sin fechas de periodo.
+            {t('pages.adminUsers.filtersHint')}
           </p>
         </div>
 
         {!loading && users.length === 0 ? (
           <div className="card text-center py-12">
             <Shield className="w-16 h-16 text-dark-600 mx-auto mb-4" />
-            <p className="text-dark-400 mb-4">No hay usuarios que coincidan con los filtros</p>
+            <p className="text-dark-400 mb-4">{t('pages.adminUsers.emptyFiltered')}</p>
             {filtersActive && (
               <button type="button" onClick={clearFilters} className="btn-primary">
-                Limpiar filtros
+                {t('pages.adminUsers.clearFilters')}
               </button>
             )}
           </div>
@@ -355,26 +370,34 @@ const AdminUsers: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-dark-700">
-                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">Usuario</th>
+                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">
+                        {t('pages.adminUsers.colUser')}
+                      </th>
                       <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium min-w-[200px]">
-                        Plan
+                        {t('pages.adminUsers.colPlan')}
                       </th>
-                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">Estado sub.</th>
+                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">
+                        {t('pages.adminUsers.colSubStatus')}
+                      </th>
                       <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium min-w-[8.5rem]">
-                        Inicio periodo (UTC)
+                        {t('pages.adminUsers.colPeriodStartUtc')}
                       </th>
                       <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium min-w-[8.5rem]">
-                        Fin periodo (UTC)
+                        {t('pages.adminUsers.colPeriodEndUtc')}
                       </th>
-                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">Cuenta</th>
-                      <th className="text-right align-middle py-3 px-4 text-dark-400 font-medium">Acciones</th>
+                      <th className="text-left align-middle py-3 px-4 text-dark-400 font-medium">
+                        {t('pages.adminUsers.colAccount')}
+                      </th>
+                      <th className="text-right align-middle py-3 px-4 text-dark-400 font-medium">
+                        {t('pages.adminUsers.colActions')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
                         <td colSpan={7} className="py-12 text-center text-dark-500">
-                          Cargando…
+                          {t('common.actions.loading')}
                         </td>
                       </tr>
                     ) : (
@@ -383,7 +406,7 @@ const AdminUsers: React.FC = () => {
                           key={u.id}
                           className="border-b border-dark-800/80 hover:bg-dark-800/40 max-md:border-0"
                         >
-                          <td data-label="Usuario" className="py-3 px-4 align-middle">
+                          <td data-label={t('pages.adminUsers.dataLabelUser')} className="py-3 px-4 align-middle">
                             <span className="table-stack-value !flex-col !items-end gap-0.5 text-right">
                               <div className="text-white font-medium">
                                 <Link
@@ -395,11 +418,13 @@ const AdminUsers: React.FC = () => {
                               </div>
                               <div className="text-dark-500 text-xs">
                                 {[u.firstName, u.lastName].filter(Boolean).join(' ') || '—'}
-                                {u.isSuperAdmin && <span className="ml-2 text-amber-400">Super admin</span>}
+                                {u.isSuperAdmin && (
+                                  <span className="ml-2 text-amber-400">{t('pages.admin.kpiSuperAdmin')}</span>
+                                )}
                               </div>
                             </span>
                           </td>
-                          <td data-label="Plan" className="py-3 px-4 align-middle">
+                          <td data-label={t('pages.adminUsers.dataLabelPlan')} className="py-3 px-4 align-middle">
                             <span className="table-stack-value !block w-full min-w-0 max-md:max-w-[min(100%,12rem)]">
                               {u.isSuperAdmin ? (
                                 <span className="text-dark-300 capitalize">
@@ -414,9 +439,11 @@ const AdminUsers: React.FC = () => {
                                     value={u.planId != null ? String(u.planId) : ''}
                                     disabled={savingPlanUserId === u.id}
                                     onChange={(e) => changePlan(u, e.target.value)}
-                                    aria-label={`Plan para ${u.email}`}
+                                    aria-label={t('pages.adminUsers.planSelectAria', { email: u.email })}
                                   >
-                                    {u.planId == null && <option value="">Sin asignar</option>}
+                                    {u.planId == null && (
+                                      <option value="">{t('pages.adminUsers.unassignedPlan')}</option>
+                                    )}
                                     {u.planId != null && !plans.some((p) => p.id === u.planId) && (
                                       <option value={String(u.planId)}>
                                         {u.subscriptionPlanName || u.subscriptionPlan || `Plan #${u.planId}`}
@@ -429,7 +456,7 @@ const AdminUsers: React.FC = () => {
                                     ))}
                                   </select>
                                   <label className="flex items-center gap-1.5 text-[0.65rem] text-dark-500">
-                                    <span className="shrink-0">Ciclo (manual):</span>
+                                    <span className="shrink-0">{t('pages.adminUsers.manualBillingCycle')}</span>
                                     <select
                                       className="input flex-1 min-w-0 text-xs py-1"
                                       value={assignPlanBilling[u.id] ?? 'monthly'}
@@ -440,41 +467,41 @@ const AdminUsers: React.FC = () => {
                                         }))
                                       }
                                       disabled={savingPlanUserId === u.id}
-                                      aria-label={`Ciclo al asignar plan para ${u.email}`}
+                                      aria-label={t('pages.adminUsers.billingCycleAssignAria', { email: u.email })}
                                     >
-                                      <option value="monthly">Mensual</option>
-                                      <option value="yearly">Anual</option>
+                                      <option value="monthly">{t('pages.adminUsers.monthly')}</option>
+                                      <option value="yearly">{t('pages.adminUsers.yearly')}</option>
                                     </select>
                                   </label>
                                 </div>
                               )}
                             </span>
                           </td>
-                          <td data-label="Estado sub." className="py-3 px-4 align-middle">
+                          <td data-label={t('pages.adminUsers.dataLabelSubStatus')} className="py-3 px-4 align-middle">
                             <span className="table-stack-value text-dark-300 text-sm">
-                              {subscriptionStatusLabelEs(u.subscriptionStatus)}
+                              {subscriptionStatusLabel(t, u.subscriptionStatus)}
                             </span>
                           </td>
                           <td
-                            data-label="Inicio periodo"
+                            data-label={t('pages.adminUsers.dataLabelPeriodStart')}
                             className="py-3 px-4 align-middle text-dark-300 text-xs tabular-nums"
                           >
-                            {formatPeriodUtc(u.currentPeriodStart)}
+                            {formatPeriodUtc(u.currentPeriodStart, localeTag)}
                           </td>
                           <td
-                            data-label="Fin periodo"
+                            data-label={t('pages.adminUsers.dataLabelPeriodEnd')}
                             className="py-3 px-4 align-middle text-dark-300 text-xs tabular-nums"
                           >
-                            {formatPeriodUtc(u.currentPeriodEnd)}
+                            {formatPeriodUtc(u.currentPeriodEnd, localeTag)}
                           </td>
-                          <td data-label="Cuenta" className="py-3 px-4 align-middle">
+                          <td data-label={t('pages.adminUsers.dataLabelAccount')} className="py-3 px-4 align-middle">
                             <span className="table-stack-value">
                               <span className={u.isActive ? 'text-emerald-400' : 'text-red-400'}>
-                                {u.isActive ? 'Activa' : 'Deshabilitada'}
+                                {u.isActive ? t('pages.adminUsers.accountActive') : t('pages.adminUsers.accountDisabled')}
                               </span>
                             </span>
                           </td>
-                          <td data-label="Acciones" className="py-3 px-4 align-middle text-right">
+                          <td data-label={t('pages.adminUsers.dataLabelActions')} className="py-3 px-4 align-middle text-right">
                             <span className="table-stack-value inline-flex flex-wrap items-center justify-end gap-2">
                               {!u.isSuperAdmin && (
                                 <>
@@ -483,8 +510,14 @@ const AdminUsers: React.FC = () => {
                                     onClick={() => impersonate(u)}
                                     disabled={!u.isActive}
                                     className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-dark-600 bg-dark-800/60 text-primary-400 hover:bg-dark-700 hover:text-primary-300 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-dark-800/60"
-                                    title={u.isActive ? 'Suplantar usuario' : 'No se puede suplantar: cuenta deshabilitada'}
-                                    aria-label={u.isActive ? `Suplantar ${u.email}` : 'Suplantar no disponible'}
+                                    title={
+                                      u.isActive ? t('pages.adminUsers.impersonateTitle') : t('pages.adminUsers.impersonateDisabled')
+                                    }
+                                    aria-label={
+                                      u.isActive
+                                        ? t('pages.adminUsers.impersonateAria', { email: u.email })
+                                        : t('pages.adminUsers.impersonateUnavailableAria')
+                                    }
                                   >
                                     <LogIn className="w-4 h-4" aria-hidden />
                                   </button>
@@ -496,9 +529,11 @@ const AdminUsers: React.FC = () => {
                                         ? 'inline-flex items-center justify-center w-9 h-9 rounded-lg border border-amber-700/50 bg-dark-800/60 text-amber-400 hover:bg-amber-950/40 hover:text-amber-300'
                                         : 'inline-flex items-center justify-center w-9 h-9 rounded-lg border border-emerald-700/45 bg-dark-800/60 text-emerald-400 hover:bg-emerald-950/35 hover:text-emerald-300'
                                     }
-                                    title={u.isActive ? 'Deshabilitar cuenta' : 'Habilitar cuenta'}
+                                    title={u.isActive ? t('pages.adminUsers.toggleActiveDisable') : t('pages.adminUsers.toggleActiveEnable')}
                                     aria-label={
-                                      u.isActive ? `Deshabilitar ${u.email}` : `Habilitar ${u.email}`
+                                      u.isActive
+                                        ? t('pages.adminUsers.disableAria', { email: u.email })
+                                        : t('pages.adminUsers.enableAria', { email: u.email })
                                     }
                                   >
                                     {u.isActive ? (
@@ -525,7 +560,7 @@ const AdminUsers: React.FC = () => {
                 totalItems={total}
                 itemsPerPage={limit}
                 onPageChange={setPage}
-                itemLabel="usuarios"
+                itemLabel={t('pages.adminUsers.itemsLabel')}
                 disabled={loading}
                 variant="card"
                 pageSizeOptions={usersPageSizeOptions}

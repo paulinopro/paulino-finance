@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { ArrowLeft } from 'lucide-react';
 import AuthBrandMark from '../components/AuthBrandMark';
 import api from '../services/api';
 
 const ForgotPassword: React.FC = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -17,9 +19,9 @@ const ForgotPassword: React.FC = () => {
     try {
       await api.post('/auth/forgot-password', { email: email.trim() });
       setSent(true);
-      toast.success('Si el correo está registrado, recibirás un enlace en breve.');
+      toast.success(t('auth.forgot.toastSuccess'));
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'No se pudo enviar la solicitud');
+      toast.error(error.response?.data?.message || t('auth.forgot.toastErrorFallback'));
     } finally {
       setLoading(false);
     }
@@ -36,11 +38,9 @@ const ForgotPassword: React.FC = () => {
         <div className="card">
           <div className="text-center mb-8">
             <AuthBrandMark />
-            <h1 className="page-title mb-2">Recuperar contraseña</h1>
+            <h1 className="page-title mb-2">{t('auth.forgot.title')}</h1>
             <p className="text-dark-400 text-sm sm:text-base">
-              {sent
-                ? 'Si existe una cuenta con ese correo, recibirás instrucciones en breve.'
-                : 'Indica tu correo y te enviaremos un enlace para restablecer la contraseña.'}
+              {sent ? t('auth.forgot.subtitleSent') : t('auth.forgot.subtitleBeforeSend')}
             </p>
           </div>
 
@@ -48,7 +48,7 @@ const ForgotPassword: React.FC = () => {
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label htmlFor="email" className="label">
-                  Correo electrónico
+                  {t('auth.forgot.email')}
                 </label>
                 <input
                   id="email"
@@ -67,13 +67,11 @@ const ForgotPassword: React.FC = () => {
                 disabled={loading}
                 className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Enviando…' : 'Enviar enlace'}
+                {loading ? t('auth.forgot.submitSending') : t('auth.forgot.submitIdle')}
               </button>
             </form>
           ) : (
-            <p className="text-dark-300 text-sm text-center">
-              Revisa también la carpeta de spam. El enlace caduca en 1 hora.
-            </p>
+            <p className="text-dark-300 text-sm text-center">{t('auth.forgot.spamHint')}</p>
           )}
 
           <Link
@@ -81,7 +79,7 @@ const ForgotPassword: React.FC = () => {
             className="mt-6 flex items-center justify-center gap-2 text-primary-500 hover:text-primary-400 text-sm font-medium"
           >
             <ArrowLeft size={16} />
-            Volver al inicio de sesión
+            {t('auth.forgot.backToLogin')}
           </Link>
         </div>
       </motion.div>

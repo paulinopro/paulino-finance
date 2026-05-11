@@ -1,0 +1,21 @@
+{
+  "America_Santo_Domingo": "América/Santo Domingo (AST, UTC-4)",
+  "America_New_York": "América/Nueva York (EST/EDT, UTC-5/-4)",
+  "America_Chicago": "América/Chicago (CST/CDT, UTC-6/-5)",
+  "America_Denver": "América/Denver (MST/MDT, UTC-7/-6)",
+  "America_Los_Angeles": "América/Los Ángeles (PST/PDT, UTC-8/-7)",
+  "America_Mexico_City": "América/Ciudad de México (CST, UTC-6)",
+  "America_Bogota": "América/Bogotá (COT, UTC-5)",
+  "America_Lima": "América/Lima (PET, UTC-5)",
+  "America_Santiago": "América/Santiago (CLT, UTC-3)",
+  "America_Buenos_Aires": "América/Buenos Aires (ART, UTC-3)",
+  "America_Sao_Paulo": "América/São Paulo (BRT, UTC-3)",
+  "Europe_London": "Europa/Londres (GMT/BST, UTC+0/+1)",
+  "Europe_Paris": "Europa/París (CET/CEST, UTC+1/+2)",
+  "Europe_Madrid": "Europa/Madrid (CET/CEST, UTC+1/+2)",
+  "Europe_Berlin": "Europa/Berlín (CET/CEST, UTC+1/+2)",
+  "Asia_Tokyo": "Asia/Tokio (JST, UTC+9)",
+  "Asia_Shanghai": "Asia/Shanghái (CST, UTC+8)",
+  "Asia_Dubai": "Asia/Dubái (GST, UTC+4)",
+  "UTC": "UTC (UTC+0)"
+}

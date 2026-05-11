@@ -20,6 +20,15 @@ function parseBankAccountIdFromBody(body) {
     const n = parseInt(String(v), 10);
     return Number.isNaN(n) ? null : n;
 }
+/** Etiqueta legible para el libro de cuenta (movimientos). */
+function vehicleLedgerTag(row, vehicleId) {
+    const mk = `${row?.make ?? ''} ${row?.model ?? ''}`.trim();
+    if (mk)
+        return mk;
+    if (row?.license_plate)
+        return `Pat. ${String(row.license_plate)}`;
+    return `Vehículo #${vehicleId}`;
+}
 const getVehicles = async (req, res) => {
     try {
         const userId = req.userId;
@@ -270,6 +279,8 @@ const createVehicleExpense = async (req, res) => {
     if (vehicleCheck.rows.length === 0) {
         return res.status(404).json({ message: 'Vehicle not found' });
     }
+    const vLblRows = await (0, database_1.query)(`SELECT make, model, license_plate FROM vehicles WHERE id = $1 AND user_id = $2`, [vehicleId, userId]);
+    const vehTag = vehicleLedgerTag(vLblRows.rows[0], vehicleId);
     const amt = parseFloat(String(amount));
     const cur = String(currency);
     const bankAccountId = parseBankAccountIdFromBody(body);
@@ -294,7 +305,9 @@ const createVehicleExpense = async (req, res) => {
         const expenseRowId = insEx.rows[0].id;
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client, {
+                    description: `[Vehículos · ${vehTag}] ${spendKind}: ${description}`,
+                });
             }
             catch (e) {
                 await client.query('ROLLBACK');
@@ -432,11 +445,15 @@ const updateVehicleExpense = async (req, res) => {
             ? String(categoryName)
             : old.category;
         const resolvedBank = 'bankAccountId' in body ? newBankId : old.bank_account_id;
+        const vehRow = await (0, database_1.query)(`SELECT make, model, license_plate FROM vehicles WHERE id = $1 AND user_id = $2`, [vehicleId, userId]);
+        const vehTag = vehicleLedgerTag(vehRow.rows[0], vehicleId);
         const client = await (0, database_1.getClient)();
         try {
             await client.query('BEGIN');
             if ((0, incomeExpenseTaxonomy_1.expenseUsesImmediateBalance)(old) && old.bank_account_id) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, parseFloat(old.amount), client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, parseFloat(old.amount), client, {
+                    description: `[Vehículos · ${vehTag}] Actualización gasto — reversión «${old.description}»`,
+                });
             }
             await client.query(`UPDATE expenses
          SET description = $1, amount = $2, currency = $3, category = $4, date = $5, bank_account_id = $6,
@@ -461,7 +478,9 @@ const updateVehicleExpense = async (req, res) => {
             }) &&
                 resolvedBank) {
                 try {
-                    await (0, accountBalance_1.applyBalanceDelta)(userId, resolvedBank, newCur, -newAmt, client);
+                    await (0, accountBalance_1.applyBalanceDelta)(userId, resolvedBank, newCur, -newAmt, client, {
+                        description: `[Vehículos · ${vehTag}] Gasto actualizado · ${newDesc}`,
+                    });
                 }
                 catch (e) {
                     await client.query('ROLLBACK');

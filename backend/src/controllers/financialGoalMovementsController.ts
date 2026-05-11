@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta, getAccountRow, isCurrencyAllowedForAccount } from '../services/accountBalance';
+import { getUserCurrencyPair } from '../utils/userCurrencyPair';
 
 const roundMoney = (n: number) => Math.round(n * 100) / 100;
 
@@ -90,7 +91,8 @@ async function validateAccountForGoalCurrency(
   if (!accountId) return null;
   const row = await getAccountRow(userId, accountId);
   if (!row) return 'Cuenta no encontrada';
-  if (!isCurrencyAllowedForAccount(row.currency_type, currency)) {
+  const pair = await getUserCurrencyPair(userId);
+  if (!isCurrencyAllowedForAccount(row.currency_type, currency, pair)) {
     return 'La moneda debe coincidir con la cuenta (o usar cuenta DUAL)';
   }
   return null;
@@ -164,7 +166,7 @@ export const addGoalMovement = async (req: AuthRequest, res: Response) => {
     await client.query('BEGIN');
 
     const goalResult = await client.query(
-      `SELECT target_amount, current_amount, status, currency, bank_account_id
+      `SELECT target_amount, current_amount, status, currency, bank_account_id, name
        FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`,
       [goalId, userId]
     );
@@ -185,6 +187,7 @@ export const addGoalMovement = async (req: AuthRequest, res: Response) => {
     const remaining = roundMoney(target - current);
     const currency = String(g.currency);
     const snapBankId = (g.bank_account_id as number | null) ?? null;
+    const goalNmAdd = String(g.name ?? '').trim() || `Meta #${goalId}`;
 
     if (remaining <= 0) {
       await client.query('ROLLBACK');
@@ -216,7 +219,9 @@ export const addGoalMovement = async (req: AuthRequest, res: Response) => {
 
     if (sourceBankId) {
       try {
-        await applyBalanceDelta(userId, sourceBankId, currency, -numericAmount, client);
+        await applyBalanceDelta(userId, sourceBankId, currency, -numericAmount, client, {
+          description: `[Meta financiera · ${goalNmAdd}] Aporte a la meta desde esta cuenta`,
+        });
       } catch (e: any) {
         await client.query('ROLLBACK');
         if (e?.message === 'ACCOUNT_NOT_FOUND') {
@@ -231,7 +236,9 @@ export const addGoalMovement = async (req: AuthRequest, res: Response) => {
 
     if (snapBankId) {
       try {
-        await applyBalanceDelta(userId, snapBankId, currency, numericAmount, client);
+        await applyBalanceDelta(userId, snapBankId, currency, numericAmount, client, {
+          description: `[Meta financiera · ${goalNmAdd}] Abono acreditado en cuenta de la meta`,
+        });
       } catch (e: any) {
         await client.query('ROLLBACK');
         if (e?.message === 'ACCOUNT_NOT_FOUND') {
@@ -331,7 +338,7 @@ export const updateGoalMovement = async (req: AuthRequest, res: Response) => {
     await client.query('BEGIN');
 
     const goalResult = await client.query(
-      `SELECT target_amount, current_amount, status, currency FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+      `SELECT target_amount, current_amount, status, currency, name FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`,
       [goalId, userId]
     );
 
@@ -347,6 +354,7 @@ export const updateGoalMovement = async (req: AuthRequest, res: Response) => {
     }
 
     const currency = String(goalRow.currency);
+    const goalNmEdit = String(goalRow.name ?? '').trim() || `Meta #${goalId}`;
 
     const existingResult = await client.query(
       `SELECT amount, note, bank_account_id, source_bank_account_id
@@ -397,16 +405,24 @@ export const updateGoalMovement = async (req: AuthRequest, res: Response) => {
 
     try {
       if (prevSrcId) {
-        await applyBalanceDelta(userId, prevSrcId, currency, existingAmount, client);
+        await applyBalanceDelta(userId, prevSrcId, currency, existingAmount, client, {
+          description: `[Meta financiera · ${goalNmEdit}] Edición de abono — devolución a origen anterior`,
+        });
       }
       if (movBankId) {
-        await applyBalanceDelta(userId, movBankId, currency, -existingAmount, client);
+        await applyBalanceDelta(userId, movBankId, currency, -existingAmount, client, {
+          description: `[Meta financiera · ${goalNmEdit}] Edición de abono — retiro de cuenta meta (monto anterior)`,
+        });
       }
       if (newSrcId) {
-        await applyBalanceDelta(userId, newSrcId, currency, -numericAmount, client);
+        await applyBalanceDelta(userId, newSrcId, currency, -numericAmount, client, {
+          description: `[Meta financiera · ${goalNmEdit}] Edición de abono — nuevo débito en cuenta origen`,
+        });
       }
       if (movBankId) {
-        await applyBalanceDelta(userId, movBankId, currency, numericAmount, client);
+        await applyBalanceDelta(userId, movBankId, currency, numericAmount, client, {
+          description: `[Meta financiera · ${goalNmEdit}] Edición de abono — nuevo abono en cuenta meta`,
+        });
       }
     } catch (e: any) {
       await client.query('ROLLBACK');
@@ -480,7 +496,7 @@ export const deleteGoalMovement = async (req: AuthRequest, res: Response) => {
     await client.query('BEGIN');
 
     const goalResult = await client.query(
-      `SELECT currency FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+      `SELECT currency, name FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`,
       [goalId, userId]
     );
     if (goalResult.rows.length === 0) {
@@ -488,6 +504,7 @@ export const deleteGoalMovement = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Financial goal not found' });
     }
     const currency = String(goalResult.rows[0].currency);
+    const goalNmDel = String(goalResult.rows[0].name ?? '').trim() || `Meta #${goalId}`;
 
     const existingResult = await client.query(
       `SELECT amount, bank_account_id, source_bank_account_id
@@ -507,10 +524,14 @@ export const deleteGoalMovement = async (req: AuthRequest, res: Response) => {
 
     try {
       if (srcId) {
-        await applyBalanceDelta(userId, srcId, currency, existingAmount, client);
+        await applyBalanceDelta(userId, srcId, currency, existingAmount, client, {
+          description: `[Meta financiera · ${goalNmDel}] Eliminación de abono — devolución a cuenta origen`,
+        });
       }
       if (movBankId) {
-        await applyBalanceDelta(userId, movBankId, currency, -existingAmount, client);
+        await applyBalanceDelta(userId, movBankId, currency, -existingAmount, client, {
+          description: `[Meta financiera · ${goalNmDel}] Eliminación de abono — retiro de cuenta meta`,
+        });
       }
     } catch (e: any) {
       await client.query('ROLLBACK');

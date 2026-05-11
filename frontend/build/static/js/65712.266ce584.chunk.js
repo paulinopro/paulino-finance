@@ -1,0 +1,3 @@
+/*! For license information please see 65712.266ce584.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[65712],{65712(e,c,n){n.r(c),n.d(c,{default:()=>a});const a=(0,n(21639).A)("UnlockKeyhole",[["circle",{cx:"12",cy:"16",r:"1",key:"1au0dj"}],["rect",{x:"3",y:"10",width:"18",height:"12",rx:"2",key:"6s8ecr"}],["path",{d:"M7 10V7a5 5 0 0 1 9.33-2.5",key:"car5b7"}]])}}]);
+//# sourceMappingURL=65712.266ce584.chunk.js.map

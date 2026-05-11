@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { getUserCurrencyPair, isCurrencyInUserPair } from '../utils/userCurrencyPair';
 
 export const getBudgets = async (req: AuthRequest, res: Response) => {
   try {
@@ -148,6 +149,14 @@ export const createBudget = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Period month is required for monthly budgets' });
     }
 
+    const pair = await getUserCurrencyPair(userId);
+    const cur = String(currency).trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, cur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
+
     const result = await query(
       `INSERT INTO budgets (user_id, name, category, amount, currency, period_type, period_month, period_year)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -186,6 +195,21 @@ export const updateBudget = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { id } = req.params;
     const { name, category, amount, currency, periodType, periodMonth, periodYear } = req.body;
+
+    const pair = await getUserCurrencyPair(userId);
+    const prevRow = await query(`SELECT currency FROM budgets WHERE id = $1 AND user_id = $2`, [id, userId]);
+    if (prevRow.rows.length === 0) {
+      return res.status(404).json({ message: 'Budget not found' });
+    }
+    const mergedCur =
+      currency !== undefined && currency !== null && String(currency).trim() !== ''
+        ? String(currency).trim().toUpperCase()
+        : String(prevRow.rows[0].currency || '').trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, mergedCur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
 
     const result = await query(
       `UPDATE budgets

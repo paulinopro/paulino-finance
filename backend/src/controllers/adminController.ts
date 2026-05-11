@@ -3,15 +3,17 @@ import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { signAuthToken } from '../utils/jwt';
 import { assignPlanToUser, getSubscriptionDetailsForUser, getSubscriptionPaymentHistoryByUserId } from '../services/subscriptionService';
+import { getNotificationSchedulerStatus } from '../services/notificationService';
 import { logAdminAction } from '../services/adminAuditService';
 import { invalidateMaintenanceModeCache } from '../middleware/maintenanceMode';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { exchangeRatePayloadForUser } from '../services/exchangeRatePayload';
 import {
   ADMIN_STATS_TTL_MS,
   getAdminStatsCacheEntry,
   invalidateAdminStatsCache,
   setAdminStatsCacheEntry,
 } from './adminStatsCacheStore';
+import { userCurrencyPreferencePayload } from '../utils/userCurrencyPair';
 
 const SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'cancelled', 'expired', 'past_due']);
 const USERS_EXPORT_MAX = 10_000;
@@ -310,6 +312,11 @@ export const getAdminSubscriptionDataQuality = async (_req: AuthRequest, res: Re
     console.error('getAdminSubscriptionDataQuality', e);
     res.status(500).json({ message: 'Error al leer calidad de datos' });
   }
+};
+
+/** Estado del cron de notificaciones (node-cron) — sólo lectura. */
+export const getAdminNotificationScheduler = (_req: AuthRequest, res: Response) => {
+  res.json(getNotificationSchedulerStatus());
 };
 
 export const getAdminHealth = async (_req: AuthRequest, res: Response) => {
@@ -651,8 +658,8 @@ export const impersonateUser = async (req: AuthRequest, res: Response) => {
     }
 
     const target = await query(
-      `SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference, u.secondary_currency_preference,
+              u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1`,
       [targetId]
@@ -675,6 +682,8 @@ export const impersonateUser = async (req: AuthRequest, res: Response) => {
 
     void logAdminAction(adminId, 'user.impersonate', 'user', targetId, { targetEmail: u.email });
 
+    const rateTarget = await exchangeRatePayloadForUser(u.id, u);
+
     res.json({
       token,
       user: {
@@ -683,8 +692,9 @@ export const impersonateUser = async (req: AuthRequest, res: Response) => {
         firstName: u.first_name,
         lastName: u.last_name,
         telegramChatId: u.telegram_chat_id,
-        currencyPreference: u.currency_preference || 'DOP',
-        exchangeRateDopUsd: resolveExchangeRateDopUsd(u.exchange_rate_dop_usd),
+        ...userCurrencyPreferencePayload(u),
+        localePreference: u.locale_preference || 'es',
+        ...rateTarget,
         timezone: u.timezone || 'America/Santo_Domingo',
         isSuperAdmin: false,
         subscriptionPlan: u.subscription_plan || 'free',
@@ -707,8 +717,8 @@ export const stopImpersonation = async (req: AuthRequest, res: Response) => {
     }
 
     const admin = await query(
-      `SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.is_super_admin, u.subscription_plan, u.subscription_status,
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference, u.secondary_currency_preference,
+              u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.is_super_admin, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1 AND u.is_super_admin = true`,
       [impersonatedBy]
@@ -728,6 +738,8 @@ export const stopImpersonation = async (req: AuthRequest, res: Response) => {
       viewedEmail: viewed.rows[0]?.email ?? null,
     });
 
+    const rateAdmin = await exchangeRatePayloadForUser(u.id, u);
+
     res.json({
       token,
       user: {
@@ -736,8 +748,9 @@ export const stopImpersonation = async (req: AuthRequest, res: Response) => {
         firstName: u.first_name,
         lastName: u.last_name,
         telegramChatId: u.telegram_chat_id,
-        currencyPreference: u.currency_preference || 'DOP',
-        exchangeRateDopUsd: resolveExchangeRateDopUsd(u.exchange_rate_dop_usd),
+        ...userCurrencyPreferencePayload(u),
+        localePreference: u.locale_preference || 'es',
+        ...rateAdmin,
         timezone: u.timezone || 'America/Santo_Domingo',
         isSuperAdmin: true,
         subscriptionPlan: u.subscription_plan || 'free',

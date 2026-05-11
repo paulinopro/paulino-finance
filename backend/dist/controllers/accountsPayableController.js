@@ -4,6 +4,7 @@ exports.deleteAccountPayable = exports.payAccountPayable = exports.updateAccount
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
+const calendarService_1 = require("../services/calendarService");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -144,7 +145,10 @@ const addAccountPayablePayment = async (req, res) => {
         const expenseId = expenseResult.rows[0].id;
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, -payAmount);
+                const cxpLbl = `[CxP] Abono`;
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, -payAmount, undefined, {
+                    description: `${cxpLbl} · «${account.description}»`,
+                });
             }
             catch (e) {
                 console.error('AP payment balance:', e);
@@ -243,7 +247,9 @@ const updateAccountPayablePayment = async (req, res) => {
                 const cur = String(account.currency);
                 if (prevExpenseBank) {
                     try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, prevExpenseBank, cur, prevAmt, client);
+                        await (0, accountBalance_1.applyBalanceDelta)(userId, prevExpenseBank, cur, prevAmt, client, {
+                            description: `[CxP] Ajuste de abono · reversión «${account.description}»`,
+                        });
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
@@ -269,7 +275,9 @@ const updateAccountPayablePayment = async (req, res) => {
                 ]);
                 if (newBankId) {
                     try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, cur, -payAmount, client);
+                        await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, cur, -payAmount, client, {
+                            description: `[CxP] Ajuste de abono · nuevo cargo «${account.description}»`,
+                        });
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
@@ -337,6 +345,7 @@ const deleteAccountPayablePayment = async (req, res) => {
         const expenseId = payRow.rows[0].expense_id;
         if (expenseId) {
             await (0, database_1.query)(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
+            await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, expenseId, ['RECURRING_EXPENSE', 'EXPENSE']);
         }
         await (0, database_1.query)(`DELETE FROM accounts_payable_payments WHERE id = $1 AND account_payable_id = $2 AND user_id = $3`, [paymentId, id, userId]);
         await (0, accountsPaymentLinkSync_1.recalculatePayableStatus)(Number(id), userId);
@@ -500,7 +509,9 @@ const payAccountPayable = async (req, res) => {
         const expenseId = expenseResult.rows[0].id;
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, -remaining);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, -remaining, undefined, {
+                    description: `[CxP] Liquidación por pagar · «${account.description}»`,
+                });
             }
             catch (e) {
                 console.error('AP pay balance:', e);
@@ -548,7 +559,9 @@ const deleteAccountPayable = async (req, res) => {
         const expRows = await (0, database_1.query)(`SELECT expense_id FROM accounts_payable_payments
        WHERE account_payable_id = $1 AND expense_id IS NOT NULL`, [id]);
         for (const row of expRows.rows) {
-            await (0, database_1.query)(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [row.expense_id, userId]);
+            const expId = row.expense_id;
+            await (0, database_1.query)(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [expId, userId]);
+            await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, expId, ['RECURRING_EXPENSE', 'EXPENSE']);
         }
         const result = await (0, database_1.query)('DELETE FROM accounts_payable WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]);
         if (result.rows.length === 0) {

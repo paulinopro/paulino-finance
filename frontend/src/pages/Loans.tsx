@@ -20,11 +20,14 @@ import {
   listCardProgressColor,
 } from '../utils/listCard';
 import { todayYmdLocal } from '../utils/dateUtils';
-import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
@@ -35,7 +38,17 @@ function loanListAccent(loan: Loan): string {
 }
 
 const Loans: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    formatDatePresetLocalized,
+    currencySelectLabel,
+    defaultTransactionCurrency,
+    transactionCurrencyOptions,
+    primaryCurrency,
+    secondaryCurrency,
+  } = useIntlFormatting();
   const { pageSize: loanListPageSize, setPageSize: setLoanListPageSize, pageSizeOptions: loanListPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:loans', TABLE_PAGE_SIZE_LOANS);
   const {
@@ -98,11 +111,11 @@ const Loans: React.FC = () => {
       setLoans(response.data.loans);
       setSummary(response.data.summary || { totalRemaining: 0, totalInstallment: 0, totalLoans: 0 });
     } catch (error: any) {
-      toast.error('Error al cargar préstamos');
+      toast.error(t('toast.loans.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, bankFilter]);
+  }, [searchTerm, bankFilter, t]);
 
   useEffect(() => {
     (async () => {
@@ -149,13 +162,17 @@ const Loans: React.FC = () => {
   useEffect(() => {
     setPaymentHistoryPage(1);
   }, [loanPaymentHistoryPageSize]);
-  const listDnd = useListOrderPageDnd(pagedLoans, loanListStart, orderedLoans, commitLoanOrder);
+  const listDnd = useListOrderPageDnd(pagedLoans, loanListStart, orderedLoans, commitLoanOrder, {
+    ghostLabel: (l) => l.loanName,
+  });
 
   const accountsForLoanPayment = useMemo(() => {
     if (!selectedLoan) return [];
-    const c = selectedLoan.currency;
-    return bankAccounts.filter((a: BankAccount) => a.currencyType === 'DUAL' || a.currencyType === c);
-  }, [bankAccounts, selectedLoan]);
+    const c = (selectedLoan.currency && String(selectedLoan.currency).trim()) || primaryCurrency;
+    return bankAccounts.filter((a: BankAccount) =>
+      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+    );
+  }, [bankAccounts, selectedLoan, primaryCurrency, secondaryCurrency]);
 
   const bankAccountNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -189,17 +206,17 @@ const Loans: React.FC = () => {
 
       if (editingLoan) {
         await api.put(`/loans/${editingLoan.id}`, data);
-        toast.success('Préstamo actualizado');
+        toast.success(t('toast.loans.updated'));
       } else {
         await api.post('/loans', data);
-        toast.success('Préstamo creado');
+        toast.success(t('toast.loans.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchLoans();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar préstamo');
+      toast.error(error.response?.data?.message || t('toast.loans.saveError'));
     }
   };
 
@@ -219,7 +236,7 @@ const Loans: React.FC = () => {
         payload.bankAccountId = null;
       }
       await api.post(`/loans/${selectedLoan.id}/payment`, payload);
-      toast.success('Pago registrado');
+      toast.success(t('toast.loans.paymentRegistered'));
       setShowPaymentModal(false);
       setPaymentData({ paymentDate: todayYmdLocal(), amount: '', notes: '', bankAccountId: '' });
       fetchLoans();
@@ -228,34 +245,34 @@ const Loans: React.FC = () => {
         setSelectedLoan(loanRes.data.loan);
       }
     } catch (error: any) {
-      toast.error('Error al registrar pago');
+      toast.error(t('toast.loans.paymentRegisterError'));
     }
   };
 
   const handleDeletePayment = async (paymentId: number) => {
-    if (!window.confirm('¿Estás seguro de eliminar este pago?')) return;
+    if (!window.confirm(t('confirm.deleteLoanPayment'))) return;
     try {
       if (!selectedLoan) return;
       await api.delete(`/loans/${selectedLoan.id}/payments/${paymentId}`);
-      toast.success('Pago eliminado');
+      toast.success(t('toast.loans.paymentDeleted'));
       if (selectedLoan) {
         const loanRes = await api.get(`/loans/${selectedLoan.id}`);
         setSelectedLoan(loanRes.data.loan);
       }
       fetchLoans();
     } catch (error: any) {
-      toast.error('Error al eliminar pago');
+      toast.error(t('toast.loans.paymentDeleteError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de eliminar este préstamo?')) return;
+    if (!window.confirm(t('confirm.deleteLoan'))) return;
     try {
       await api.delete(`/loans/${id}`);
-      toast.success('Préstamo eliminado');
+      toast.success(t('toast.loans.deleted'));
       fetchLoans();
     } catch (error: any) {
-      toast.error('Error al eliminar préstamo');
+      toast.error(t('toast.loans.deleteError'));
     }
   };
 
@@ -265,7 +282,7 @@ const Loans: React.FC = () => {
       setSelectedLoan(response.data.loan);
       setShowLoanDetails(true);
     } catch (error: any) {
-      toast.error('Error al cargar detalles');
+      toast.error(t('toast.loans.detailLoadError'));
     }
   };
 
@@ -276,79 +293,43 @@ const Loans: React.FC = () => {
       setPaymentHistoryPage(1); // Reset to first page
       setShowPaymentHistory(true);
     } catch (error: any) {
-      toast.error('Error al cargar historial de pagos');
+      toast.error(t('toast.loans.paymentsHistoryLoadError'));
     }
   };
 
-  // Helper function to format dates without timezone issues
-  const formatDate = (dateString: string | null | undefined): string => {
-    if (!dateString) return '';
+  const parseLoanDate = (dateString: string | null | undefined): Date | null => {
+    if (!dateString) return null;
     try {
-      // Handle different date formats
       let date: Date;
       if (typeof dateString === 'string') {
-        // If it's already a date string, try to parse it
         if (dateString.includes('T')) {
           date = new Date(dateString);
         } else {
-          // If it's YYYY-MM-DD format, add time to avoid timezone issues
           date = new Date(dateString + 'T12:00:00');
         }
       } else {
         date = new Date(dateString);
       }
-      
-      // Check if date is valid
-      if (isNaN(date.getTime())) return '';
-      
-      return date.toLocaleDateString('es-DO');
-    } catch (error) {
-      return '';
+      if (isNaN(date.getTime())) return null;
+      return date;
+    } catch {
+      return null;
     }
+  };
+
+  const formatDate = (dateString: string | null | undefined): string => {
+    const date = parseLoanDate(dateString);
+    return date ? formatDatePresetLocalized(date, 'short') : '';
   };
 
   const formatDateFull = (dateString: string | null | undefined): string => {
-    if (!dateString) return '';
-    try {
-      let date: Date;
-      if (typeof dateString === 'string') {
-        if (dateString.includes('T')) {
-          date = new Date(dateString);
-        } else {
-          date = new Date(dateString + 'T12:00:00');
-        }
-      } else {
-        date = new Date(dateString);
-      }
-      
-      if (isNaN(date.getTime())) return '';
-      
-      return date.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    } catch (error) {
-      return '';
-    }
+    const date = parseLoanDate(dateString);
+    return date ? formatDatePresetLocalized(date, 'long') : '';
   };
 
   const formatDateShort = (dateString: string | null | undefined): string => {
-    if (!dateString) return '';
-    try {
-      let date: Date;
-      if (typeof dateString === 'string') {
-        if (dateString.includes('T')) {
-          date = new Date(dateString);
-        } else {
-          date = new Date(dateString + 'T12:00:00');
-        }
-      } else {
-        date = new Date(dateString);
-      }
-      
-      if (isNaN(date.getTime())) return '';
-      
-      return date.toLocaleDateString('es-DO', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-    } catch (error) {
-      return '';
-    }
+    const date = parseLoanDate(dateString);
+    return date ? formatDatePresetLocalized(date, 'weekdayMedium') : '';
   };
 
   const resetForm = () => {
@@ -364,7 +345,7 @@ const Loans: React.FC = () => {
       installmentAmount: '',
       fixedCharge: '',
       paymentDay: '',
-      currency: 'DOP',
+      currency: defaultTransactionCurrency,
       interestCalculationBase: 'ACTUAL_360',
       status: 'ACTIVE',
     });
@@ -394,7 +375,7 @@ const Loans: React.FC = () => {
       setEditingLoan(loanData);
       setShowModal(true);
     } catch (error: any) {
-      toast.error('Error al cargar préstamo para editar');
+      toast.error(t('toast.loans.editLoadError'));
     }
   };
 
@@ -403,11 +384,11 @@ const Loans: React.FC = () => {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'ACTIVE':
-        return 'Activo';
+        return t('pages.loans.status.active');
       case 'PAID':
-        return 'Pagado';
+        return t('pages.loans.status.paid');
       case 'DEFAULTED':
-        return 'En Mora';
+        return t('pages.loans.status.defaulted');
       default:
         return status;
     }
@@ -458,8 +439,8 @@ const Loans: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         className="mb-4"
-        title="Préstamos"
-        subtitle="Gestiona tus préstamos activos"
+        title={t('pages.loans.title')}
+        subtitle={t('pages.loans.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -472,7 +453,7 @@ const Loans: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
             >
               <Plus size={20} />
-              <span>Agregar Préstamo</span>
+              <span>{t('pages.loans.addLoan')}</span>
             </button>
           </div>
         }
@@ -483,15 +464,15 @@ const Loans: React.FC = () => {
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Restante Total</p>
-              <p className="text-2xl font-bold text-white">{summary.totalRemaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.loans.totalRemaining')}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalRemaining, primaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cuotas Totales</p>
-              <p className="text-2xl font-bold text-white">{summary.totalInstallment.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.loans.totalInstallmentsSummary')}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalInstallment, primaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Préstamos</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.loans.totalLoans')}</p>
               <p className="text-2xl font-bold text-white">{summary.totalLoans}</p>
             </div>
           </div>
@@ -505,7 +486,7 @@ const Loans: React.FC = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por nombre o banco..."
+              placeholder={t('pages.loans.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="input w-full pl-10"
@@ -525,7 +506,7 @@ const Loans: React.FC = () => {
               onChange={(e) => setBankFilter(e.target.value)}
               className="input w-full"
             >
-              <option value="">Todos los bancos</option>
+              <option value="">{t('pages.loans.allBanks')}</option>
               {uniqueBanks.map((bank) => (
                 <option key={bank} value={bank}>{bank}</option>
               ))}
@@ -537,8 +518,17 @@ const Loans: React.FC = () => {
       {loans.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
           <Receipt className="w-16 h-16 text-dark-600 mx-auto mb-4" />
-          <p className="text-dark-400 mb-4">No tienes préstamos registrados</p>
-          <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Préstamo</button>
+          <p className="text-dark-400 mb-4">{t('pages.loans.emptyState')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="btn-primary"
+          >
+            {t('pages.loans.addFirstLoan')}
+          </button>
         </div>
       ) : (
         <>
@@ -550,12 +540,16 @@ const Loans: React.FC = () => {
                 key={loan.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                onDragOver={listDnd.onDragOver}
-                onDrop={listDnd.onDrop(loan.id)}
+                {...listDnd.droppableAttr(loan.id)}
                 className={[
                   LIST_CARD_SHELL,
                   loanListAccent(loan),
-                  listDnd.dragId === loan.id ? 'opacity-60' : '',
+                  listDnd.dragId === loan.id ? 'opacity-[0.22]' : '',
+                  listDnd.dragId !== null &&
+                  listDnd.pointerOverItemId === loan.id &&
+                  listDnd.dragId !== loan.id
+                    ? 'ring-2 ring-primary-400/75 z-[1]'
+                    : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -565,7 +559,7 @@ const Loans: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                         <Receipt className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                        Préstamo
+                        {t('pages.loans.loanBadge')}
                       </span>
                       <span className={`text-xs font-medium sm:text-sm ${getStatusColor(loan.status)}`}>{getStatusText(loan.status)}</span>
                     </div>
@@ -575,8 +569,7 @@ const Loans: React.FC = () => {
                   <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                     <ListOrderDragHandle
                       itemId={loan.id}
-                      onDragStart={listDnd.onDragStart}
-                      onDragEnd={listDnd.onDragEnd}
+                      gripBinder={listDnd.gripBinder}
                       disabled={pagedLoans.length < 2}
                     />
                     <button
@@ -586,8 +579,8 @@ const Loans: React.FC = () => {
                         setShowAmortizationTable(true);
                       }}
                       className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-violet-400 transition-colors hover:bg-violet-500/15"
-                      title="Tabla de Amortización"
-                      aria-label="Tabla de amortización"
+                      title={t('pages.loans.amortizationTitle')}
+                      aria-label={t('pages.loans.amortizationAria')}
                     >
                       <Table className="h-[18px] w-[18px]" />
                     </button>
@@ -595,8 +588,8 @@ const Loans: React.FC = () => {
                       type="button"
                       onClick={() => handleViewDetails(loan)}
                       className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
-                      title="Ver Detalles"
-                      aria-label="Ver detalles"
+                      title={t('pages.loans.viewDetails')}
+                      aria-label={t('pages.loans.viewDetails')}
                     >
                       <Receipt className="h-[18px] w-[18px]" />
                     </button>
@@ -604,8 +597,8 @@ const Loans: React.FC = () => {
                       type="button"
                       onClick={() => handleViewPaymentHistory(loan)}
                       className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
-                      title="Historial de Pagos"
-                      aria-label="Historial de pagos"
+                      title={t('pages.loans.paymentsHistoryTitle')}
+                      aria-label={t('pages.loans.paymentsHistoryAria')}
                     >
                       <List className="h-[18px] w-[18px]" />
                     </button>
@@ -622,15 +615,15 @@ const Loans: React.FC = () => {
                         setShowPaymentModal(true);
                       }}
                       className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
-                      title="Registrar Pago"
-                      aria-label="Registrar pago"
+                      title={t('pages.loans.registerPayment')}
+                      aria-label={t('pages.loans.registerPayment')}
                     >
                       <DollarSign className="h-[18px] w-[18px]" />
                     </button>
-                    <button type="button" onClick={() => handleEdit(loan)} className={listCardBtnEdit} title="Editar" aria-label="Editar préstamo">
+                    <button type="button" onClick={() => handleEdit(loan)} className={listCardBtnEdit} title={t('pages.loans.editTitle')} aria-label={t('pages.loans.editAria')}>
                       <Edit className="h-5 w-5" />
                     </button>
-                    <button type="button" onClick={() => handleDelete(loan.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar préstamo">
+                    <button type="button" onClick={() => handleDelete(loan.id)} className={listCardBtnDanger} title={t('pages.loans.deleteTitle')} aria-label={t('pages.loans.deleteAria')}>
                       <Trash2 className="h-5 w-5" />
                     </button>
                   </div>
@@ -640,37 +633,34 @@ const Loans: React.FC = () => {
                   <div className="metrics-cq">
                     <div className="metrics-row-2">
                     <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Monto total</p>
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.loans.totalAmount')}</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {loan.totalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                        {fc(loan.totalAmount, loan.currency)}
                       </p>
                     </div>
                     <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Tasa</p>
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.loans.rate')}</p>
                       <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">
-                        {loan.interestRate}% <span className="text-xs font-normal text-dark-400">{loan.interestRateType === 'ANNUAL' ? 'Anual' : 'Mensual'}</span>
+                        {loan.interestRate}% <span className="text-xs font-normal text-dark-400">{loan.interestRateType === 'ANNUAL' ? t('pages.loans.annual') : t('pages.loans.monthly')}</span>
                       </p>
                     </div>
                     <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuotas</p>
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.loans.installments')}</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                         {loan.paidInstallments}/{loan.totalInstallments}
                       </p>
                     </div>
                     <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Cuota</p>
+                      <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.loans.installment')}</p>
                       <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                        {loan.installmentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                        {fc(loan.installmentAmount, loan.currency)}
                       </p>
                     </div>
                     {loan.remainingBalance !== undefined && (
                       <div className="metrics-cell-span-2 rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.loans.remaining')}</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                          {loan.remainingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{loan.currency}</span>
+                          {fc(loan.remainingBalance, loan.currency)}
                         </p>
                       </div>
                     )}
@@ -679,7 +669,7 @@ const Loans: React.FC = () => {
 
                   <div>
                     <div className="mb-2 flex justify-between gap-2 text-xs text-dark-400">
-                      <span>Progreso de amortización</span>
+                      <span>{t('pages.loans.amortizationProgress')}</span>
                       <span className="tabular-nums text-dark-300">{prog.toFixed(0)}%</span>
                     </div>
                     <div
@@ -704,6 +694,7 @@ const Loans: React.FC = () => {
             );
           })}
         </div>
+        <ListOrderDragGhostPortal ghost={listDnd.dragGhost} />
         <TablePagination
           className="mt-4 sm:mt-5"
           currentPage={loanPageSafe}
@@ -711,7 +702,7 @@ const Loans: React.FC = () => {
           totalItems={orderedLoans.length}
           itemsPerPage={loanListPageSize}
           onPageChange={setLoanListPage}
-          itemLabel="préstamos"
+          itemLabel={t('pages.loans.itemsLabel')}
           variant="card"
           pageSizeOptions={loanListPageSizeOptions}
           onPageSizeChange={setLoanListPageSize}
@@ -740,61 +731,74 @@ const Loans: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="loans-form-modal-title" className="text-2xl font-bold text-white mb-6">
-              {editingLoan ? 'Editar Préstamo' : 'Nuevo Préstamo'}
+              {editingLoan ? t('pages.loans.editLoan') : t('pages.loans.newLoan')}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div><label className="label">Nombre del Préstamo</label><input type="text" value={formData.loanName} onChange={(e) => setFormData({ ...formData, loanName: e.target.value })} className="input w-full" required /></div>
-              <div><label className="label">Banco (opcional)</label><input type="text" value={formData.bankName} onChange={(e) => setFormData({ ...formData, bankName: e.target.value })} className="input w-full" placeholder="Nombre del banco" /></div>
+              <div><label className="label">{t('pages.loans.loanName')}</label><input type="text" value={formData.loanName} onChange={(e) => setFormData({ ...formData, loanName: e.target.value })} className="input w-full" required /></div>
+              <div><label className="label">{t('pages.loans.bankOptional')}</label><input type="text" value={formData.bankName} onChange={(e) => setFormData({ ...formData, bankName: e.target.value })} className="input w-full" placeholder={t('pages.loans.bankPlaceholder')} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Monto Total</label><input type="number" step="0.01" value={formData.totalAmount} onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })} className="input w-full" required /></div>
-                <div><label className="label">Tasa de Interés</label><input type="number" step="0.01" value={formData.interestRate} onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })} className="input w-full" required /></div>
+                <div><label className="label">{t('pages.loans.totalAmount')}</label><input type="number" step="0.01" value={formData.totalAmount} onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })} className="input w-full" required /></div>
+                <div><label className="label">{t('pages.loans.interestRate')}</label><input type="number" step="0.01" value={formData.interestRate} onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })} className="input w-full" required /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Tipo de Tasa</label><select value={formData.interestRateType} onChange={(e) => setFormData({ ...formData, interestRateType: e.target.value as any })} className="input w-full"><option value="ANNUAL">Anual</option><option value="MONTHLY">Mensual</option></select></div>
-                <div><label className="label">Total de Cuotas</label><input type="number" value={formData.totalInstallments} onChange={(e) => setFormData({ ...formData, totalInstallments: e.target.value })} className="input w-full" required /></div>
+                <div><label className="label">{t('pages.loans.interestRateType')}</label><select value={formData.interestRateType} onChange={(e) => setFormData({ ...formData, interestRateType: e.target.value as any })} className="input w-full"><option value="ANNUAL">{t('pages.loans.annual')}</option><option value="MONTHLY">{t('pages.loans.monthly')}</option></select></div>
+                <div><label className="label">{t('pages.loans.totalInstallments')}</label><input type="number" value={formData.totalInstallments} onChange={(e) => setFormData({ ...formData, totalInstallments: e.target.value })} className="input w-full" required /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Fecha de Inicio</label><input type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} className="input w-full" required /></div>
-                <div><label className="label">Fecha de Vencimiento (opcional)</label><input type="date" value={formData.endDate} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} className="input w-full" /></div>
+                <div><label className="label">{t('pages.loans.startDate')}</label><input type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} className="input w-full" required /></div>
+                <div><label className="label">{t('pages.loans.endDateOptional')}</label><input type="date" value={formData.endDate} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} className="input w-full" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Monto de Cuota</label><input type="number" step="0.01" value={formData.installmentAmount} onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value })} className="input w-full" required /></div>
-                <div><label className="label">Cargo Fijo</label><input type="number" step="0.01" value={formData.fixedCharge} onChange={(e) => setFormData({ ...formData, fixedCharge: e.target.value })} className="input w-full" placeholder="0.00" /></div>
+                <div><label className="label">{t('pages.loans.installmentAmount')}</label><input type="number" step="0.01" value={formData.installmentAmount} onChange={(e) => setFormData({ ...formData, installmentAmount: e.target.value })} className="input w-full" required /></div>
+                <div><label className="label">{t('pages.loans.fixedCharge')}</label><input type="number" step="0.01" value={formData.fixedCharge} onChange={(e) => setFormData({ ...formData, fixedCharge: e.target.value })} className="input w-full" placeholder="0.00" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Día de Pago</label><input type="number" min="1" max="31" value={formData.paymentDay} onChange={(e) => setFormData({ ...formData, paymentDay: e.target.value })} className="input w-full" required /></div>
-                <div><label className="label">Moneda</label><select value={formData.currency} onChange={(e) => setFormData({ ...formData, currency: e.target.value })} className="input w-full"><option value="DOP">DOP</option><option value="USD">USD</option></select></div>
+                <div><label className="label">{t('pages.loans.paymentDay')}</label><input type="number" min="1" max="31" value={formData.paymentDay} onChange={(e) => setFormData({ ...formData, paymentDay: e.target.value })} className="input w-full" required /></div>
+                <div>
+                  <label className="label">{t('pages.loans.currency')}</label>
+                  <select
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="input w-full"
+                  >
+                    {transactionCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {currencySelectLabel(code)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Base de cálculo de interés</label>
+                  <label className="label">{t('pages.loans.interestBase')}</label>
                   <select 
                     value={formData.interestCalculationBase} 
                     onChange={(e) => setFormData({ ...formData, interestCalculationBase: e.target.value as any })} 
                     className="input w-full"
                   >
-                  <option value="ACTUAL_360">Mes Actual / 360</option>
-                  <option value="ACTUAL_365">Mes Actual / 365</option>
+                  <option value="ACTUAL_360">{t('pages.loans.interestBaseActual360')}</option>
+                  <option value="ACTUAL_365">{t('pages.loans.interestBaseActual365')}</option>
                     <option value="30_360">30 / 360</option>
                     <option value="30_365">30 / 365</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Estado</label>
+                  <label className="label">{t('pages.loans.statusLabel')}</label>
                   <select 
                     value={formData.status} 
                     onChange={(e) => setFormData({ ...formData, status: e.target.value as any })} 
                     className="input w-full"
                   >
-                    <option value="ACTIVE">Activo</option>
-                    <option value="PAID">Pagado</option>
-                    <option value="DEFAULTED">En Mora</option>
+                    <option value="ACTIVE">{t('pages.loans.status.active')}</option>
+                    <option value="PAID">{t('pages.loans.status.paid')}</option>
+                    <option value="DEFAULTED">{t('pages.loans.status.defaulted')}</option>
                   </select>
                 </div>
               </div>
               <div className="flex space-x-4 pt-4">
-                <button type="submit" className="btn-primary flex-1">{editingLoan ? 'Actualizar' : 'Crear'}</button>
-                <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="btn-secondary flex-1">Cancelar</button>
+                <button type="submit" className="btn-primary flex-1">{editingLoan ? t('pages.loans.update') : t('pages.loans.create')}</button>
+                <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="btn-secondary flex-1">{t('common.actions.cancel')}</button>
               </div>
             </form>
           </motion.div>
@@ -819,19 +823,19 @@ const Loans: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="loans-payment-modal-title" className="text-2xl font-bold text-white mb-6">
-              Registrar Pago
+              {t('pages.loans.registerPayment')}
             </h2>
             <form onSubmit={handlePayment} className="space-y-4">
-              <div><label className="label">Fecha de Pago</label><input type="date" value={paymentData.paymentDate} onChange={(e) => setPaymentData({ ...paymentData, paymentDate: e.target.value })} className="input w-full" required /></div>
-              <div><label className="label">Monto</label><input type="number" step="0.01" value={paymentData.amount} onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })} className="input w-full" required /></div>
+              <div><label className="label">{t('pages.loans.paymentDate')}</label><input type="date" value={paymentData.paymentDate} onChange={(e) => setPaymentData({ ...paymentData, paymentDate: e.target.value })} className="input w-full" required /></div>
+              <div><label className="label">{t('pages.loans.amount')}</label><input type="number" step="0.01" value={paymentData.amount} onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })} className="input w-full" required /></div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.loans.sourceAccountOptional')}</label>
                 <select
                   value={paymentData.bankAccountId}
                   onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
                   className="input w-full"
                 >
-                  <option value="">Sin vincular saldo</option>
+                  <option value="">{t('pages.loans.unlinkedBalance')}</option>
                   {accountsForLoanPayment.map((a: BankAccount) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -839,12 +843,12 @@ const Loans: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {selectedLoan.currency}</p>
+                <p className="text-xs text-dark-500 mt-1">{t('pages.loans.loanCurrency', { currency: selectedLoan.currency })}</p>
               </div>
-              <div><label className="label">Notas (opcional)</label><textarea value={paymentData.notes} onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })} className="input w-full" rows={3} /></div>
+              <div><label className="label">{t('pages.loans.notesOptional')}</label><textarea value={paymentData.notes} onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })} className="input w-full" rows={3} /></div>
               <div className="flex space-x-4 pt-4">
-                <button type="submit" className="btn-primary flex-1">Registrar</button>
-                <button type="button" onClick={() => setShowPaymentModal(false)} className="btn-secondary flex-1">Cancelar</button>
+                <button type="submit" className="btn-primary flex-1">{t('pages.loans.register')}</button>
+                <button type="button" onClick={() => setShowPaymentModal(false)} className="btn-secondary flex-1">{t('common.actions.cancel')}</button>
               </div>
             </form>
           </motion.div>
@@ -866,7 +870,7 @@ const Loans: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 id="loans-details-modal-title" className="text-2xl font-bold text-white">
-                Detalles del Préstamo
+                {t('pages.loans.loanDetails')}
               </h2>
               <button onClick={() => setShowLoanDetails(false)} className="text-dark-400 hover:text-white">
                 <X size={24} />
@@ -875,55 +879,55 @@ const Loans: React.FC = () => {
             <div className="space-y-6">
               {/* Información Principal */}
               <div>
-                <h3 className="text-lg font-semibold text-white mb-4">Información del Préstamo</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">{t('pages.loans.loanInformation')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <span className="text-dark-400 text-sm">Nombre:</span>
+                    <span className="text-dark-400 text-sm">{t('pages.loans.name')}:</span>
                     <p className="text-white font-medium">{selectedLoan.loanName}</p>
                   </div>
                   {selectedLoan.bankName && (
                     <div>
-                      <span className="text-dark-400 text-sm">Banco:</span>
+                      <span className="text-dark-400 text-sm">{t('pages.loans.bank')}:</span>
                       <p className="text-white font-medium">{selectedLoan.bankName}</p>
                     </div>
                   )}
                   <div>
-                    <span className="text-dark-400 text-sm">Monto Total:</span>
-                    <p className="text-white font-medium">{selectedLoan.totalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                    <span className="text-dark-400 text-sm">{t('pages.loans.totalAmount')}:</span>
+                    <p className="text-white font-medium">{fc(selectedLoan.totalAmount, selectedLoan.currency)}</p>
                   </div>
                   {selectedLoan.remainingBalance !== undefined && (
                     <div>
-                      <span className="text-dark-400 text-sm">Monto Restante:</span>
-                      <p className="text-red-400 font-medium">{selectedLoan.remainingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                      <span className="text-dark-400 text-sm">{t('pages.loans.remainingAmount')}:</span>
+                      <p className="text-red-400 font-medium">{fc(selectedLoan.remainingBalance, selectedLoan.currency)}</p>
                     </div>
                   )}
                   <div>
-                    <span className="text-dark-400 text-sm">Tasa de Interés:</span>
-                    <p className="text-white font-medium">{selectedLoan.interestRate}% {selectedLoan.interestRateType === 'ANNUAL' ? 'Anual' : 'Mensual'}</p>
+                    <span className="text-dark-400 text-sm">{t('pages.loans.interestRate')}:</span>
+                    <p className="text-white font-medium">{selectedLoan.interestRate}% {selectedLoan.interestRateType === 'ANNUAL' ? t('pages.loans.annual') : t('pages.loans.monthly')}</p>
                   </div>
                   <div>
-                    <span className="text-dark-400 text-sm">Cuotas:</span>
+                    <span className="text-dark-400 text-sm">{t('pages.loans.installments')}:</span>
                     <p className="text-white font-medium">{selectedLoan.paidInstallments} / {selectedLoan.totalInstallments}</p>
                   </div>
                   <div>
-                    <span className="text-dark-400 text-sm">Monto de Cuota:</span>
-                    <p className="text-white font-medium">{selectedLoan.installmentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                    <span className="text-dark-400 text-sm">{t('pages.loans.installmentAmount')}:</span>
+                    <p className="text-white font-medium">{fc(selectedLoan.installmentAmount, selectedLoan.currency)}</p>
                   </div>
                   {selectedLoan.nextPaymentDate && (
                     <div>
-                      <span className="text-dark-400 text-sm">Próximo Pago:</span>
+                      <span className="text-dark-400 text-sm">{t('pages.loans.nextPayment')}:</span>
                       <p className="text-primary-400 font-medium">{formatDateFull(selectedLoan.nextPaymentDate)}</p>
                     </div>
                   )}
                   {selectedLoan.startDate && (
                     <div>
-                      <span className="text-dark-400 text-sm">Fecha de Inicio:</span>
+                      <span className="text-dark-400 text-sm">{t('pages.loans.startDate')}:</span>
                       <p className="text-white font-medium">{formatDate(selectedLoan.startDate)}</p>
                     </div>
                   )}
                   {selectedLoan.endDate && (
                     <div>
-                      <span className="text-dark-400 text-sm">Fecha de Vencimiento:</span>
+                      <span className="text-dark-400 text-sm">{t('pages.loans.endDate')}:</span>
                       <p className="text-white font-medium">{formatDate(selectedLoan.endDate)}</p>
                     </div>
                   )}
@@ -970,7 +974,7 @@ const Loans: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 id="loans-payment-history-title" className="text-xl font-bold text-white">
-                  Historial de Pagos
+                  {t('pages.loans.paymentsHistory')}
                 </h2>
                 <p className="text-xs text-dark-400 mt-1">{selectedLoan.loanName}</p>
               </div>
@@ -997,65 +1001,69 @@ const Loans: React.FC = () => {
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                  <span className="text-sm font-semibold text-white">Cuota #{payment.installmentNumber || 'N/A'}</span>
+                                  <span className="text-sm font-semibold text-white">{t('pages.loans.installmentNumber', { number: payment.installmentNumber || t('pages.loans.notAvailableShort') })}</span>
                                   {payment.paymentDate && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-primary-400/10 text-primary-400">
-                                      {formatDateShort(payment.paymentDate) || 'Fecha no disponible'}
+                                      {formatDateShort(payment.paymentDate) || t('pages.loans.dateUnavailable')}
                                     </span>
                                   )}
                                   {payment.paymentType && (
                                     <span className="text-xs px-2 py-0.5 rounded bg-dark-600 text-dark-300">
-                                      {payment.paymentType === 'COMPLETE' ? 'Completo' : payment.paymentType === 'PARTIAL' ? 'Parcial' : 'Adelantado'}
+                                      {payment.paymentType === 'COMPLETE'
+                                        ? t('pages.loans.paymentType.complete')
+                                        : payment.paymentType === 'PARTIAL'
+                                          ? t('pages.loans.paymentType.partial')
+                                          : t('pages.loans.paymentType.advance')}
                                     </span>
                                   )}
                                 </div>
                                 <p className="text-xs text-dark-500 mb-2">
-                                  Origen:{' '}
+                                  {t('pages.loans.source')}:{' '}
                                   <span className="text-dark-300">
                                     {payment.bankAccountId != null
-                                      ? bankAccountNameById.get(payment.bankAccountId) ?? `Cuenta #${payment.bankAccountId}`
-                                      : 'Sin cuenta vinculada'}
+                                      ? bankAccountNameById.get(payment.bankAccountId) ?? t('pages.loans.accountNumber', { id: payment.bankAccountId })
+                                      : t('pages.loans.noLinkedAccount')}
                                   </span>
                                 </p>
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
                                   <div>
-                                    <span className="text-dark-400 block mb-0.5">Total:</span>
-                                    <p className="text-white font-medium">{payment.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                    <span className="text-dark-400 block mb-0.5">{t('pages.loans.total')}:</span>
+                                    <p className="text-white font-medium">{fc(payment.amount, selectedLoan.currency)}</p>
                                   </div>
                                   {payment.principalAmount !== undefined && payment.principalAmount > 0 && (
                                     <div>
-                                      <span className="text-dark-400 block mb-0.5">Capital:</span>
-                                      <p className="text-green-400 font-medium">{payment.principalAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                      <span className="text-dark-400 block mb-0.5">{t('pages.loans.principal')}:</span>
+                                      <p className="text-green-400 font-medium">{fc(payment.principalAmount, selectedLoan.currency)}</p>
                                     </div>
                                   )}
                                   {payment.interestAmount !== undefined && payment.interestAmount > 0 && (
                                     <div>
-                                      <span className="text-dark-400 block mb-0.5">Interés:</span>
-                                      <p className="text-yellow-400 font-medium">{payment.interestAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                      <span className="text-dark-400 block mb-0.5">{t('pages.loans.interest')}:</span>
+                                      <p className="text-yellow-400 font-medium">{fc(payment.interestAmount, selectedLoan.currency)}</p>
                                     </div>
                                   )}
                                   {payment.chargeAmount !== undefined && payment.chargeAmount > 0 && (
                                     <div>
-                                      <span className="text-dark-400 block mb-0.5">Cargo:</span>
-                                      <p className="text-orange-400 font-medium">{payment.chargeAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                      <span className="text-dark-400 block mb-0.5">{t('pages.loans.charge')}:</span>
+                                      <p className="text-orange-400 font-medium">{fc(payment.chargeAmount, selectedLoan.currency)}</p>
                                     </div>
                                   )}
                                   {payment.lateFee !== undefined && payment.lateFee > 0 && (
                                     <div>
-                                      <span className="text-dark-400 block mb-0.5">Mora:</span>
-                                      <p className="text-red-400 font-medium">{payment.lateFee.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                      <span className="text-dark-400 block mb-0.5">{t('pages.loans.lateFee')}:</span>
+                                      <p className="text-red-400 font-medium">{fc(payment.lateFee, selectedLoan.currency)}</p>
                                     </div>
                                   )}
                                   {payment.outstandingBalance !== undefined && (
                                     <div>
-                                      <span className="text-dark-400 block mb-0.5">Saldo:</span>
-                                      <p className="text-blue-400 font-medium">{payment.outstandingBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {selectedLoan.currency}</p>
+                                      <span className="text-dark-400 block mb-0.5">{t('pages.loans.balance')}:</span>
+                                      <p className="text-blue-400 font-medium">{fc(payment.outstandingBalance, selectedLoan.currency)}</p>
                                     </div>
                                   )}
                                 </div>
                                 {payment.notes && (
                                   <div className="mt-2 pt-2 border-t border-dark-600">
-                                    <span className="text-dark-400 text-xs">Nota: </span>
+                                    <span className="text-dark-400 text-xs">{t('pages.loans.note')}: </span>
                                     <span className="text-dark-300 text-xs">{payment.notes}</span>
                                   </div>
                                 )}
@@ -1063,7 +1071,7 @@ const Loans: React.FC = () => {
                               <button
                                 onClick={() => handleDeletePayment(payment.id)}
                                 className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded transition-colors"
-                                title="Eliminar pago"
+                                title={t('pages.loans.deletePayment')}
                               >
                                 <Trash2 size={16} />
                               </button>
@@ -1077,7 +1085,7 @@ const Loans: React.FC = () => {
                         totalItems={payments.length}
                         itemsPerPage={itemsPerPage}
                         onPageChange={setPaymentHistoryPage}
-                        itemLabel="pagos"
+                        itemLabel={t('pages.loans.payments')}
                         variant="embedded"
                         className="border-t border-dark-700 pt-3 mt-2"
                         pageSizeOptions={loanPaymentHistoryPageSizeOptions}
@@ -1087,7 +1095,7 @@ const Loans: React.FC = () => {
                   ) : (
                     <div className="text-center py-12">
                       <List className="w-12 h-12 text-dark-600 mx-auto mb-3" />
-                      <p className="text-dark-400 text-sm">No hay pagos registrados para este préstamo</p>
+                      <p className="text-dark-400 text-sm">{t('pages.loans.noPayments')}</p>
                     </div>
                   )}
                 </div>

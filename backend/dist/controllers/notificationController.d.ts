@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 export declare const getNotifications: (req: AuthRequest, res: Response) => Promise<void>;
+export declare const getNotificationById: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const markAsRead: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const getNotificationSettings: (req: AuthRequest, res: Response) => Promise<void>;
 export declare const updateNotificationSettings: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
@@ -9,5 +10,7 @@ export declare const deleteNotification: (req: AuthRequest, res: Response) => Pr
 export declare const getPushVapidPublicKey: (_req: AuthRequest, res: Response) => Promise<void>;
 export declare const subscribePush: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const unsubscribePush: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
+/** Prueba Web Push sin Telegram: requiere VAPID y al menos una fila en push_subscriptions. */
+export declare const testPushNotification: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const testNotification: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 //# sourceMappingURL=notificationController.d.ts.map

@@ -1,0 +1,23 @@
+{
+  "notificationTemplatesReset": "Vorlage auf Standardwerte zurücksetzen?",
+  "deletePlan": "Diesen Plan löschen?",
+  "deleteCategory": "Diese Kategorie löschen?",
+  "deleteIncome": "Diesen Eingang löschen?",
+  "deleteExpense": "Diese Ausgabe löschen?",
+  "deleteGoalPayment": "Diese Einzahlung löschen? Der Fortschritt des Ziels wird angepasst.",
+  "deleteFinancialGoal": "Dieses finanzielle Ziel löschen?",
+  "deleteBudget": "Dieses Budget löschen?",
+  "deletePayablePayment": "Diese Zahlung löschen? Die verknüpfte Ausgabe wird entfernt und der Kontostand aktualisiert.",
+  "deletePayableAccount": "Diese Verbindlichkeit löschen?",
+  "deleteReceivablePayment": "Diese Zahlung löschen? Der verknüpfte Eingang wird entfernt und der Kontostand aktualisiert.",
+  "deleteReceivableAccount": "Diese Forderung löschen?",
+  "deleteCardPayment": "Diese Kartenzahlung löschen? Schulden und Kontostand werden ggf. zurückgesetzt.",
+  "deleteCard": "Diese Karte löschen?",
+  "deleteBankAccount": "Dieses Konto löschen?",
+  "deleteLoanPayment": "Diese Zahlung löschen?",
+  "deleteLoan": "Diesen Kredit löschen?",
+  "deleteVehicle": "Dieses Fahrzeug löschen? Alle zugehörigen Ausgaben werden ebenfalls gelöscht.",
+  "deleteVehicleExpense": "Diese Ausgabe löschen?",
+  "disableUser": "Konto {{email}} deaktivieren? Anmeldung erst wieder möglich, wenn Sie es hier reaktivieren.",
+  "deleteAmortizationPayment": "Diese Zahlung löschen?"
+}

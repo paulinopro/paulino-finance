@@ -7,9 +7,10 @@ import {
   saveAmortizationSchedule,
 } from '../services/amortizationService';
 import { applyBalanceDelta } from '../services/accountBalance';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { amountToPrimary, getConversionContextForUser } from '../services/userCurrencyConversion';
 import { dateToYmdLocal } from '../utils/dateUtils';
 import { deleteCalendarEventsForRelated } from '../services/calendarService';
+import { getUserCurrencyPair, isCurrencyInUserPair } from '../utils/userCurrencyPair';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -166,30 +167,22 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       };
     });
 
-    // Get exchange rate once
-    const userResult = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
 
-    // Calculate totals
     const totalRemaining = loans
       .filter((l) => l.status === 'ACTIVE')
-      .reduce((sum, l) => {
-        // Sum by currency, convert USD to DOP
-        if (l.currency === 'DOP') {
-          return sum + (l.remainingBalance || 0);
-        }
-        return sum + ((l.remainingBalance || 0) * exchangeRate);
-      }, 0);
-    
+      .reduce(
+        (sum, l) =>
+          sum + amountToPrimary(l.remainingBalance || 0, String(l.currency || 'DOP'), ctx),
+        0
+      );
+
     const totalInstallment = loans
       .filter((l) => l.status === 'ACTIVE')
-      .reduce((sum, l) => {
-        // Sum by currency, convert USD to DOP
-        if (l.currency === 'DOP') {
-          return sum + l.installmentAmount;
-        }
-        return sum + (l.installmentAmount * exchangeRate);
-      }, 0);
+      .reduce(
+        (sum, l) => sum + amountToPrimary(l.installmentAmount, String(l.currency || 'DOP'), ctx),
+        0
+      );
 
     res.json({
       success: true,
@@ -331,6 +324,17 @@ export const createLoan = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
+    const pair = await getUserCurrencyPair(userId);
+    const cur =
+      currency != null && String(currency).trim() !== ''
+        ? String(currency).trim().toUpperCase()
+        : pair.primary;
+    if (!isCurrencyInUserPair(pair, cur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
+
     // Calculate next payment date based on payment_day and start_date
     let nextPaymentDate = null;
     if (paymentDay) {
@@ -369,7 +373,7 @@ export const createLoan = async (req: AuthRequest, res: Response) => {
         fixedCharge || 0,
         paymentDay || null,
         nextPaymentDate,
-        currency || 'DOP',
+        cur,
         interestCalculationBase || 'ACTUAL_360',
       ]
     );
@@ -434,6 +438,22 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
 
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ message: 'Loan not found' });
+    }
+
+    const existingCurRow = await query(`SELECT currency FROM loans WHERE id = $1 AND user_id = $2`, [
+      loanId,
+      userId,
+    ]);
+    const pair = await getUserCurrencyPair(userId);
+    const prevCur = String(existingCurRow.rows[0]?.currency || '').trim().toUpperCase();
+    const nextCur =
+      currency !== undefined && currency !== null && String(currency).trim() !== ''
+        ? String(currency).trim().toUpperCase()
+        : prevCur;
+    if (!isCurrencyInUserPair(pair, nextCur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
     }
 
     // Process dates: ensure startDate is always provided, endDate can be null
@@ -582,7 +602,8 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 
     // Verify loan exists and belongs to user
     const loanResult = await query(
-      'SELECT id, paid_installments, total_installments, payment_day, currency FROM loans WHERE id = $1 AND user_id = $2',
+      `SELECT id, loan_name, paid_installments, total_installments, payment_day, currency
+       FROM loans WHERE id = $1 AND user_id = $2`,
       [loanId, userId]
     );
 
@@ -667,7 +688,14 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 
     if (bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, loanCurrency, -payAmt);
+        const loanLabel = String(loan.loan_name ?? '').trim() || `#${loanId}`;
+        const instHint =
+          paymentDistribution.installmentNumber != null
+            ? ` · Cuota ${paymentDistribution.installmentNumber}`
+            : '';
+        await applyBalanceDelta(userId, bankAccountId, loanCurrency, -payAmt, undefined, {
+          description: `[Préstamo «${loanLabel}»] Pago desde cuenta${instHint}`,
+        });
       } catch (e: any) {
         await removeLoanPaymentById(newPaymentId, userId);
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -733,7 +761,7 @@ export const deletePayment = async (req: AuthRequest, res: Response) => {
     const paymentId = parseInt(req.params.paymentId);
 
     const meta = await query(
-      `SELECT lp.amount, lp.bank_account_id, l.currency
+      `SELECT lp.amount, lp.bank_account_id, lp.installment_number, l.currency, l.loan_name, lp.loan_id
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
        WHERE lp.id = $1 AND l.user_id = $2`,
@@ -747,12 +775,12 @@ export const deletePayment = async (req: AuthRequest, res: Response) => {
     const row = meta.rows[0];
     if (row.bank_account_id) {
       try {
-        await applyBalanceDelta(
-          userId,
-          row.bank_account_id,
-          row.currency,
-          parseFloat(row.amount)
-        );
+        const loanNm = String(row.loan_name ?? '').trim() || `#${row.loan_id}`;
+        const instHint =
+          row.installment_number != null ? ` · Cuota ${row.installment_number}` : '';
+        await applyBalanceDelta(userId, row.bank_account_id, row.currency, parseFloat(row.amount), undefined, {
+          description: `[Préstamo «${loanNm}»] Eliminación de pago (reversión)${instHint}`,
+        });
       } catch (e: any) {
         console.error('Revert balance on loan payment delete:', e);
       }
@@ -850,7 +878,8 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
     const { paymentDate, amount, paymentType, notes } = req.body;
 
     const oldQ = await query(
-      `SELECT lp.id, lp.loan_id, lp.installment_number, lp.amount, lp.bank_account_id, lp.payment_date, l.currency
+      `SELECT lp.id, lp.loan_id, lp.installment_number, lp.amount, lp.bank_account_id, lp.payment_date,
+              l.currency, l.loan_name
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
        WHERE lp.id = $1 AND l.user_id = $2`,
@@ -864,6 +893,7 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
     const old = oldQ.rows[0];
     const loanId = old.loan_id;
     const loanCurrency = String(old.currency || 'DOP');
+    const loanNmEdit = String(old.loan_name ?? '').trim() || `#${loanId}`;
     const newBankId = resolveBankAccountIdUpdate(req.body as Record<string, unknown>, old.bank_account_id);
 
     const effDate = paymentDate !== undefined && paymentDate !== null ? paymentDate : old.payment_date;
@@ -874,7 +904,18 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
 
     if (old.bank_account_id) {
       try {
-        await applyBalanceDelta(userId, old.bank_account_id, loanCurrency, parseFloat(old.amount));
+        const instHintOld =
+          old.installment_number != null ? ` · Cuota ${old.installment_number}` : '';
+        await applyBalanceDelta(
+          userId,
+          old.bank_account_id,
+          loanCurrency,
+          parseFloat(old.amount),
+          undefined,
+          {
+            description: `[Préstamo «${loanNmEdit}»] Edición de pago — reversión del cargo anterior${instHintOld}`,
+          }
+        );
       } catch (e: any) {
         console.error('Revert balance on loan payment update:', e);
       }
@@ -924,7 +965,13 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
 
     if (newBankId) {
       try {
-        await applyBalanceDelta(userId, newBankId, loanCurrency, -effAmt);
+        const instHintAfter =
+          paymentDistribution.installmentNumber != null
+            ? ` · Cuota ${paymentDistribution.installmentNumber}`
+            : '';
+        await applyBalanceDelta(userId, newBankId, loanCurrency, -effAmt, undefined, {
+          description: `[Préstamo «${loanNmEdit}»] Edición de pago — nuevo cargo${instHintAfter}`,
+        });
       } catch (e: any) {
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
           return res.status(400).json({

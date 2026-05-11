@@ -1,0 +1,77 @@
+{
+  "kmSuffix": "km",
+  "perMonthSuffix": "/month",
+  "savingEllipsis": "Saving…",
+  "ellipsis": "...",
+  "emptyDash": "—",
+  "invalidDate": "Invalid date",
+  "actions": {
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "search": "Search",
+    "loading": "Loading…",
+    "registerPrincipalPayment": "Record principal payment",
+    "registerPayment": "Record payment",
+    "actions": "Actions",
+    "create": "Create",
+    "apply": "Apply",
+    "history": "History"
+  },
+  "pagination": {
+    "compactSummary": "{{start}}–{{end}} of {{total}}",
+    "unreadSummary": "{{total}} unread",
+    "showingSummary": "Showing {{start}}–{{end}} of {{total}} {{itemLabel}}",
+    "perPage": "Per page",
+    "perPageAria": "Records per page",
+    "prevPageAria": "Previous page",
+    "nextPageAria": "Next page",
+    "prev": "Previous",
+    "next": "Next",
+    "pagesAria": "Pages"
+  },
+  "reorder": {
+    "title": "Reorder",
+    "aria": "Reorder: press and drag to another card (touch or mouse)"
+  },
+  "adminBreadcrumbs": {
+    "aria": "Breadcrumb",
+    "console": "Console",
+    "users": "Users",
+    "audit": "Audit",
+    "status": "Status",
+    "plans": "Plans (product)",
+    "settings": "Settings",
+    "overview": "Overview",
+    "userNumber": "User #{{id}}"
+  },
+  "installPrompt": {
+    "regionAria": "Install app",
+    "title": "Install Paulino Finance",
+    "subtitle": "Access faster from your home screen, like an app.",
+    "install": "Install",
+    "notNow": "Not now",
+    "iosTitle": "Add to home screen",
+    "iosPrefix": "In Safari, tap",
+    "iosShare": "Share",
+    "iosAndChoose": "and choose",
+    "iosAddToHome": "Add to Home Screen",
+    "gotIt": "Got it",
+    "closeAria": "Close install prompt"
+  },
+  "pwaUpdate": {
+    "newVersion": "A new version of the app is available.",
+    "update": "Update"
+  },
+  "offlineBanner": {
+    "message": "You are offline. Data may not load until you are back online."
+  },
+  "iconSelect": {
+    "searchPlaceholder": "Search icon (e.g. Wallet, Zap, Home)…",
+    "loading": "Loading icons…",
+    "optionsCount": "{{count}} options",
+    "colorSwatchAria": "Color {{color}}"
+  }
+}

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { ArrowLeft } from 'lucide-react';
 import AuthBrandMark from '../components/AuthBrandMark';
 import api from '../services/api';
 
 const ResetPassword: React.FC = () => {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tokenFromUrl = searchParams.get('token') || '';
@@ -24,25 +26,25 @@ const ResetPassword: React.FC = () => {
     e.preventDefault();
     const effectiveToken = (tokenFromUrl || token).trim();
     if (!effectiveToken) {
-      toast.error('Falta el token del enlace. Usa el enlace del correo o solicita uno nuevo.');
+      toast.error(t('auth.reset.toastMissingToken'));
       return;
     }
     if (password.length < 6) {
-      toast.error('La contraseña debe tener al menos 6 caracteres');
+      toast.error(t('auth.reset.toastPasswordTooShort'));
       return;
     }
     if (password !== confirm) {
-      toast.error('Las contraseñas no coinciden');
+      toast.error(t('auth.reset.toastPasswordMismatch'));
       return;
     }
 
     setLoading(true);
     try {
       await api.post('/auth/reset-password', { token: effectiveToken, password });
-      toast.success('Contraseña actualizada');
+      toast.success(t('auth.reset.toastUpdated'));
       navigate('/login', { replace: true });
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'No se pudo restablecer la contraseña');
+      toast.error(error.response?.data?.message || t('auth.reset.toastErrorFallback'));
     } finally {
       setLoading(false);
     }
@@ -59,16 +61,13 @@ const ResetPassword: React.FC = () => {
         <div className="card">
           <div className="text-center mb-8">
             <AuthBrandMark />
-            <h1 className="page-title mb-2">Nueva contraseña</h1>
-            <p className="text-dark-400 text-sm sm:text-base">
-              Elige una contraseña segura para tu cuenta.
-            </p>
+            <h1 className="page-title mb-2">{t('auth.reset.title')}</h1>
+            <p className="text-dark-400 text-sm sm:text-base">{t('auth.reset.subtitle')}</p>
           </div>
 
           {!tokenFromUrl && (
             <div className="mb-4 p-3 rounded-lg bg-amber-900/25 border border-amber-700/40 text-amber-100 text-sm">
-              No hay token en el enlace. Abre el correo y usa el botón «Restablecer contraseña», o pega aquí el
-              token si tu cliente lo muestra por separado.
+              {t('auth.reset.missingTokenBanner')}
             </div>
           )}
 
@@ -76,7 +75,7 @@ const ResetPassword: React.FC = () => {
             {!tokenFromUrl && (
               <div>
                 <label htmlFor="token" className="label">
-                  Token (opcional si el enlace no trae parámetros)
+                  {t('auth.reset.tokenLabel')}
                 </label>
                 <input
                   id="token"
@@ -84,7 +83,7 @@ const ResetPassword: React.FC = () => {
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   className="input w-full font-mono text-sm"
-                  placeholder="Pega el token del enlace"
+                  placeholder={t('auth.reset.tokenPlaceholder')}
                   autoComplete="off"
                 />
               </div>
@@ -92,7 +91,7 @@ const ResetPassword: React.FC = () => {
 
             <div>
               <label htmlFor="new-password" className="label">
-                Nueva contraseña
+                {t('auth.reset.newPassword')}
               </label>
               <input
                 id="new-password"
@@ -100,7 +99,7 @@ const ResetPassword: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="input w-full"
-                placeholder="Mínimo 6 caracteres"
+                placeholder={t('auth.reset.passwordPlaceholder')}
                 required
                 minLength={6}
                 autoComplete="new-password"
@@ -109,7 +108,7 @@ const ResetPassword: React.FC = () => {
 
             <div>
               <label htmlFor="confirm-password" className="label">
-                Confirmar contraseña
+                {t('auth.reset.confirmPassword')}
               </label>
               <input
                 id="confirm-password"
@@ -128,20 +127,20 @@ const ResetPassword: React.FC = () => {
               disabled={loading}
               className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Guardando…' : 'Guardar contraseña'}
+              {loading ? t('auth.reset.saveLoading') : t('auth.reset.saveIdle')}
             </button>
           </form>
 
           <div className="mt-6 flex flex-col gap-2 text-center text-sm">
             <Link to="/forgot-password" className="text-primary-500 hover:text-primary-400 font-medium">
-              Solicitar otro enlace
+              {t('auth.reset.anotherLink')}
             </Link>
             <Link
               to="/login"
               className="flex items-center justify-center gap-2 text-dark-400 hover:text-dark-300"
             >
               <ArrowLeft size={16} />
-              Volver al inicio de sesión
+              {t('auth.reset.backToLogin')}
             </Link>
           </div>
         </div>

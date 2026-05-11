@@ -1,0 +1,3 @@
+/*! For license information please see 44919.db7cfd09.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[44919],{44919(n,e,i){i.r(e),i.d(e,{default:()=>l});const l=(0,i(21639).A)("TrendingUp",[["polyline",{points:"22 7 13.5 15.5 8.5 10.5 2 17",key:"126l90"}],["polyline",{points:"16 7 22 7 22 13",key:"kwv8wd"}]])}}]);
+//# sourceMappingURL=44919.db7cfd09.chunk.js.map

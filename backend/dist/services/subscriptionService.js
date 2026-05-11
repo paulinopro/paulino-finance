@@ -24,6 +24,11 @@ function resolveBillingIntervalForRow(row) {
         return 'yearly';
     return null;
 }
+/**
+ * Módulos permitidos para el usuario: super admin = todos; si no, proviene de
+ * `subscription_plans.enabled_modules` del plan vinculado a `user_subscriptions` (solo filas
+ * con suscripción activa/trialing y periodo no vencido). Ver `modulesFromJson`.
+ */
 async function getAllowedModulesForUserId(userId) {
     const admin = await (0, database_1.query)(`SELECT is_super_admin FROM users WHERE id = $1`, [userId]);
     if (admin.rows[0]?.is_super_admin === true) {

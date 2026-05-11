@@ -1,6 +1,10 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { isCurrencyAllowedForAccount, recordBankAccountMovement } from '../services/accountBalance';
+import { getUserCurrencyPair } from '../utils/userCurrencyPair';
+
+const BAL_EPS = 1e-9;
 
 export const getAccounts = async (req: AuthRequest, res: Response) => {
   try {
@@ -137,6 +141,59 @@ export const getAccount = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const listBankAccountMovements = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const accountId = parseInt(req.params.id);
+    if (Number.isNaN(accountId)) {
+      return res.status(400).json({ message: 'Invalid account id' });
+    }
+
+    const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
+    const offset = Math.max(parseInt(String(req.query.offset || '0'), 10) || 0, 0);
+
+    const own = await query('SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2', [
+      accountId,
+      userId,
+    ]);
+    if (own.rows.length === 0) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    const [result, countR] = await Promise.all([
+      query(
+        `SELECT id, amount, currency, direction, description, status, occurred_at
+         FROM bank_account_movements
+         WHERE user_id = $1 AND bank_account_id = $2
+         ORDER BY occurred_at DESC, id DESC
+         LIMIT $3 OFFSET $4`,
+        [userId, accountId, limit, offset]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS c FROM bank_account_movements WHERE user_id = $1 AND bank_account_id = $2`,
+        [userId, accountId]
+      ),
+    ]);
+
+    res.json({
+      success: true,
+      movements: result.rows.map((r) => ({
+        id: r.id,
+        amount: parseFloat(r.amount),
+        currency: r.currency,
+        direction: r.direction,
+        description: r.description,
+        status: r.status,
+        occurredAt: r.occurred_at,
+      })),
+      total: countR.rows[0]?.c ?? 0,
+    });
+  } catch (error: any) {
+    console.error('List account movements error:', error);
+    res.status(500).json({ message: 'Error listing movements', error: error.message });
+  }
+};
+
 export const createAccount = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -169,6 +226,33 @@ export const createAccount = async (req: AuthRequest, res: Response) => {
     );
 
     const row = result.rows[0];
+    const accId = row.id as number;
+    const ct = row.currency_type as string;
+    const bd = parseFloat(row.balance_dop || 0);
+    const bu = parseFloat(row.balance_usd || 0);
+    const pair = await getUserCurrencyPair(userId);
+
+    if (isCurrencyAllowedForAccount(ct, pair.primary, pair) && bd > BAL_EPS) {
+      await recordBankAccountMovement(
+        userId,
+        accId,
+        pair.primary,
+        'IN',
+        bd,
+        `Saldo inicial (${pair.primary})`
+      );
+    }
+    if (isCurrencyAllowedForAccount(ct, pair.secondary, pair) && bu > BAL_EPS) {
+      await recordBankAccountMovement(
+        userId,
+        accId,
+        pair.secondary,
+        'IN',
+        bu,
+        `Saldo inicial (${pair.secondary})`
+      );
+    }
+
     res.status(201).json({
       success: true,
       message: 'Account created successfully',
@@ -199,13 +283,17 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
       req.body;
 
     const checkResult = await query(
-      'SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2',
+      `SELECT id, balance_dop, balance_usd, currency_type FROM bank_accounts WHERE id = $1 AND user_id = $2`,
       [accountId, userId]
     );
 
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ message: 'Account not found' });
     }
+
+    const prev = checkResult.rows[0];
+    const oldDop = parseFloat(prev.balance_dop || 0);
+    const oldUsd = parseFloat(prev.balance_usd || 0);
 
     const kindUpdate =
       accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : null;
@@ -237,6 +325,38 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
     );
 
     const row = result.rows[0];
+    const ct = row.currency_type as string;
+    const newDop = parseFloat(row.balance_dop || 0);
+    const newUsd = parseFloat(row.balance_usd || 0);
+    const pair = await getUserCurrencyPair(userId);
+
+    if (isCurrencyAllowedForAccount(ct, pair.primary, pair)) {
+      const dDop = newDop - oldDop;
+      if (Math.abs(dDop) > BAL_EPS) {
+        await recordBankAccountMovement(
+          userId,
+          accountId,
+          pair.primary,
+          dDop > 0 ? 'IN' : 'OUT',
+          Math.abs(dDop),
+          `Ajuste manual de balance (${pair.primary})`
+        );
+      }
+    }
+    if (isCurrencyAllowedForAccount(ct, pair.secondary, pair)) {
+      const dUsd = newUsd - oldUsd;
+      if (Math.abs(dUsd) > BAL_EPS) {
+        await recordBankAccountMovement(
+          userId,
+          accountId,
+          pair.secondary,
+          dUsd > 0 ? 'IN' : 'OUT',
+          Math.abs(dUsd),
+          `Ajuste manual de balance (${pair.secondary})`
+        );
+      }
+    }
+
     res.json({
       success: true,
       message: 'Account updated successfully',

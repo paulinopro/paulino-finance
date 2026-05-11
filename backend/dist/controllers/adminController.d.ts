@@ -1,11 +1,13 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-export declare const getAdminStats: (_req: AuthRequest, res: Response) => Promise<void>;
+export declare const getAdminStats: (_req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 /**
  * Conteos ligeros para cierre del criterio de “periodo sin nulos”.
  * No modifica datos; el arreglo es SQL manual o webhooks a futuro.
  */
 export declare const getAdminSubscriptionDataQuality: (_req: AuthRequest, res: Response) => Promise<void>;
+/** Estado del cron de notificaciones (node-cron) — sólo lectura. */
+export declare const getAdminNotificationScheduler: (_req: AuthRequest, res: Response) => void;
 export declare const getAdminHealth: (_req: AuthRequest, res: Response) => Promise<void>;
 export declare const listAdminAuditLog: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;
 export declare const listUsers: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>> | undefined>;

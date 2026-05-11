@@ -1,0 +1,135 @@
+{
+  "types": {
+    "expenses": { "title": "Expenses", "description": "Movements by status and category" },
+    "loans": { "title": "Loans", "description": "Active, paid, and balances" },
+    "cards": { "title": "Cards", "description": "Limits, debt, and available credit" },
+    "accounts": { "title": "Accounts", "description": "DOP and USD balances" },
+    "comprehensive": { "title": "Full", "description": "Portfolio-wide overview" }
+  },
+  "summary": {
+    "total": "Records / total",
+    "paid": "Paid",
+    "pending": "Pending",
+    "active": "Active",
+    "totalPaid": "Total paid",
+    "totalPending": "Total pending",
+    "totalActive": "Total active",
+    "totalDebt": "Total debt",
+    "totalLimit": "Total limit",
+    "totalBalance": "Total balance (DOP eq.)",
+    "totalBalanceDop": "DOP balance",
+    "totalBalanceUsd": "USD balance",
+    "savings": "Savings accounts",
+    "checking": "Checking accounts",
+    "totalCardDebt": "Credit card debt",
+    "totalLoanDebt": "Loan debt",
+    "netWorth": "Net worth"
+  },
+  "reportResultTitle": {
+    "comprehensive": "Full report — portfolio overview",
+    "typed": "{{type}} report"
+  },
+  "periodPreset": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "this_week": "This week",
+    "this_month": "This month",
+    "last_month": "Last month",
+    "last_7_days": "Last 7 days",
+    "last_30_days": "Last 30 days",
+    "this_year": "This year",
+    "custom": "Custom"
+  },
+  "pdfSlug": {
+    "expenses": "expenses",
+    "loans": "loans",
+    "cards": "cards",
+    "accounts": "accounts",
+    "comprehensive": "full"
+  },
+  "pdfFilenamePrefix": "report",
+  "ui": {
+    "reportTypeSection": "Report type",
+    "filtersSection": "Filters",
+    "periodLabel": "Period",
+    "dateFrom": "From date",
+    "dateTo": "To date",
+    "statusLabel": "Status",
+    "statusPendingExpenses": "Pending",
+    "statusPendingLoans": "Active (unpaid)",
+    "loading": "Generating…",
+    "resultSection": "Result",
+    "periodLine": "Period: {{range}}"
+  },
+  "statusFilter": {
+    "all": "All",
+    "paid": "Paid",
+    "pending": "Pending"
+  },
+  "actions": {
+    "generate": "Generate report",
+    "exportPdf": "Export PDF"
+  },
+  "emptyState": "Generate a report to see data here.",
+  "tables": {
+    "common": {
+      "na": "N/A",
+      "description": "Description",
+      "amount": "Amount",
+      "category": "Category",
+      "status": "Status",
+      "bank": "Bank",
+      "loan": "Loan",
+      "totalAmount": "Total amount",
+      "progress": "Progress",
+      "card": "Card",
+      "limit": "Limit",
+      "debt": "Debt",
+      "available": "Available",
+      "type": "Type",
+      "number": "Number",
+      "balanceDop": "DOP balance",
+      "balanceUsd": "USD balance"
+    },
+    "expenses": {
+      "emptyPeriod": "No expenses in the selected period."
+    },
+    "loans": {
+      "emptyPeriod": "No loans in the selected period."
+    },
+    "cards": {
+      "empty": "No cards match the criteria."
+    },
+    "accounts": {
+      "empty": "No accounts on file."
+    }
+  },
+  "expenseStatus": {
+    "paid": "Paid",
+    "pending": "Pending"
+  },
+  "loanStatus": {
+    "paid": "Paid",
+    "active": "Active",
+    "delinquent": "Delinquent"
+  },
+  "accountType": {
+    "savings": "Savings",
+    "checking": "Checking"
+  },
+  "comprehensive": {
+    "overviewTitle": "Overview",
+    "balanceTotal": "Total balance",
+    "expensesSection": "Expenses",
+    "loansSection": "Loans",
+    "cardsSection": "Credit cards",
+    "accountsSection": "Bank accounts"
+  },
+  "pagination": {
+    "expenses": "expenses",
+    "loans": "loans",
+    "cards": "cards",
+    "accounts": "accounts",
+    "rows": "rows"
+  }
+}

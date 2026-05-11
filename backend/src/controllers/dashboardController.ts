@@ -22,7 +22,12 @@ import {
   getExpenseOccurrenceDatesInPeriod,
   getFixedIncomeOccurrenceDates,
 } from '../utils/dateUtils';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import {
+  amountToPrimary,
+  bankBalancesToPrimary,
+  getConversionContextForUser,
+  type UserConversionContext,
+} from '../services/userCurrencyConversion';
 
 const FIN_HEALTH_EPS = 1e-9;
 
@@ -30,6 +35,22 @@ function mergeCategoryTotals(target: { [key: string]: number }, delta: { [key: s
   for (const [k, v] of Object.entries(delta)) {
     target[k] = (target[k] || 0) + v;
   }
+}
+
+/** Deuda tarjetas (columnas DOP/USD) + préstamos en cualquier divisa → total en moneda principal. */
+function totalDebtInPrimary(
+  totalCardDebtDop: number,
+  totalCardDebtUsd: number,
+  loansRows: Array<{ total_amount: string; total_paid: string; currency: string }>,
+  ctx: UserConversionContext
+): { total: number; cardsInPrimary: number; loansInPrimary: number } {
+  const cardsInPrimary = bankBalancesToPrimary(totalCardDebtDop, totalCardDebtUsd, ctx);
+  let loansInPrimary = 0;
+  for (const loan of loansRows) {
+    const remaining = parseFloat(loan.total_amount) - parseFloat(loan.total_paid);
+    loansInPrimary += amountToPrimary(remaining, String(loan.currency || 'DOP'), ctx);
+  }
+  return { total: cardsInPrimary + loansInPrimary, cardsInPrimary, loansInPrimary };
 }
 
 function fixedIncomeScheduleFromRow(row: {
@@ -63,13 +84,13 @@ function otherFreqExpenseTotalsInPeriod(
   }>,
   periodStart: Date,
   periodEnd: Date,
-  exchangeRate: number
+  ctx: UserConversionContext
 ): { byCategory: { [key: string]: number }; totalDop: number } {
   const byCategory: { [key: string]: number } = {};
   let totalDop = 0;
   for (const row of rows) {
     const amount = parseFloat(row.amount);
-    const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+    const amountDop = amountToPrimary(amount, row.currency, ctx);
     const n = getExpenseOccurrenceDatesInPeriod(
       {
         frequency: row.frequency,
@@ -165,12 +186,8 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
 
-    // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     // Total assets (bank accounts)
     const accountsResult = await query(
@@ -198,8 +215,8 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     const bankUsd = parseFloat(bk.bank_usd || 0);
     const cashDop = parseFloat(bk.cash_dop || 0);
     const cashUsd = parseFloat(bk.cash_usd || 0);
-    const bankDopUnified = bankDop + bankUsd * exchangeRate;
-    const cashDopUnified = cashDop + cashUsd * exchangeRate;
+    const bankDopUnified = bankBalancesToPrimary(bankDop, bankUsd, ctx);
+    const cashDopUnified = bankBalancesToPrimary(cashDop, cashUsd, ctx);
 
     // Total debts (credit cards + loans)
     const cardsResult = await query(
@@ -223,13 +240,13 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
 
     let totalLoanDebtDop = 0;
     let totalLoanDebtUsd = 0;
+    let totalLoanDebtPrimary = 0;
     loansResult.rows.forEach((loan) => {
       const remaining = parseFloat(loan.total_amount) - parseFloat(loan.total_paid);
-      if (loan.currency === 'DOP') {
-        totalLoanDebtDop += remaining;
-      } else if (loan.currency === 'USD') {
-        totalLoanDebtUsd += remaining;
-      }
+      const cur = String(loan.currency || 'DOP').toUpperCase();
+      if (cur === 'DOP') totalLoanDebtDop += remaining;
+      else if (cur === 'USD') totalLoanDebtUsd += remaining;
+      totalLoanDebtPrimary += amountToPrimary(remaining, cur, ctx);
     });
 
     const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop;
@@ -239,10 +256,10 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     const netWorthDop = totalAssetsDop - totalDebtsDop;
     const netWorthUsd = totalAssetsUsd - totalDebtsUsd;
 
-    // Convert everything to DOP for unified view
-    const totalAssetsDopUnified = totalAssetsDop + (totalAssetsUsd * exchangeRate);
-    const totalDebtsDopUnified = totalDebtsDop + (totalDebtsUsd * exchangeRate);
-    const netWorthDopUnified = netWorthDop + (netWorthUsd * exchangeRate);
+    const totalAssetsDopUnified = bankBalancesToPrimary(totalAssetsDop, totalAssetsUsd, ctx);
+    const cardDebtPrimary = bankBalancesToPrimary(totalCardDebtDop, totalCardDebtUsd, ctx);
+    const totalDebtsDopUnified = cardDebtPrimary + totalLoanDebtPrimary;
+    const netWorthDopUnified = totalAssetsDopUnified - totalDebtsDopUnified;
 
     // Accounts Payable (Pending)
     const accountsPayableResult = await query(
@@ -257,7 +274,7 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     accountsPayableResult.rows.forEach((row) => {
       accountsPayableCount += parseInt(row.count);
       const amount = parseFloat(row.total || 0);
-      accountsPayableTotalDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      accountsPayableTotalDop += amountToPrimary(amount, String(row.currency || 'DOP'), ctx);
     });
 
     // Accounts Receivable (Pending)
@@ -273,7 +290,7 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
     accountsReceivableResult.rows.forEach((row) => {
       accountsReceivableCount += parseInt(row.count);
       const amount = parseFloat(row.total || 0);
-      accountsReceivableTotalDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      accountsReceivableTotalDop += amountToPrimary(amount, String(row.currency || 'DOP'), ctx);
     });
 
     // Active Budgets
@@ -378,6 +395,8 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
         loans: loansCount,
         vehicles: vehiclesCount,
         exchangeRate,
+        primaryCurrency: ctx.pair.primary,
+        secondaryCurrency: ctx.pair.secondary,
       },
     });
   } catch (error: any) {
@@ -395,11 +414,8 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     const currentYear = year ? parseInt(year as string) : new Date().getFullYear();
 
     // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     const monthStart = new Date(currentYear, currentMonth - 1, 1);
     const monthEnd = new Date(currentYear, currentMonth, 0);
@@ -419,7 +435,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     expensesResult.rows.forEach((row) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
 
@@ -431,7 +447,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     );
     mergeCategoryTotals(
       expensesByCategory,
-      otherFreqExpenseTotalsInPeriod(otherFreqStats.rows, monthStart, monthEnd, exchangeRate).byCategory
+      otherFreqExpenseTotalsInPeriod(otherFreqStats.rows, monthStart, monthEnd, ctx).byCategory
     );
 
     // Ingreso del mes: puntual en el mes + recurrentes expandidos
@@ -447,7 +463,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
     let totalIncomeDop = 0;
     incomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const fixedIncomeStatsResult = await query(
@@ -459,7 +475,7 @@ export const getStats = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeStatsResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
         monthStart,
@@ -536,11 +552,8 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     const currentYear = year ? parseInt(year as string) : new Date().getFullYear();
 
     // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     // Monthly income - variable income + fixed income for this month
     const monthStart = new Date(currentYear, currentMonth - 1, 1);
@@ -560,7 +573,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     let totalIncomeDop = 0;
     incomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const fixedIncomeResult = await query(
@@ -572,7 +585,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
 
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -595,7 +608,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     let totalExpensesDop = 0;
     expensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const otherFreqMonth = await query(
@@ -608,7 +621,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       otherFreqMonth.rows,
       monthStart,
       monthEnd,
-      exchangeRate
+      ctx
     );
     totalExpensesDop += otherMonthTotals.totalDop;
 
@@ -625,7 +638,7 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     expensesByCategoryResult.rows.forEach((row) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
     mergeCategoryTotals(expensesByCategory, otherMonthTotals.byCategory);
@@ -661,7 +674,8 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
+    const debtP = totalDebtInPrimary(totalCardDebtDop, totalCardDebtUsd, loansResult.rows, ctx);
+    const totalDebtsDop = debtP.total;
 
     const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
       computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
@@ -687,13 +701,13 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     let prevIncomeDop = 0;
     prevIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     // Add fixed income for previous month
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
 
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -716,13 +730,13 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
     let prevExpensesDop = 0;
     prevExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
     prevExpensesDop += otherFreqExpenseTotalsInPeriod(
       otherFreqMonth.rows,
       prevMonthStart,
       prevMonthEnd,
-      exchangeRate
+      ctx
     ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
@@ -748,8 +762,8 @@ export const getMonthlyHealth = async (req: AuthRequest, res: Response) => {
         },
         debts: {
           total: totalDebtsDop,
-          cards: totalCardDebtDop + totalCardDebtUsd * exchangeRate,
-          loans: totalLoanDebtDop + totalLoanDebtUsd * exchangeRate,
+          cards: debtP.cardsInPrimary,
+          loans: debtP.loansInPrimary,
         },
         ratios: {
           debtToIncome: debtToIncomeRatio,
@@ -773,11 +787,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     const currentYear = year ? parseInt(year as string) : new Date().getFullYear();
 
     // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     const incomeResult = await query(
       `SELECT 
@@ -797,7 +808,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     incomeResult.rows.forEach((row) => {
       const month = parseInt(row.month);
       const amount = parseFloat(row.total || 0);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       monthlyIncome[month] = (monthlyIncome[month] || 0) + amountDop;
       totalIncomeDop += amountDop;
     });
@@ -815,7 +826,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -854,7 +865,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     expensesResult.rows.forEach((row) => {
       const month = parseInt(row.month);
       const amount = parseFloat(row.total || 0);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       monthlyExpenses[month] = (monthlyExpenses[month] || 0) + amountDop;
       totalExpensesDop += amountDop;
     });
@@ -869,7 +880,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
 
     recurringExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       for (let month = 1; month <= 12; month++) {
         monthlyExpenses[month] = (monthlyExpenses[month] || 0) + amountDop;
       }
@@ -893,7 +904,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     expensesByCategoryResult.rows.forEach((row) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       const monthlyRec = isMonthlyRecurringExpenseRow(row);
       const finalAmount = monthlyRec ? amountDop * 12 : amountDop;
       expensesByCategory[category] = (expensesByCategory[category] || 0) + finalAmount;
@@ -909,7 +920,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       const ms = new Date(currentYear, m - 1, 1);
       const me = new Date(currentYear, m, 0);
       me.setHours(23, 59, 59, 999);
-      const t = otherFreqExpenseTotalsInPeriod(otherFreqAnnual.rows, ms, me, exchangeRate);
+      const t = otherFreqExpenseTotalsInPeriod(otherFreqAnnual.rows, ms, me, ctx);
       monthlyExpenses[m] = (monthlyExpenses[m] || 0) + t.totalDop;
       totalExpensesDop += t.totalDop;
       mergeCategoryTotals(expensesByCategory, t.byCategory);
@@ -946,7 +957,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
+    const debtP = totalDebtInPrimary(totalCardDebtDop, totalCardDebtUsd, loansResult.rows, ctx);
+    const totalDebtsDop = debtP.total;
 
     const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
       computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
@@ -978,7 +990,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     let prevIncomeDop = 0;
     prevIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     // Add fixed income for previous year
@@ -988,7 +1000,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -1014,12 +1026,12 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
     let prevExpensesDop = 0;
     prevExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     recurringExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       prevExpensesDop += amountDop * 12;
     });
 
@@ -1027,7 +1039,7 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
       otherFreqAnnual.rows,
       prevYearStart,
       prevYearEnd,
-      exchangeRate
+      ctx
     ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
@@ -1055,8 +1067,8 @@ export const getAnnualHealth = async (req: AuthRequest, res: Response) => {
         },
         debts: {
           total: totalDebtsDop,
-          cards: totalCardDebtDop + totalCardDebtUsd * exchangeRate,
-          loans: totalLoanDebtDop + totalLoanDebtUsd * exchangeRate,
+          cards: debtP.cardsInPrimary,
+          loans: debtP.loansInPrimary,
         },
         ratios: {
           debtToIncome: debtToIncomeRatio,
@@ -1084,11 +1096,8 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     const targetDay = targetDate.getDate();
 
     // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     const targetDateObj = new Date(targetYear, targetMonth - 1, targetDay);
     const dayRangeStart = new Date(targetYear, targetMonth - 1, targetDay, 0, 0, 0, 0);
@@ -1106,7 +1115,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     let totalIncomeDop = 0;
     incomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const fixedIncomeResult = await query(
@@ -1118,7 +1127,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const dayStr = dateToYmdLocal(targetDateObj);
       const occ = getFixedIncomeOccurrenceDates(
@@ -1145,7 +1154,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     let totalExpensesDop = 0;
     expensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const expensesByCategoryResult = await query(
@@ -1161,7 +1170,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     expensesByCategoryResult.rows.forEach((row) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
 
@@ -1171,7 +1180,7 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
        WHERE user_id = $1 AND ( ${EXPENSE_RECURRING_OTHER_FREQ} )`,
       [userId]
     );
-    const otherDay = otherFreqExpenseTotalsInPeriod(otherFreqDayRows.rows, dayRangeStart, dayRangeEnd, exchangeRate);
+    const otherDay = otherFreqExpenseTotalsInPeriod(otherFreqDayRows.rows, dayRangeStart, dayRangeEnd, ctx);
     totalExpensesDop += otherDay.totalDop;
     mergeCategoryTotals(expensesByCategory, otherDay.byCategory);
 
@@ -1206,7 +1215,8 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
+    const debtP = totalDebtInPrimary(totalCardDebtDop, totalCardDebtUsd, loansResult.rows, ctx);
+    const totalDebtsDop = debtP.total;
 
     const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
       computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
@@ -1230,14 +1240,14 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     let prevIncomeDop = 0;
     prevIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     // Add fixed income for previous day
     const prevDateObj = new Date(prevYear, prevMonth - 1, prevDay);
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const prevDayStr = dateToYmdLocal(prevDateObj);
       const occPrev = getFixedIncomeOccurrenceDates(
@@ -1267,13 +1277,13 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
     let prevExpensesDop = 0;
     prevExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
     prevExpensesDop += otherFreqExpenseTotalsInPeriod(
       otherFreqDayRows.rows,
       prevDayRangeStart,
       prevDayRangeEnd,
-      exchangeRate
+      ctx
     ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
@@ -1298,8 +1308,8 @@ export const getDailyHealth = async (req: AuthRequest, res: Response) => {
         },
         debts: {
           total: totalDebtsDop,
-          cards: totalCardDebtDop + totalCardDebtUsd * exchangeRate,
-          loans: totalLoanDebtDop + totalLoanDebtUsd * exchangeRate,
+          cards: debtP.cardsInPrimary,
+          loans: debtP.loansInPrimary,
         },
         ratios: {
           debtToIncome: debtToIncomeRatio,
@@ -1337,11 +1347,8 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     endDate.setHours(23, 59, 59, 999);
 
     // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
+    const exchangeRate = ctx.pairRateSecondaryPerPrimary;
 
     const incomeResult = await query(
       `SELECT SUM(amount) as total, currency
@@ -1355,7 +1362,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     let totalIncomeDop = 0;
     incomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const fixedIncomeResult = await query(
@@ -1367,7 +1374,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -1390,7 +1397,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     let totalExpensesDop = 0;
     expensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     const recurringAllWeek = await query(
@@ -1404,7 +1411,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
          )`,
       [userId]
     );
-    const recWeek = otherFreqExpenseTotalsInPeriod(recurringAllWeek.rows, startDate, endDate, exchangeRate);
+    const recWeek = otherFreqExpenseTotalsInPeriod(recurringAllWeek.rows, startDate, endDate, ctx);
     totalExpensesDop += recWeek.totalDop;
 
     const expensesByCategoryResult = await query(
@@ -1420,7 +1427,7 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     expensesByCategoryResult.rows.forEach((row) => {
       const category = row.category || 'Sin categoría';
       const amount = parseFloat(row.total);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       expensesByCategory[category] = (expensesByCategory[category] || 0) + amountDop;
     });
     mergeCategoryTotals(expensesByCategory, recWeek.byCategory);
@@ -1456,7 +1463,8 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const totalDebtsDop = totalCardDebtDop + totalLoanDebtDop + (totalCardDebtUsd + totalLoanDebtUsd) * exchangeRate;
+    const debtP = totalDebtInPrimary(totalCardDebtDop, totalCardDebtUsd, loansResult.rows, ctx);
+    const totalDebtsDop = debtP.total;
 
     const { savings, savingsRate, debtToIncomeRatio, expenseToIncomeRatio, healthScore } =
       computeFinancialHealthMetrics(totalIncomeDop, totalExpensesDop, totalDebtsDop);
@@ -1480,12 +1488,12 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     let prevIncomeDop = 0;
     prevIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevIncomeDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevIncomeDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     fixedIncomeResult.rows.forEach((row) => {
       const amount = parseFloat(row.amount);
-      const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+      const amountDop = amountToPrimary(amount, row.currency, ctx);
       
       const dates = getFixedIncomeOccurrenceDates(
         fixedIncomeScheduleFromRow(row),
@@ -1508,14 +1516,14 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
     let prevExpensesDop = 0;
     prevExpensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      prevExpensesDop += row.currency === 'USD' ? amount * exchangeRate : amount;
+      prevExpensesDop += amountToPrimary(amount, row.currency, ctx);
     });
 
     prevExpensesDop += otherFreqExpenseTotalsInPeriod(
       recurringAllWeek.rows,
       prevStartDate,
       prevEndDate,
-      exchangeRate
+      ctx
     ).totalDop;
 
     const incomeChange = prevIncomeDop > 0 ? ((totalIncomeDop - prevIncomeDop) / prevIncomeDop) * 100 : 0;
@@ -1541,8 +1549,8 @@ export const getWeeklyHealth = async (req: AuthRequest, res: Response) => {
         },
         debts: {
           total: totalDebtsDop,
-          cards: totalCardDebtDop + totalCardDebtUsd * exchangeRate,
-          loans: totalLoanDebtDop + totalLoanDebtUsd * exchangeRate,
+          cards: debtP.cardsInPrimary,
+          loans: debtP.loansInPrimary,
         },
         ratios: {
           debtToIncome: debtToIncomeRatio,

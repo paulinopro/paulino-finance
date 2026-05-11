@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
@@ -39,10 +40,9 @@ import type { AppNotification } from '../types';
 import toast from 'react-hot-toast';
 import OfflineBanner from './OfflineBanner';
 import TablePagination from './TablePagination';
-import { TABLE_PAGE_SIZE } from '../constants/pagination';
-import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
+import { TABLE_PAGE_SIZE_LAYOUT_NOTIFICATIONS } from '../constants/pagination';
 import MobileTabBar from './MobileTabBar';
-import SystemNotificationBody from './SystemNotificationBody';
+import NotificationBellListRow from './NotificationBellListRow';
 import { useForegroundPushNotifications } from '../hooks/useForegroundPushNotifications';
 import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useMobileTabBarVisible } from '../hooks/useMobileTabBarVisible';
@@ -52,6 +52,7 @@ import { LAYOUT_DESKTOP_SHELL_MEDIA } from '../constants/layout';
 const SIDEBAR_COLLAPSED_KEY = 'paulino-sidebar-collapsed';
 
 interface MenuItem {
+  menuKey: string;
   label: string;
   path?: string;
   icon: React.ComponentType<any>;
@@ -90,6 +91,15 @@ function pathToModule(pathname: string): string | null {
   return map[first] ?? null;
 }
 
+/** Claves i18n cortas para etiquetas del panel del campanario. */
+const HEADER_NOTIF_I18N_KEY: Record<string, 'card' | 'loan' | 'recurring' | 'system'> = {
+  CARD_PAYMENT: 'card',
+  LOAN_PAYMENT: 'loan',
+  RECURRING_EXPENSE: 'recurring',
+  SYSTEM: 'system',
+};
+type BellTabId = 'unread' | 'read';
+
 function filterMenuBySubscription(
   items: MenuItem[],
   hasModule: (k: string) => boolean
@@ -124,38 +134,57 @@ const Layout: React.FC = () => {
   );
   const [expandedMenus, setExpandedMenus] = useState<{ [key: string]: boolean }>({});
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [bellTab, setBellTab] = useState<BellTabId>('unread');
+  const [unreadBadgeCount, setUnreadBadgeCount] = useState(0);
+  const [bellPanelTotal, setBellPanelTotal] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationPage, setNotificationPage] = useState(1);
   const [notificationTotalPages, setNotificationTotalPages] = useState(1);
-  const { pageSize: headerNotifLimit, setPageSize: setHeaderNotifLimit, pageSizeOptions: headerNotifPageSizeOptions } =
-    usePersistedTablePageSize('pf:pageSize:layoutNotifications', TABLE_PAGE_SIZE);
   const [publicMaintenanceMode, setPublicMaintenanceMode] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const notificationsButtonRef = useRef<HTMLButtonElement>(null);
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const response = await api.get('/notifications', {
-        params: {
-          unreadOnly: true,
-          page: notificationPage,
-          limit: 10, // 10 notifications per page in header
-        },
-      });
-      setNotifications(response.data.notifications || []);
-      setUnreadCount(response.data.pagination?.total || 0);
-      setNotificationTotalPages(response.data.pagination?.totalPages || 1);
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    }
-  }, [notificationPage, headerNotifLimit]);
-
   const { user, logout, impersonatedBy, stopImpersonation } = useAuth();
 
-  useEffect(() => {
-    setNotificationPage(1);
-  }, [headerNotifLimit]);
+  const fetchUnreadBadgeCount = useCallback(async () => {
+    if (!user?.id) {
+      setUnreadBadgeCount(0);
+      return;
+    }
+    try {
+      const response = await api.get('/notifications', {
+        params: { unreadOnly: true, page: 1, limit: 1 },
+      });
+      setUnreadBadgeCount(response.data.pagination?.total || 0);
+    } catch (error) {
+      console.error('Error fetching unread badge count:', error);
+    }
+  }, [user?.id]);
+
+  const fetchBellPanelNotifications = useCallback(async () => {
+    if (!user?.id) {
+      setNotifications([]);
+      setBellPanelTotal(0);
+      setNotificationTotalPages(1);
+      return;
+    }
+    try {
+      const params: Record<string, string | number | boolean> = {
+        page: notificationPage,
+        limit: TABLE_PAGE_SIZE_LAYOUT_NOTIFICATIONS,
+      };
+      if (bellTab === 'unread') params.unreadOnly = true;
+      else params.readOnly = true;
+      const response = await api.get('/notifications', { params });
+      setNotifications(response.data.notifications || []);
+      const total = response.data.pagination?.total || 0;
+      setBellPanelTotal(total);
+      setNotificationTotalPages(response.data.pagination?.totalPages || 1);
+    } catch (error) {
+      console.error('Error fetching bell notifications:', error);
+    }
+  }, [bellTab, notificationPage, user?.id]);
+
   const {
     hasModule,
     subscription,
@@ -166,6 +195,20 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const showMobileTabBar = useMobileTabBarVisible();
+  const { t } = useTranslation();
+
+  const shortNotifLabel = useCallback(
+    (type: string) => {
+      const k = HEADER_NOTIF_I18N_KEY[type];
+      if (k) return t(`notifTypes.${k}`);
+      return type
+        .split('_')
+        .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+        .join(' ')
+        .slice(0, 24);
+    },
+    [t]
+  );
 
   useForegroundPushNotifications(notifications, user?.id);
 
@@ -178,74 +221,86 @@ const Layout: React.FC = () => {
   const menuItems: MenuItem[] = useMemo(
     () => [
       ...(user?.isSuperAdmin && impersonatedBy == null
-        ? ([{ path: '/admin', label: 'Consola de administración', icon: Shield }] as MenuItem[])
+        ? ([
+            {
+              menuKey: 'admin_console',
+              path: '/admin',
+              label: t('nav.adminConsole'),
+              icon: Shield,
+            },
+          ] as MenuItem[])
         : []),
-      { path: '/', label: 'Resumen', icon: LayoutDashboard, module: 'dashboard' },
+      { menuKey: 'summary', path: '/', label: t('nav.summary'), icon: LayoutDashboard, module: 'dashboard' },
       {
-        label: 'Finanzas',
+        menuKey: 'finances',
+        label: t('nav.finances'),
         icon: DollarSign,
         children: [
-          { path: '/accounts', label: 'Cuentas', icon: Wallet, module: 'accounts' },
-          { path: '/income', label: 'Ingresos', icon: TrendingUp, module: 'income' },
-          { path: '/expenses', label: 'Gastos', icon: TrendingDown, module: 'expenses' },
-          { path: '/cards', label: 'Tarjetas', icon: CreditCard, module: 'cards' },
-          { path: '/loans', label: 'Préstamos', icon: Receipt, module: 'loans' },
-          { path: '/accounts-payable', label: 'Por Pagar', icon: FileText, module: 'accounts_payable' },
-          { path: '/accounts-receivable', label: 'Por Cobrar', icon: WalletIcon, module: 'accounts_receivable' },
+          { menuKey: 'accounts', path: '/accounts', label: t('nav.accounts'), icon: Wallet, module: 'accounts' },
+          { menuKey: 'income', path: '/income', label: t('nav.income'), icon: TrendingUp, module: 'income' },
+          { menuKey: 'expenses', path: '/expenses', label: t('nav.expenses'), icon: TrendingDown, module: 'expenses' },
+          { menuKey: 'cards', path: '/cards', label: t('nav.cards'), icon: CreditCard, module: 'cards' },
+          { menuKey: 'loans', path: '/loans', label: t('nav.loans'), icon: Receipt, module: 'loans' },
+          { menuKey: 'accounts_payable', path: '/accounts-payable', label: t('nav.accountsPayable'), icon: FileText, module: 'accounts_payable' },
+          { menuKey: 'accounts_receivable', path: '/accounts-receivable', label: t('nav.accountsReceivable'), icon: WalletIcon, module: 'accounts_receivable' },
         ],
       },
       {
-        label: 'Planificación',
+        menuKey: 'planning',
+        label: t('nav.planning'),
         icon: CalendarIcon,
         children: [
-          { path: '/calendar', label: 'Calendario', icon: CalendarIcon, module: 'calendar' },
-          { path: '/budgets', label: 'Presupuestos', icon: FileText, module: 'budgets' },
-          { path: '/financial-goals', label: 'Metas', icon: Target, module: 'financial_goals' },
+          { menuKey: 'calendar', path: '/calendar', label: t('nav.calendar'), icon: CalendarIcon, module: 'calendar' },
+          { menuKey: 'budgets', path: '/budgets', label: t('nav.budgets'), icon: FileText, module: 'budgets' },
+          { menuKey: 'financial_goals', path: '/financial-goals', label: t('nav.financialGoals'), icon: Target, module: 'financial_goals' },
         ],
       },
       {
-        label: 'Análisis',
+        menuKey: 'analysis',
+        label: t('nav.analysis'),
         icon: BarChart3,
         children: [
-          { path: '/reports', label: 'Reportes', icon: FileTextIcon, module: 'reports' },
-          { path: '/cash-flow', label: 'Flujo de Caja', icon: TrendingUpIcon, module: 'cash_flow' },
-          { path: '/projections', label: 'Proyecciones', icon: BarChart3, module: 'projections' },
+          { menuKey: 'reports', path: '/reports', label: t('nav.reports'), icon: FileTextIcon, module: 'reports' },
+          { menuKey: 'cash_flow', path: '/cash-flow', label: t('nav.cashFlow'), icon: TrendingUpIcon, module: 'cash_flow' },
+          { menuKey: 'projections', path: '/projections', label: t('nav.projections'), icon: BarChart3, module: 'projections' },
         ],
       },
       {
-        label: 'Especiales',
+        menuKey: 'specials',
+        label: t('nav.specials'),
         icon: Car,
-        children: [
-          { path: '/vehicles', label: 'Vehículos', icon: Car, module: 'vehicles' },
-        ],
+        children: [{ menuKey: 'vehicles', path: '/vehicles', label: t('nav.vehicles'), icon: Car, module: 'vehicles' }],
       },
       {
-        label: 'Notificaciones',
+        menuKey: 'notifications_group',
+        label: t('nav.notifications'),
         icon: Bell,
         children: [
-          { path: '/notifications/history', label: 'Historial', icon: History, module: 'notifications' },
+          { menuKey: 'notifications_history', path: '/notifications/history', label: t('nav.notificationHistory'), icon: History, module: 'notifications' },
         ],
       },
       {
-        label: 'Suscripción',
+        menuKey: 'subscription_group',
+        label: t('nav.subscription'),
         icon: CreditCard,
         children: [
-          { path: '/subscription', label: 'Planes', icon: CreditCard, module: 'subscription' },
-          { path: '/subscription/payments', label: 'Historial de pagos', icon: Receipt, module: 'subscription' },
+          { menuKey: 'subscription_plans', path: '/subscription', label: t('nav.subscriptionPlans'), icon: CreditCard, module: 'subscription' },
+          { menuKey: 'subscription_payments', path: '/subscription/payments', label: t('nav.subscriptionPaymentHistory'), icon: Receipt, module: 'subscription' },
         ],
       },
       {
-        label: 'Preferencias',
+        menuKey: 'preferences_group',
+        label: t('nav.preferences'),
         icon: Settings,
         children: [
-          { path: '/profile', label: 'Mi perfil', icon: UserCircle, module: 'profile' },
-          { path: '/categories', label: 'Categorías', icon: Tag, module: 'categories' },
-          { path: '/templates', label: 'Plantillas', icon: MessageSquare, module: 'templates' },
-          { path: '/settings', label: 'Configuración', icon: Settings, module: 'settings' },
+          { menuKey: 'profile', path: '/profile', label: t('nav.myProfile'), icon: UserCircle, module: 'profile' },
+          { menuKey: 'categories', path: '/categories', label: t('nav.categories'), icon: Tag, module: 'categories' },
+          { menuKey: 'templates', path: '/templates', label: t('nav.templates'), icon: MessageSquare, module: 'templates' },
+          { menuKey: 'settings', path: '/settings', label: t('nav.settings'), icon: Settings, module: 'settings' },
         ],
       },
     ],
-    [user?.isSuperAdmin, impersonatedBy]
+    [t, user?.isSuperAdmin, impersonatedBy]
   );
 
   const filteredMenuItems = useMemo(
@@ -283,15 +338,13 @@ const Layout: React.FC = () => {
       // Suscripción vencida: hay fila/plan pero sin acceso a módulos — mensaje y destino correctos
       if (subscription?.status === 'expired') {
         if (!p.startsWith('/subscription')) {
-          toast.error('Tu suscripción no está vigente. Renueva o elige un plan para continuar.');
+          toast.error(t('layout.toastSubscriptionExpired'));
           navigate('/subscription', { replace: true });
         }
         return;
       }
       if (p !== '/') {
-        toast.error(
-          'Tu plan actual no incluye esta sección. Puedes cambiar de plan en Planes y suscripción.'
-        );
+        toast.error(t('layout.toastPlanNoModule'));
         navigate('/', { replace: true });
       }
       return;
@@ -307,16 +360,27 @@ const Layout: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // Refresh every 30 seconds
+    void fetchUnreadBadgeCount();
+    const interval = setInterval(() => void fetchUnreadBadgeCount(), 30000);
     return () => clearInterval(interval);
-  }, [fetchNotifications]);
+  }, [fetchUnreadBadgeCount]);
 
   useEffect(() => {
-    if (showNotifications) {
-      setNotificationPage(1);
-    }
-  }, [showNotifications]);
+    void fetchBellPanelNotifications();
+    const interval = setInterval(() => void fetchBellPanelNotifications(), 30000);
+    return () => clearInterval(interval);
+  }, [fetchBellPanelNotifications]);
+
+  useEffect(() => {
+    setNotificationPage(1);
+  }, [bellTab]);
+
+  /** Al abrir el panel solo: no deps de fetchBellPanelNotifications (depende de la página → recreaba el callback al paginar y volvía todo a página 1). */
+  useEffect(() => {
+    if (!showNotifications) return;
+    setNotificationPage(1);
+    void fetchUnreadBadgeCount();
+  }, [showNotifications, fetchUnreadBadgeCount]);
 
   // Close notifications when clicking outside
   useEffect(() => {
@@ -341,28 +405,32 @@ const Layout: React.FC = () => {
     };
   }, [showNotifications]);
 
-  const markAsRead = async (id: number) => {
+  const handleBellNotificationOpen = async (n: AppNotification) => {
     try {
-      await api.put(`/notifications/${id}/read`);
-      fetchNotifications();
+      if (!n.isRead) await api.put(`/notifications/${n.id}/read`);
+      setShowNotifications(false);
+      navigate(`/notifications/history?nid=${encodeURIComponent(String(n.id))}`);
+      await Promise.all([fetchUnreadBadgeCount(), fetchBellPanelNotifications()]);
     } catch (error) {
-      console.error('Error marking notification as read:', error);
+      console.error('Error opening notification:', error);
+      toast.error(t('layout.notificationOpenError'));
     }
   };
 
   const markAllAsRead = async () => {
     try {
       await api.put('/notifications/read-all');
-      fetchNotifications();
+      await Promise.all([fetchUnreadBadgeCount(), fetchBellPanelNotifications()]);
     } catch (error) {
       console.error('Error marking all as read:', error);
+      toast.error(t('layout.markAllReadError'));
     }
   };
 
-  const toggleMenu = (label: string) => {
+  const toggleMenu = (menuKey: string) => {
     setExpandedMenus((prev) => ({
       ...prev,
-      [label]: !prev[label],
+      [menuKey]: !prev[menuKey],
     }));
   };
 
@@ -410,11 +478,11 @@ const Layout: React.FC = () => {
 
   const renderMenuItem = (item: MenuItem, level: number = 0) => {
     const hasChildren = item.children && item.children.length > 0;
-    const isExpanded = expandedMenus[item.label] || isMenuActive(item);
+    const isExpanded = expandedMenus[item.menuKey] || isMenuActive(item);
     const isActive = isMenuActive(item);
 
     return (
-      <div key={item.label}>
+      <div key={item.menuKey}>
         {item.path ? (
           <Link
             to={item.path}
@@ -430,7 +498,8 @@ const Layout: React.FC = () => {
           </Link>
         ) : (
           <button
-            onClick={() => toggleMenu(item.label)}
+            type="button"
+            onClick={() => toggleMenu(item.menuKey)}
             className={`w-full flex items-center justify-between px-3 sm:px-4 py-3.5 sm:py-3 min-h-[48px] rounded-lg transition-colors active:bg-dark-700/80 ${isActive
               ? 'bg-primary-600 text-white'
               : 'text-dark-300 hover:bg-dark-700 hover:text-white'
@@ -482,14 +551,14 @@ const Layout: React.FC = () => {
               <h1
                 className="text-lg sm:text-2xl font-bold truncate bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent"
               >
-                Paulino Finance
+                {t('layout.brandTitle')}
               </h1>
             </div>
             <button
               type="button"
               onClick={closeMobileDrawer}
               className="md:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
-              aria-label="Cerrar menú"
+              aria-label={t('layout.closeMobileMenuAria')}
             >
               <X size={22} />
             </button>
@@ -504,7 +573,7 @@ const Layout: React.FC = () => {
           >
             <Link
               to="/profile"
-              title="Mi perfil"
+              title={t('layout.myProfileAria')}
               onClick={closeMobileDrawer}
               className="flex items-center space-x-3 mb-3 sm:mb-4 px-2 sm:px-4 py-2 rounded-lg transition-colors cursor-pointer hover:bg-dark-700/80 min-h-[48px]"
             >
@@ -526,7 +595,7 @@ const Layout: React.FC = () => {
               className="w-full flex items-center space-x-3 px-3 sm:px-4 py-3.5 rounded-lg text-dark-300 hover:bg-dark-700 hover:text-white transition-colors min-h-[48px]"
             >
               <LogOut size={20} />
-              <span className="font-medium">Cerrar Sesión</span>
+              <span className="font-medium">{t('layout.logout')}</span>
             </button>
           </div>
         </div>
@@ -536,7 +605,7 @@ const Layout: React.FC = () => {
       {!isDesktopShell && sidebarOpen && (
         <button
           type="button"
-          aria-label="Cerrar menú"
+          aria-label={t('layout.closeMobileMenuAria')}
           className="fixed inset-0 bg-black/50 z-40 cursor-default border-0 p-0"
           onClick={closeMobileDrawer}
         />
@@ -556,7 +625,7 @@ const Layout: React.FC = () => {
               type="button"
               onClick={toggleSidebar}
               className="min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] -ml-1 p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80 shrink-0"
-              aria-label={sidebarVisible ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
+              aria-label={sidebarVisible ? t('layout.hideSidebarAria') : t('layout.showSidebarAria')}
               aria-expanded={sidebarVisible}
             >
               {sidebarVisible ? (
@@ -575,93 +644,118 @@ const Layout: React.FC = () => {
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80 transition-colors"
                 aria-expanded={showNotifications}
-                aria-label="Notificaciones"
+                aria-label={t('layout.notificationsAria')}
               >
                 <Bell size={20} />
-                {unreadCount > 0 && (
+                {unreadBadgeCount > 0 && (
                   <span className="absolute top-1 right-1 w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center text-xs text-white">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                    {unreadBadgeCount > 9 ? '9+' : unreadBadgeCount}
                   </span>
                 )}
               </button>
               {showNotifications && (
                 <div
                   ref={notificationsRef}
-                  className="fixed z-[60] left-3 right-3 top-[calc(3rem+env(safe-area-inset-top,0px))] w-auto max-h-[min(70vh,28rem)] overflow-y-auto sm:absolute sm:inset-x-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1.5 sm:w-80 sm:max-h-96 bg-dark-800 border border-dark-700 rounded-xl shadow-xl overscroll-contain"
+                  className="fixed z-[60] left-3 right-3 top-[calc(3rem+env(safe-area-inset-top,0px))] flex max-h-[calc(100svh-5.5rem)] w-auto flex-col overflow-hidden rounded-xl border border-dark-700 bg-dark-800 shadow-xl sm:absolute sm:inset-x-auto sm:left-auto sm:right-0 sm:top-full sm:mt-1.5 sm:max-h-[min(calc(100dvh-5rem),32rem)] sm:w-80 sm:max-w-[min(calc(100vw-14rem),20rem)]"
                 >
-                  <div className="p-4 border-b border-dark-700 flex items-center justify-between">
-                    <h3 className="text-white font-semibold">Notificaciones</h3>
-                    {unreadCount > 0 && (
+                  <div className="flex shrink-0 items-center justify-between gap-2 border-b border-dark-700/90 bg-dark-800 px-2.5 py-2">
+                    <h3 className="truncate text-[0.8125rem] font-semibold tracking-tight text-white">
+                      {t('layout.notificationsHeading')}
+                    </h3>
+                    {bellTab === 'unread' && unreadBadgeCount > 0 && (
                       <button
-                        onClick={markAllAsRead}
-                        className="text-xs text-primary-400 hover:text-primary-300"
+                        type="button"
+                        onClick={() => void markAllAsRead()}
+                        className="shrink-0 text-[0.62rem] font-medium text-primary-400 hover:text-primary-300"
                       >
-                        Marcar todas como leídas
+                        {t('layout.markAllRead')}
                       </button>
                     )}
                   </div>
-                  <div className="divide-y divide-dark-700">
+
+                  <div role="tablist" aria-label={t('layout.bellTabsAria')} className="flex shrink-0 gap-0.5 border-b border-dark-700/80 bg-[rgba(15,23,42,0.45)] px-1.5 py-1.5">
+                    <button
+                      type="button"
+                      role="tab"
+                      id="bell-tab-unread"
+                      aria-selected={bellTab === 'unread'}
+                      aria-controls="bell-panel-notifications-list"
+                      onClick={() => setBellTab('unread')}
+                      className={[
+                        'min-h-[36px] flex-1 rounded-lg px-2 text-[0.6875rem] font-semibold transition-colors',
+                        bellTab === 'unread'
+                          ? 'bg-dark-700 text-white shadow-sm'
+                          : 'text-dark-400 hover:bg-dark-800/95 hover:text-dark-200',
+                      ].join(' ')}
+                    >
+                      {t('layout.newTab')}
+                      {unreadBadgeCount > 0 ? (
+                        <span className="ml-1.5 inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-primary-600 px-1 text-[0.5625rem] font-bold text-white">
+                          {unreadBadgeCount > 99 ? '99+' : unreadBadgeCount}
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="bell-tab-read"
+                      aria-selected={bellTab === 'read'}
+                      aria-controls="bell-panel-notifications-list"
+                      onClick={() => setBellTab('read')}
+                      className={[
+                        'min-h-[36px] flex-1 rounded-lg px-2 text-[0.6875rem] font-semibold transition-colors',
+                        bellTab === 'read'
+                          ? 'bg-dark-700 text-white shadow-sm'
+                          : 'text-dark-400 hover:bg-dark-800/95 hover:text-dark-200',
+                      ].join(' ')}
+                    >
+                      {t('layout.readTab')}
+                    </button>
+                  </div>
+
+                  {/* 5 filas × 3.5rem: sin scroll dentro de la página */}
+                  <div
+                    role="tabpanel"
+                    id="bell-panel-notifications-list"
+                    aria-labelledby={bellTab === 'unread' ? 'bell-tab-unread' : 'bell-tab-read'}
+                    className="flex h-[21rem] w-full shrink-0 flex-col overflow-hidden bg-[rgba(15,23,42,0.35)]"
+                  >
                     {notifications.length === 0 ? (
-                      <div className="p-4 text-center text-dark-400 text-sm">
-                        No hay notificaciones
+                      <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+                        <p className="text-[0.7rem] leading-relaxed text-dark-400">
+                          {bellTab === 'unread' ? t('layout.noNewNotifications') : t('layout.noReadNotifications')}
+                        </p>
                       </div>
                     ) : (
                       notifications.map((notification) => (
-                        <div
+                        <NotificationBellListRow
                           key={notification.id}
-                          className={`p-4 cursor-pointer hover:bg-dark-700 transition-colors ${!notification.isRead ? 'bg-dark-750' : ''
-                            }`}
-                          onClick={() => {
-                            if (!notification.isRead) {
-                              markAsRead(notification.id);
-                            }
-                          }}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <p className="text-white font-medium text-sm leading-snug">{notification.title}</p>
-                              <SystemNotificationBody
-                                variant="compact"
-                                title={notification.title}
-                                message={notification.message}
-                                className="mt-2 max-h-[min(12rem,40vh)] overflow-y-auto overscroll-contain pr-0.5"
-                              />
-                              <p className="text-dark-500 text-xs mt-1">
-                                {new Date(notification.createdAt).toLocaleDateString('es-DO', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </p>
-                            </div>
-                            {!notification.isRead && (
-                              <div className="w-2 h-2 bg-primary-500 rounded-full ml-2"></div>
-                            )}
-                          </div>
-                        </div>
+                          notification={notification}
+                          typeLabel={shortNotifLabel(notification.type)}
+                          onActivate={() => void handleBellNotificationOpen(notification)}
+                        />
                       ))
                     )}
                   </div>
+
                   <TablePagination
-                    variant="compact"
+                    variant="minimal"
+                    className="shrink-0"
                     currentPage={notificationPage}
                     totalPages={notificationTotalPages}
-                    totalItems={unreadCount}
-                    itemsPerPage={headerNotifLimit}
+                    totalItems={bellPanelTotal}
+                    itemsPerPage={TABLE_PAGE_SIZE_LAYOUT_NOTIFICATIONS}
                     onPageChange={setNotificationPage}
-                    itemLabel="notificaciones"
-                    pageSizeOptions={headerNotifPageSizeOptions}
-                    onPageSizeChange={setHeaderNotifLimit}
+                    itemLabel={t('layout.itemLabel_notifications')}
                   />
-                  <div className="p-4 border-t border-dark-700">
+
+                  <div className="shrink-0 border-t border-dark-700/90 bg-dark-800 px-2 py-1.5">
                     <Link
                       to="/notifications/history"
                       onClick={() => setShowNotifications(false)}
-                      className="text-sm text-primary-400 hover:text-primary-300 text-center block"
+                      className="block truncate text-center text-[0.65rem] font-medium text-primary-400 hover:text-primary-300"
                     >
-                      Ver todas las notificaciones
+                      {t('layout.fullHistoryLink')}
                     </Link>
                   </div>
                 </div>
@@ -676,45 +770,41 @@ const Layout: React.FC = () => {
           <div className="bg-amber-900/35 border-b border-amber-700/50 px-3 sm:px-4 py-2.5 flex items-start gap-2 text-sm text-amber-100/95">
             <Wrench className="w-4 h-4 shrink-0 mt-0.5 text-amber-400/90" aria-hidden />
             <p>
-              La plataforma está en <span className="font-medium">modo mantenimiento</span>: no podrás crear ni
-              modificar datos (ingresos, gastos, etc.); inicio de sesión y la lectura de información siguen
-              disponibles. Los super administradores no ven esta restricción.
+              <Trans i18nKey="layout.maintenanceMode" components={{ bold: <span className="font-medium" /> }} />
             </p>
           </div>
         )}
 
         {subscriptionLoadError && user && !user.isSuperAdmin && (
           <div className="bg-red-900/30 border-b border-red-700/45 px-3 sm:px-4 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
-            <span className="text-red-100">No se pudo cargar tu suscripción. Revisa la conexión o inténtalo de nuevo.</span>
+            <span className="text-red-100">{t('layout.subscriptionLoadError')}</span>
             <button
               type="button"
               onClick={() => void refetchSubscription()}
               className="px-3 py-1.5 rounded-lg bg-red-800/50 text-white hover:bg-red-700/60 shrink-0"
             >
-              Reintentar
+              {t('layout.retry')}
             </button>
           </div>
         )}
 
         {impersonatedBy != null && (
           <div className="bg-amber-900/35 border-b border-amber-700/40 px-3 sm:px-4 py-2 flex flex-col xs:flex-row flex-wrap xs:items-center xs:justify-between gap-2 text-sm">
-            <span className="text-amber-100">
-              Modo soporte: estás actuando como <strong>{user?.email}</strong>
-            </span>
+            <span className="text-amber-100">{t('layout.supportModeBanner', { email: user?.email ?? '' })}</span>
             <button
               type="button"
               onClick={async () => {
                 try {
                   await stopImpersonation();
-                  toast.success('Sesión de administrador restaurada');
+                  toast.success(t('layout.sessionRestored'));
                   navigate('/admin');
                 } catch {
-                  toast.error('No se pudo restaurar la sesión');
+                  toast.error(t('layout.sessionRestoreError'));
                 }
               }}
               className="px-3 py-1 rounded-lg bg-amber-700/50 text-white hover:bg-amber-600/60"
             >
-              Volver a mi cuenta
+              {t('layout.stopImpersonation')}
             </button>
           </div>
         )}

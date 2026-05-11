@@ -1,0 +1,3 @@
+/*! For license information please see 4766.a9034e10.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[4766],{4766(c,e,n){n.r(e),n.d(e,{default:()=>l});const l=(0,n(21639).A)("CircleDot",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["circle",{cx:"12",cy:"12",r:"1",key:"41hilf"}]])}}]);
+//# sourceMappingURL=4766.a9034e10.chunk.js.map

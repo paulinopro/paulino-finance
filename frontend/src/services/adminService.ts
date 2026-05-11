@@ -63,6 +63,23 @@ export interface AdminDataQuality {
   activeSubscriptionsIncompleteWindow: number;
 }
 
+/** Estado job `node-cron` revisión masiva notificaciones (super admin). */
+export interface AdminNotificationScheduler {
+  cronExpression: string;
+  expressionValid: boolean;
+  schedulerRegistered: boolean;
+  schedulerConfiguredAt: string | null;
+  timezone: string | null;
+  cronTimeNoteEs: string;
+  dailyJobActive: boolean;
+  lastSweep: {
+    startedAt: string;
+    finishedAt: string;
+    ok: boolean;
+    errorMessage?: string;
+  } | null;
+}
+
 export interface AdminKpis {
   totalUsers: number;
   activeUsers: number;
@@ -102,6 +119,7 @@ export interface AdminAuditEvent {
 export interface AdminService {
   getHealth: () => Promise<AdminHealth>;
   getSubscriptionDataQuality: () => Promise<AdminDataQuality>;
+  getNotificationScheduler: () => Promise<AdminNotificationScheduler>;
   getStats: () => Promise<AdminKpis>;
   listUsers: (params: {
     page?: number;
@@ -212,6 +230,11 @@ export const adminService: AdminService = {
 
   getSubscriptionDataQuality: async () => {
     const response = await api.get<AdminDataQuality>('/admin/data-quality/subscription-payments');
+    return response.data;
+  },
+
+  getNotificationScheduler: async () => {
+    const response = await api.get<AdminNotificationScheduler>('/admin/notification-scheduler');
     return response.data;
   },
 

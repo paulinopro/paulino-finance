@@ -1,0 +1,3 @@
+/*! For license information please see 60060.72a4b056.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[60060],{60060(n,a,e){e.r(a),e.d(a,{default:()=>p});const p=(0,e(21639).A)("Airplay",[["path",{d:"M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1",key:"ns4c3b"}],["polygon",{points:"12 15 17 21 7 21 12 15",key:"1sy95i"}]])}}]);
+//# sourceMappingURL=60060.72a4b056.chunk.js.map

@@ -32,6 +32,7 @@ import adminRoutes from './routes/admin';
 import subscriptionRoutes from './routes/subscription';
 import { startNotificationScheduler } from './services/notificationService';
 import { initWebPush } from './services/webPushService';
+import { refreshAllAllowedCurrencySnapshots } from './services/openErRatesService';
 
 // Carga .env: raíz del repo (monorepo) y luego backend/.env (sobrescribe)
 const rootEnv = path.resolve(__dirname, '../../.env');
@@ -116,6 +117,14 @@ initializeDatabase()
         // Start notification scheduler
         startNotificationScheduler();
         console.log('Notification scheduler started');
+
+        const dailyMs = 24 * 60 * 60 * 1000;
+        setTimeout(() => {
+          void refreshAllAllowedCurrencySnapshots();
+        }, 15_000);
+        setInterval(() => {
+          void refreshAllAllowedCurrencySnapshots();
+        }, dailyMs);
 
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);

@@ -1,0 +1,23 @@
+{
+  "notificationTemplatesReset": "Restore this template to default values?",
+  "deletePlan": "Delete this plan?",
+  "deleteCategory": "Delete this category?",
+  "deleteIncome": "Delete this income entry?",
+  "deleteExpense": "Delete this expense?",
+  "deleteGoalPayment": "Delete this contribution? The goal progress will be updated.",
+  "deleteFinancialGoal": "Delete this financial goal?",
+  "deleteBudget": "Delete this budget?",
+  "deletePayablePayment": "Delete this payment? The linked expense will be removed and the account balance updated.",
+  "deletePayableAccount": "Delete this accounts payable entry?",
+  "deleteReceivablePayment": "Delete this payment? The linked income will be removed and the account balance updated.",
+  "deleteReceivableAccount": "Delete this accounts receivable entry?",
+  "deleteCardPayment": "Delete this card payment? Debt and account balance will be reversed where applicable.",
+  "deleteCard": "Delete this card?",
+  "deleteBankAccount": "Delete this account?",
+  "deleteLoanPayment": "Delete this payment?",
+  "deleteLoan": "Delete this loan?",
+  "deleteVehicle": "Delete this vehicle? All its expenses will be deleted too.",
+  "deleteVehicleExpense": "Delete this expense?",
+  "disableUser": "Disable account {{email}}? The user cannot sign in until you re-enable it from this console.",
+  "deleteAmortizationPayment": "Delete this payment?"
+}

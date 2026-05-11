@@ -1,0 +1,3 @@
+/*! For license information please see 40453.f88e83fd.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[40453],{40453(n,e,a){a.r(e),a.d(e,{default:()=>t});const t=(0,a(21639).A)("MousePointer",[["path",{d:"m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z",key:"y2ucgo"}],["path",{d:"m13 13 6 6",key:"1nhxnf"}]])}}]);
+//# sourceMappingURL=40453.f88e83fd.chunk.js.map

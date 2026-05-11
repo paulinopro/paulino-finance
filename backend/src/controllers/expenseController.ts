@@ -1,7 +1,8 @@
 import { Response } from 'express';
+import type { PoolClient } from 'pg';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { amountToPrimary, getConversionContextForUser } from '../services/userCurrencyConversion';
 import { applyBalanceDelta } from '../services/accountBalance';
 import {
   validateExpenseUpdateForLinkedPayable,
@@ -20,6 +21,16 @@ import {
 } from '../constants/incomeExpenseTaxonomy';
 import { parseRecurrenceBoundaryFromBody } from '../utils/recurrenceBoundary';
 import { toYmdFromPgDate } from '../utils/dateUtils';
+import {
+  getUserCurrencyPair,
+  isCurrencyInUserPair,
+  validateLedgerCurrencyForUser,
+} from '../utils/userCurrencyPair';
+import {
+  deleteExpensePeriodAmount,
+  getExpensePeriodAmount,
+  upsertExpensePeriodAmount,
+} from '../services/recurringPeriodAmounts';
 
 function validateExpenseSchedule(
   recurrenceType: RecurrenceType,
@@ -89,6 +100,22 @@ function isMonthlyRecurringExpense(row: {
   frequency?: string | null;
 }): boolean {
   return row.recurrence_type === 'recurrent' && normalizeFrequency(row.frequency ?? undefined) === 'monthly';
+}
+
+/** Monto efectivo del ciclo actual cuando hay variable recurrente mensual pagado/cobrado con fila en *_period_amounts. */
+function amountForVariableMonthlyPeriodRow(
+  row: { nature?: string; amount: unknown; period_amount?: unknown | null },
+  slotPaidOrReceived: boolean,
+  monthlyRec: boolean
+): number {
+  const base = parseFloat(String(row.amount));
+  if (!monthlyRec || row.nature !== 'variable' || !slotPaidOrReceived) return base;
+  const pv = row.period_amount;
+  if (pv != null && pv !== '') {
+    const n = parseFloat(String(pv));
+    if (!Number.isNaN(n)) return n;
+  }
+  return base;
 }
 
 function parseBankAccountIdFromBody(
@@ -173,13 +200,21 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
     const paramsBeforePagination = [...params];
     const paramIndexBeforePagination = paramIndex;
 
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const currentYear = currentDate.getFullYear();
+
     // Get paginated results
     let queryText = `
       SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
              e.category,
              e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
              e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
-             v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
+             v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
+             (SELECT epa.amount FROM expense_period_amounts epa
+              WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
+                AND epa.year = ${currentYear} AND epa.month = ${currentMonth}
+              LIMIT 1) AS period_amount
       FROM expenses e
       LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
       LEFT JOIN vehicles v ON v.id = ve.vehicle_id AND v.user_id = e.user_id
@@ -190,11 +225,6 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
     params.push(limitNum, offset);
 
     const result = await query(queryText, params);
-
-    // Get current month and year for recurring expenses
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1;
-    const currentYear = currentDate.getFullYear();
 
     const expenses = result.rows.map((row) => {
       // For recurring monthly expenses, check if paid this month
@@ -209,7 +239,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       return {
         id: row.id,
         description: row.description,
-        amount: parseFloat(row.amount),
+        amount: amountForVariableMonthlyPeriodRow(row, isPaid, isMonthlyRecurringExpense(row)),
         currency: row.currency,
         nature: row.nature,
         recurrenceType: row.recurrence_type,
@@ -238,17 +268,17 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       `SELECT e.amount, e.currency FROM expenses e ${whereClause}`,
       paramsBeforePagination
     );
-    const totalDop = allExpensesResult.rows
-      .filter((row) => row.currency === 'DOP')
-      .reduce((sum, row) => sum + parseFloat(row.amount), 0);
-    const totalUsd = allExpensesResult.rows
-      .filter((row) => row.currency === 'USD')
-      .reduce((sum, row) => sum + parseFloat(row.amount), 0);
-    
-    // Get exchange rate for total calculation
-    const userResult = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
-    const totalAmount = totalDop + (totalUsd * exchangeRate);
+    const ctx = await getConversionContextForUser(userId);
+    const totalsByCurrency: Record<string, number> = {};
+    let totalInPrimary = 0;
+    for (const row of allExpensesResult.rows) {
+      const amt = parseFloat(row.amount);
+      const c = String(row.currency || 'DOP').toUpperCase();
+      totalsByCurrency[c] = (totalsByCurrency[c] || 0) + amt;
+      totalInPrimary += amountToPrimary(amt, c, ctx);
+    }
+    const totalPrimary = totalsByCurrency[ctx.pair.primary] ?? 0;
+    const totalSecondary = totalsByCurrency[ctx.pair.secondary] ?? 0;
 
     const totalPages = Math.ceil(total / limitNum);
 
@@ -256,8 +286,15 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       success: true,
       expenses,
       summary: {
-        totalDop,
-        totalUsd,
+        totalsByCurrency,
+        totalInPrimary,
+        totalPrimary,
+        totalSecondary,
+        primaryCurrency: ctx.pair.primary,
+        secondaryCurrency: ctx.pair.secondary,
+        exchangeRate: ctx.pairRateSecondaryPerPrimary,
+        totalDop: totalsByCurrency.DOP ?? 0,
+        totalUsd: totalsByCurrency.USD ?? 0,
         totalExpenses: total,
       },
       pagination: {
@@ -278,12 +315,20 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const expenseId = parseInt(req.params.id);
 
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const currentYear = currentDate.getFullYear();
+
     const result = await query(
       `SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
               e.category,
               e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
               e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
-              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
+              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
+              (SELECT epa.amount FROM expense_period_amounts epa
+               WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
+                 AND epa.year = ${currentYear} AND epa.month = ${currentMonth}
+               LIMIT 1) AS period_amount
        FROM expenses e
        LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
        LEFT JOIN vehicles v ON v.id = ve.vehicle_id AND v.user_id = e.user_id
@@ -296,9 +341,6 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
     }
 
     const row = result.rows[0];
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1;
-    const currentYear = currentDate.getFullYear();
 
     // For recurring monthly expenses, check if paid this month
     let isPaid = row.is_paid;
@@ -313,7 +355,7 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
       expense: {
         id: row.id,
         description: row.description,
-        amount: parseFloat(row.amount),
+        amount: amountForVariableMonthlyPeriodRow(row, isPaid, isMonthlyRecurringExpense(row)),
         currency: row.currency,
         nature: row.nature,
         recurrenceType: row.recurrence_type,
@@ -368,10 +410,28 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: schedErr });
   }
 
-  const cur = currency || 'DOP';
-  const amt = parseFloat(String(amount));
+  const pair = await getUserCurrencyPair(userId);
+  const cur =
+    currency != null && String(currency).trim() !== ''
+      ? String(currency).trim().toUpperCase()
+      : pair.primary;
+  if (!isCurrencyInUserPair(pair, cur)) {
+    return res.status(400).json({
+      message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+    });
+  }
+
   const bankAccountId = parseBankAccountIdFromBody(req.body, 'create', null);
+  if (bankAccountId) {
+    const ledErr = validateLedgerCurrencyForUser(pair, cur);
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
+    }
+  }
+
+  const amt = parseFloat(String(amount));
   const initialPaid = typeof isPaid === 'boolean' ? isPaid : false;
+  const ledgerGastoDesc = `Gasto: ${String(description)}`;
 
   let recurrenceStartDate: string | null = null;
   let recurrenceEndDate: string | null = null;
@@ -424,7 +484,9 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       })
     ) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, cur, -amt, client);
+        await applyBalanceDelta(userId, bankAccountId, cur, -amt, client, {
+          description: ledgerGastoDesc,
+        });
       } catch (e: any) {
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
           await client.query('ROLLBACK');
@@ -445,7 +507,9 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       const currentYear = now.getFullYear();
       if (bankAccountId) {
         try {
-          await applyBalanceDelta(userId, bankAccountId, cur, -amt, client);
+          await applyBalanceDelta(userId, bankAccountId, cur, -amt, client, {
+          description: ledgerGastoDesc,
+        });
         } catch (e: any) {
           if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
             await client.query('ROLLBACK');
@@ -545,12 +609,26 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
   const newDesc = description !== undefined ? description : old.description;
   const newAmount = amount !== undefined ? parseFloat(String(amount)) : parseFloat(old.amount);
   const newCurrency = currency !== undefined ? currency : old.currency;
+  const pair = await getUserCurrencyPair(userId);
+  const curNorm = String(newCurrency).trim().toUpperCase();
+  if (!isCurrencyInUserPair(pair, curNorm)) {
+    return res.status(400).json({
+      message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+    });
+  }
   const newCategory = category !== undefined ? category : old.category;
   const newPaymentDay = paymentDay !== undefined ? paymentDay : old.payment_day;
   const newPaymentMonth = paymentMonth !== undefined ? paymentMonth : old.payment_month;
   const newDate = date !== undefined ? date : old.date;
   const newIsPaid = isPaid !== undefined ? isPaid : old.is_paid;
   const newBankId = parseBankAccountIdFromBody(req.body, 'update', old.bank_account_id);
+
+  if (newBankId) {
+    const ledErr = validateLedgerCurrencyForUser(pair, curNorm);
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
+    }
+  }
 
   const schedErr = validateExpenseSchedule(
     tx.recurrenceType,
@@ -596,7 +674,8 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
         old.bank_account_id,
         old.currency,
         parseFloat(old.amount),
-        client
+        client,
+        { description: `Reversión: «${old.description}»` }
       );
     }
 
@@ -648,7 +727,9 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
       newBankId
     ) {
       try {
-        await applyBalanceDelta(userId, newBankId, newCurrency, -newAmount, client);
+        await applyBalanceDelta(userId, newBankId, newCurrency, -newAmount, client, {
+          description: `Gasto: ${newDesc}`,
+        });
       } catch (e: any) {
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
           await client.query('ROLLBACK');
@@ -729,18 +810,34 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
   }
 };
 
+function resolveMonthlyPaymentAmount(
+  expense: { nature: string; amount: unknown },
+  monthlyRec: boolean,
+  actualAmountRaw: unknown
+): number {
+  const base = parseFloat(String(expense.amount));
+  if (!monthlyRec || expense.nature !== 'variable') return base;
+  if (actualAmountRaw === undefined || actualAmountRaw === null || actualAmountRaw === '') return base;
+  const n = typeof actualAmountRaw === 'number' ? actualAmountRaw : parseFloat(String(actualAmountRaw));
+  if (Number.isNaN(n) || n <= 0) {
+    throw new Error('INVALID_ACTUAL_AMOUNT');
+  }
+  return n;
+}
+
 export const updateExpensePaymentStatus = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const expenseId = parseInt(req.params.id);
     const { isPaid } = req.body;
+    const actualAmountRaw = req.body.actualAmount;
 
     if (typeof isPaid !== 'boolean') {
       return res.status(400).json({ message: 'isPaid must be a boolean' });
     }
 
     const checkResult = await query(
-      `SELECT id, recurrence_type, frequency, amount, currency, bank_account_id, last_paid_month, last_paid_year
+      `SELECT id, description, nature, recurrence_type, frequency, amount, currency, bank_account_id, last_paid_month, last_paid_year
        FROM expenses WHERE id = $1 AND user_id = $2`,
       [expenseId, userId]
     );
@@ -758,67 +855,111 @@ export const updateExpensePaymentStatus = async (req: AuthRequest, res: Response
     const alreadyMarkedPaidThisMonth =
       expense.last_paid_month === currentMonth && expense.last_paid_year === currentYear;
 
-    const applyRecurringBalance = async (paid: boolean) => {
+    const applyRecurringBalance = async (paid: boolean, ledgerAmount: number, client?: PoolClient) => {
       if (!monthlyRec || !expense.bank_account_id) return;
-      const amt = parseFloat(expense.amount);
-      const delta = paid ? -amt : amt;
+      const delta = paid ? -ledgerAmount : ledgerAmount;
       try {
-        await applyBalanceDelta(userId, expense.bank_account_id, expense.currency, delta);
+        await applyBalanceDelta(userId, expense.bank_account_id, expense.currency, delta, client, {
+          description:
+            delta < 0
+              ? `Pago recurrente (mes actual): «${expense.description}»`
+              : `Reversión de pago recurrente: «${expense.description}»`,
+        });
       } catch (e: any) {
         console.error('Recurring expense balance:', e);
+        throw e;
       }
     };
 
-    // For recurring monthly expenses, update last_paid_month/year
-    if (monthlyRec && isPaid) {
-      if (!alreadyMarkedPaidThisMonth) {
-        await applyRecurringBalance(true);
+    if (monthlyRec) {
+      let payAmount: number;
+      try {
+        payAmount = resolveMonthlyPaymentAmount(expense, monthlyRec, actualAmountRaw);
+      } catch {
+        return res.status(400).json({ message: 'actualAmount must be a positive number' });
       }
-      const result = await query(
-        `UPDATE expenses
-         SET is_paid = $1, 
-             last_paid_month = $2,
-             last_paid_year = $3,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $4 AND user_id = $5
-         RETURNING id, description, is_paid, last_paid_month, last_paid_year, updated_at`,
-        [isPaid, currentMonth, currentYear, expenseId, userId]
-      );
 
-      res.json({
-        success: true,
-        message: 'Payment status updated successfully',
-        expense: {
-          id: result.rows[0].id,
-          description: result.rows[0].description,
-          isPaid: result.rows[0].is_paid,
-          updatedAt: result.rows[0].updated_at,
-        },
-      });
-    } else if (monthlyRec && !isPaid) {
-      if (alreadyMarkedPaidThisMonth) {
-        await applyRecurringBalance(false);
+      const reverseLedgerAmount = async (): Promise<number> => {
+        const base = parseFloat(String(expense.amount));
+        if (expense.nature !== 'variable') return base;
+        const v = await getExpensePeriodAmount(userId, expenseId, currentYear, currentMonth);
+        return v != null ? v : base;
+      };
+
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+
+        if (isPaid) {
+          if (!alreadyMarkedPaidThisMonth) {
+            if (expense.nature === 'variable') {
+              await upsertExpensePeriodAmount(client, userId, expenseId, currentYear, currentMonth, payAmount);
+            }
+            await applyRecurringBalance(true, payAmount, client);
+          }
+          const result = await client.query(
+            `UPDATE expenses
+             SET is_paid = $1,
+                 last_paid_month = $2,
+                 last_paid_year = $3,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $4 AND user_id = $5
+             RETURNING id, description, is_paid, last_paid_month, last_paid_year, updated_at`,
+            [isPaid, currentMonth, currentYear, expenseId, userId]
+          );
+          await client.query('COMMIT');
+          res.json({
+            success: true,
+            message: 'Payment status updated successfully',
+            expense: {
+              id: result.rows[0].id,
+              description: result.rows[0].description,
+              isPaid: result.rows[0].is_paid,
+              updatedAt: result.rows[0].updated_at,
+            },
+          });
+        } else {
+          if (alreadyMarkedPaidThisMonth) {
+            const rev = await reverseLedgerAmount();
+            await applyRecurringBalance(false, rev, client);
+            if (expense.nature === 'variable') {
+              await deleteExpensePeriodAmount(client, userId, expenseId, currentYear, currentMonth);
+            }
+          }
+          const result = await client.query(
+            `UPDATE expenses
+             SET is_paid = $1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2 AND user_id = $3
+             RETURNING id, description, is_paid, updated_at`,
+            [isPaid, expenseId, userId]
+          );
+          await client.query('COMMIT');
+          res.json({
+            success: true,
+            message: 'Payment status updated successfully',
+            expense: {
+              id: result.rows[0].id,
+              description: result.rows[0].description,
+              isPaid: result.rows[0].is_paid,
+              updatedAt: result.rows[0].updated_at,
+            },
+          });
+        }
+      } catch (e: any) {
+        await client.query('ROLLBACK');
+        if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
+          return res.status(400).json({
+            message:
+              e.message === 'CURRENCY_MISMATCH'
+                ? 'La moneda no coincide con la cuenta seleccionada'
+                : 'Cuenta no encontrada',
+          });
+        }
+        throw e;
+      } finally {
+        client.release();
       }
-      const result = await query(
-        `UPDATE expenses
-         SET is_paid = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND user_id = $3
-         RETURNING id, description, is_paid, updated_at`,
-        [isPaid, expenseId, userId]
-      );
-
-      res.json({
-        success: true,
-        message: 'Payment status updated successfully',
-        expense: {
-          id: result.rows[0].id,
-          description: result.rows[0].description,
-          isPaid: result.rows[0].is_paid,
-          updatedAt: result.rows[0].updated_at,
-        },
-      });
     } else {
-      // For non-recurring expenses, just update is_paid
       const result = await query(
         `UPDATE expenses
          SET is_paid = $1, updated_at = CURRENT_TIMESTAMP

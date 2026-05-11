@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 import {
@@ -24,14 +25,9 @@ import { TABLE_PAGE_SIZE_CARDS } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
-import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
-
-/** Monto para línea de pago mínimo: $0 sin decimales; resto con 2 decimales (es-DO). */
-function formatMinPaymentAmount(value: number | undefined | null): string {
-  const n = Number(value ?? 0);
-  if (n === 0) return '0';
-  return n.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 
 function creditCardListAccent(card: CreditCard): string {
   if (card.currencyType === 'DUAL') {
@@ -46,7 +42,16 @@ function creditCardListAccent(card: CreditCard): string {
 }
 
 const Cards: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    defaultBankMoneyCurrencyType,
+    ledgerCurrencyOptions,
+    defaultLedgerCurrency,
+    primaryCurrency,
+    secondaryCurrency,
+  } = useIntlFormatting();
   const { pageSize: cardPageSize, setPageSize: setCardPageSize, pageSizeOptions: cardPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:cards', TABLE_PAGE_SIZE_CARDS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
@@ -77,12 +82,18 @@ const Cards: React.FC = () => {
   });
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentTargetCard, setPaymentTargetCard] = useState<CreditCard | null>(null);
-  const [cardPaymentForm, setCardPaymentForm] = useState({
+  const [cardPaymentForm, setCardPaymentForm] = useState<{
+    paymentDate: string;
+    amount: string;
+    notes: string;
+    bankAccountId: string;
+    payCurrency: string;
+  }>({
     paymentDate: todayYmdLocal(),
     amount: '',
     notes: '',
     bankAccountId: '',
-    payCurrency: 'DOP' as 'DOP' | 'USD',
+    payCurrency: defaultLedgerCurrency,
   });
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [recentCardPayments, setRecentCardPayments] = useState<CardPayment[]>([]);
@@ -108,11 +119,11 @@ const Cards: React.FC = () => {
       setCards(response.data.cards);
       setSummary(response.data.summary || { totalDebtDop: 0, totalDebtUsd: 0, totalMinPaymentDop: 0, totalMinPaymentUsd: 0, totalCards: 0 });
     } catch {
-      toast.error('Error al cargar tarjetas');
+      toast.error(t('toast.cards.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, bankFilter]);
+  }, [searchTerm, bankFilter, t]);
 
   useEffect(() => {
     fetchCards();
@@ -144,12 +155,16 @@ const Cards: React.FC = () => {
     return orderedCards.slice(start, start + cardPageSize);
   }, [orderedCards, cardPageSafe, cardPageSize]);
   const cardListStart = (cardPageSafe - 1) * cardPageSize;
-  const listDnd = useListOrderPageDnd(pagedCards, cardListStart, orderedCards, commitCardOrder);
+  const listDnd = useListOrderPageDnd(pagedCards, cardListStart, orderedCards, commitCardOrder, {
+    ghostLabel: (c) => [c.cardName, c.bankName].filter(Boolean).join(' · '),
+  });
 
   const accountsForCardPayment = useMemo(() => {
     const c = cardPaymentForm.payCurrency;
-    return bankAccounts.filter((a: BankAccount) => a.currencyType === 'DUAL' || a.currencyType === c);
-  }, [bankAccounts, cardPaymentForm.payCurrency]);
+    return bankAccounts.filter((a: BankAccount) =>
+      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+    );
+  }, [bankAccounts, cardPaymentForm.payCurrency, primaryCurrency, secondaryCurrency]);
 
   const bankAccountNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -158,14 +173,24 @@ const Cards: React.FC = () => {
   }, [bankAccounts]);
 
   const openCardPaymentModal = async (card: CreditCard) => {
-    const payCurrency: 'DOP' | 'USD' =
-      card.currencyType === 'DOP'
-        ? 'DOP'
-        : card.currencyType === 'USD'
-          ? 'USD'
-          : card.currentDebtDop >= card.currentDebtUsd
-            ? 'DOP'
-            : 'USD';
+    const priInPair = ledgerCurrencyOptions.includes(primaryCurrency);
+    const secInPair = ledgerCurrencyOptions.includes(secondaryCurrency);
+    let payCurrency: string;
+    if (card.currencyType === 'DOP') {
+      payCurrency = primaryCurrency;
+    } else if (card.currencyType === 'USD') {
+      payCurrency = secondaryCurrency;
+    } else {
+      if (priInPair && secInPair) {
+        payCurrency = card.currentDebtDop >= card.currentDebtUsd ? primaryCurrency : secondaryCurrency;
+      } else if (secInPair) {
+        payCurrency = secondaryCurrency;
+      } else if (priInPair) {
+        payCurrency = primaryCurrency;
+      } else {
+        payCurrency = defaultLedgerCurrency;
+      }
+    }
     setPaymentTargetCard(card);
     setCardPaymentForm({
       paymentDate: todayYmdLocal(),
@@ -188,7 +213,7 @@ const Cards: React.FC = () => {
     if (!paymentTargetCard) return;
     const amt = parseFloat(cardPaymentForm.amount);
     if (!amt || amt <= 0 || Number.isNaN(amt)) {
-      toast.error('Indica un monto válido');
+      toast.error(t('toast.generic.invalidAmount'));
       return;
     }
     try {
@@ -204,27 +229,27 @@ const Cards: React.FC = () => {
         payload.bankAccountId = null;
       }
       await api.post(`/cards/${paymentTargetCard.id}/payments`, payload);
-      toast.success('Pago registrado');
+      toast.success(t('toast.cards.paymentRegistered'));
       setShowPaymentModal(false);
       setPaymentTargetCard(null);
       fetchCards();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Error al registrar pago');
+      toast.error(err.response?.data?.message || t('toast.cards.paymentRegisterError'));
     }
   };
 
   const handleDeleteCardPayment = async (paymentId: number) => {
-    if (!window.confirm('¿Eliminar este pago de tarjeta? Se revertirá la deuda y el saldo de la cuenta si aplica.')) return;
+    if (!window.confirm(t('confirm.deleteCardPayment'))) return;
     try {
       await api.delete(`/cards/payments/${paymentId}`);
-      toast.success('Pago eliminado');
+      toast.success(t('toast.cards.paymentDeleted'));
       if (paymentTargetCard) {
         const r = await api.get(`/cards/${paymentTargetCard.id}/payments`, { params: { limit: 12 } });
         setRecentCardPayments(r.data.payments || []);
       }
       fetchCards();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Error al eliminar');
+      toast.error(err.response?.data?.message || t('toast.cards.paymentDeleteError'));
     }
   };
 
@@ -245,29 +270,29 @@ const Cards: React.FC = () => {
 
       if (editingCard) {
         await api.put(`/cards/${editingCard.id}`, data);
-        toast.success('Tarjeta actualizada');
+        toast.success(t('toast.cards.updated'));
       } else {
         await api.post('/cards', data);
-        toast.success('Tarjeta creada');
+        toast.success(t('toast.cards.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchCards();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar tarjeta');
+      toast.error(error.response?.data?.message || t('toast.cards.saveError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de eliminar esta tarjeta?')) return;
+    if (!window.confirm(t('confirm.deleteCard'))) return;
 
     try {
       await api.delete(`/cards/${id}`);
-      toast.success('Tarjeta eliminada');
+      toast.success(t('toast.cards.deleted'));
       fetchCards();
     } catch (error: any) {
-      toast.error('Error al eliminar tarjeta');
+      toast.error(t('toast.cards.deleteError'));
     }
   };
 
@@ -301,7 +326,7 @@ const Cards: React.FC = () => {
       minimumPaymentUsd: '',
       cutOffDay: '',
       paymentDueDay: '',
-      currencyType: 'DOP',
+      currencyType: defaultBankMoneyCurrencyType,
     });
     setEditingCard(null);
   };
@@ -322,8 +347,8 @@ const Cards: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         className="mb-4"
-        title="Tarjetas de Crédito"
-        subtitle="Gestiona tus tarjetas de crédito"
+        title={t('pages.cards.title')}
+        subtitle={t('pages.cards.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -336,7 +361,7 @@ const Cards: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
             >
               <Plus size={20} />
-              <span>Agregar Tarjeta</span>
+              <span>{t('pages.cards.addCard')}</span>
             </button>
           </div>
         }
@@ -347,23 +372,23 @@ const Cards: React.FC = () => {
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Deudas Totales (DOP)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.cards.totalDebt', { currency: primaryCurrency })}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalDebtDop, primaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Deudas Totales (USD)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.cards.totalDebt', { currency: secondaryCurrency })}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalDebtUsd, secondaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos (DOP)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalMinPaymentDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.cards.totalMinPayments', { currency: primaryCurrency })}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalMinPaymentDop, primaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pagos Mínimos (USD)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalMinPaymentUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.cards.totalMinPayments', { currency: secondaryCurrency })}</p>
+              <p className="text-2xl font-bold text-white">{fc(summary.totalMinPaymentUsd, secondaryCurrency)}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Tarjetas</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.cards.totalCards')}</p>
               <p className="text-2xl font-bold text-white">{summary.totalCards}</p>
             </div>
           </div>
@@ -378,7 +403,7 @@ const Cards: React.FC = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
               <input
                 type="text"
-                placeholder="Buscar por nombre o banco..."
+                placeholder={t('pages.cards.searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input w-full pl-10"
@@ -398,7 +423,7 @@ const Cards: React.FC = () => {
                 onChange={(e) => setBankFilter(e.target.value)}
                 className="input w-full"
               >
-                <option value="">Todos los bancos</option>
+                <option value="">{t('pages.cards.allBanks')}</option>
                 {Array.from(new Set(cards.map(c => c.bankName))).map((bank) => (
                   <option key={bank} value={bank}>{bank}</option>
                 ))}
@@ -411,9 +436,16 @@ const Cards: React.FC = () => {
       {cards.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
           <CardIcon className="w-16 h-16 text-dark-600 mx-auto mb-4" />
-          <p className="text-dark-400 mb-4">No tienes tarjetas registradas</p>
-          <button onClick={() => setShowModal(true)} className="btn-primary">
-            Agregar Primera Tarjeta
+          <p className="text-dark-400 mb-4">{t('pages.cards.emptyState')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="btn-primary"
+          >
+            {t('pages.cards.addFirstCard')}
           </button>
         </div>
       ) : (
@@ -424,12 +456,16 @@ const Cards: React.FC = () => {
                 key={card.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                onDragOver={listDnd.onDragOver}
-                onDrop={listDnd.onDrop(card.id)}
+                {...listDnd.droppableAttr(card.id)}
                 className={[
                   LIST_CARD_SHELL,
                   creditCardListAccent(card),
-                  listDnd.dragId === card.id ? 'opacity-60' : '',
+                  listDnd.dragId === card.id ? 'opacity-[0.22]' : '',
+                  listDnd.dragId !== null &&
+                  listDnd.pointerOverItemId === card.id &&
+                  listDnd.dragId !== card.id
+                    ? 'ring-2 ring-primary-400/75 z-[1]'
+                    : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -439,9 +475,15 @@ const Cards: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                         <CardIcon className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                        Tarjeta
+                        {t('pages.cards.cardBadge')}
                       </span>
-                      <span className="text-xs text-dark-500 sm:text-sm">{card.currencyType}</span>
+                      <span className="text-xs text-dark-500 sm:text-sm">
+                        {card.currencyType === 'DUAL'
+                          ? `${primaryCurrency} + ${secondaryCurrency}`
+                          : card.currencyType === 'DOP'
+                            ? primaryCurrency
+                            : secondaryCurrency}
+                      </span>
                     </div>
                     <h3 className="break-words text-lg font-bold leading-snug text-white sm:text-xl">{card.cardName}</h3>
                     <p className="text-sm text-dark-400">{card.bankName}</p>
@@ -449,23 +491,22 @@ const Cards: React.FC = () => {
                   <div className="flex shrink-0 items-center gap-0.5">
                     <ListOrderDragHandle
                       itemId={card.id}
-                      onDragStart={listDnd.onDragStart}
-                      onDragEnd={listDnd.onDragEnd}
+                      gripBinder={listDnd.gripBinder}
                       disabled={pagedCards.length < 2}
                     />
                     <button
                       type="button"
                       onClick={() => openCardPaymentModal(card)}
                       className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
-                      title="Registrar pago"
-                      aria-label="Registrar pago"
+                      title={t('pages.cards.registerPayment')}
+                      aria-label={t('pages.cards.registerPayment')}
                     >
                       <DollarSign className="h-[18px] w-[18px]" />
                     </button>
-                    <button type="button" onClick={() => handleEdit(card)} className={listCardBtnEdit} title="Editar" aria-label="Editar tarjeta">
+                    <button type="button" onClick={() => handleEdit(card)} className={listCardBtnEdit} title={t('common.actions.edit')} aria-label={t('pages.cards.editAria')}>
                       <Edit className="h-5 w-5" />
                     </button>
-                    <button type="button" onClick={() => handleDelete(card.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar tarjeta">
+                    <button type="button" onClick={() => handleDelete(card.id)} className={listCardBtnDanger} title={t('common.actions.delete')} aria-label={t('pages.cards.deleteAria')}>
                       <Trash2 className="h-5 w-5" />
                     </button>
                   </div>
@@ -477,15 +518,19 @@ const Cards: React.FC = () => {
                       <div className="metrics-cq">
                         <div className="metrics-row-2">
                           <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (DOP)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.limitCurrency', { currency: primaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                            {card.creditLimitDop.toLocaleString('es-DO')}
+                            {fc(card.creditLimitDop, primaryCurrency)}
                           </p>
                         </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite (USD)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.limitCurrency', { currency: secondaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                            {card.creditLimitUsd.toLocaleString('es-DO')}
+                            {fc(card.creditLimitUsd, secondaryCurrency)}
                           </p>
                         </div>
                         </div>
@@ -493,15 +538,19 @@ const Cards: React.FC = () => {
                       <div className="metrics-cq">
                         <div className="metrics-row-2">
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (DOP)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.debtCurrency', { currency: primaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                            {card.currentDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fc(card.currentDebtDop, primaryCurrency)}
                           </p>
                         </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda (USD)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.debtCurrency', { currency: secondaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                            {card.currentDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {fc(card.currentDebtUsd, secondaryCurrency)}
                           </p>
                         </div>
                         </div>
@@ -509,15 +558,19 @@ const Cards: React.FC = () => {
                       <div className="metrics-cq">
                         <div className="metrics-row-2">
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (DOP)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.minimumPaymentCurrency', { currency: primaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                            {formatMinPaymentAmount(card.minimumPaymentDop)}
+                            {fc(Number(card.minimumPaymentDop ?? 0), primaryCurrency)}
                           </p>
                         </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo (USD)</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.cards.minimumPaymentCurrency', { currency: secondaryCurrency })}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                            {formatMinPaymentAmount(card.minimumPaymentUsd)}
+                            {fc(Number(card.minimumPaymentUsd ?? 0), secondaryCurrency)}
                           </p>
                         </div>
                         </div>
@@ -525,12 +578,12 @@ const Cards: React.FC = () => {
                       <div className="metrics-cq">
                         <div className="metrics-row-2">
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Corte</p>
-                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.cutOffDay}</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.cutOff')}</p>
+                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{t('pages.cards.dayValue', { day: card.cutOffDay })}</p>
                         </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
-                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.paymentDueDay}</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.dueDate')}</p>
+                          <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{t('pages.cards.dayValue', { day: card.paymentDueDay })}</p>
                         </div>
                         </div>
                       </div>
@@ -539,33 +592,35 @@ const Cards: React.FC = () => {
                     <div className="metrics-cq">
                       <div className="metrics-row-2">
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Límite</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.limit')}</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                          {card.currencyType === 'DOP' && `${card.creditLimitDop.toLocaleString('es-DO')} DOP`}
-                          {card.currencyType === 'USD' && `${card.creditLimitUsd.toLocaleString('es-DO')} USD`}
+                          {card.currencyType === 'DOP' && fc(card.creditLimitDop, primaryCurrency)}
+                          {card.currencyType === 'USD' && fc(card.creditLimitUsd, secondaryCurrency)}
                         </p>
                       </div>
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Deuda</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.debt')}</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                          {card.currencyType === 'DOP' && `${card.currentDebtDop.toLocaleString('es-DO')} DOP`}
-                          {card.currencyType === 'USD' && `${card.currentDebtUsd.toLocaleString('es-DO')} USD`}
+                          {card.currencyType === 'DOP' && fc(card.currentDebtDop, primaryCurrency)}
+                          {card.currencyType === 'USD' && fc(card.currentDebtUsd, secondaryCurrency)}
                         </p>
                       </div>
                       <div className="metrics-cell-span-2 rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Pago mínimo</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.minimumPayment')}</p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-amber-400 sm:text-base">
-                          {card.currencyType === 'DOP' && `${formatMinPaymentAmount(card.minimumPaymentDop)} DOP`}
-                          {card.currencyType === 'USD' && `${formatMinPaymentAmount(card.minimumPaymentUsd)} USD`}
+                          {card.currencyType === 'DOP' &&
+                            fc(Number(card.minimumPaymentDop ?? 0), primaryCurrency)}
+                          {card.currencyType === 'USD' &&
+                            fc(Number(card.minimumPaymentUsd ?? 0), secondaryCurrency)}
                         </p>
                       </div>
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Corte</p>
-                        <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.cutOffDay}</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.cutOff')}</p>
+                        <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{t('pages.cards.dayValue', { day: card.cutOffDay })}</p>
                       </div>
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
-                        <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">Día {card.paymentDueDay}</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">{t('pages.cards.dueDate')}</p>
+                        <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{t('pages.cards.dayValue', { day: card.paymentDueDay })}</p>
                       </div>
                     </div>
                     </div>
@@ -574,6 +629,7 @@ const Cards: React.FC = () => {
               </motion.article>
             ))}
           </div>
+          <ListOrderDragGhostPortal ghost={listDnd.dragGhost} />
           <TablePagination
             className="mt-4 sm:mt-5"
             currentPage={cardPageSafe}
@@ -581,7 +637,7 @@ const Cards: React.FC = () => {
             totalItems={orderedCards.length}
             itemsPerPage={cardPageSize}
             onPageChange={setListPage}
-            itemLabel="tarjetas"
+            itemLabel={t('pages.cards.itemsLabel')}
             variant="card"
             pageSizeOptions={cardPageSizeOptions}
             onPageSizeChange={setCardPageSize}
@@ -610,7 +666,7 @@ const Cards: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="cards-payment-modal-title" className="text-xl font-bold text-white mb-1">
-              Registrar pago
+              {t('pages.cards.registerPayment')}
             </h2>
             <p className="text-sm text-dark-400 mb-4">
               {paymentTargetCard.cardName} — {paymentTargetCard.bankName}
@@ -618,25 +674,34 @@ const Cards: React.FC = () => {
             <form onSubmit={handleCardPaymentSubmit} className="space-y-4">
               {paymentTargetCard.currencyType === 'DUAL' && (
                 <div>
-                  <label className="label">Moneda del pago</label>
+                  <label className="label">{t('pages.cards.paymentCurrency')}</label>
                   <select
                     value={cardPaymentForm.payCurrency}
                     onChange={(e) =>
                       setCardPaymentForm({
                         ...cardPaymentForm,
-                        payCurrency: e.target.value as 'DOP' | 'USD',
+                        payCurrency: e.target.value,
                         bankAccountId: '',
                       })
                     }
                     className="input w-full"
                   >
-                    <option value="DOP">DOP (deuda: {paymentTargetCard.currentDebtDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })})</option>
-                    <option value="USD">USD (deuda: {paymentTargetCard.currentDebtUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })})</option>
+                    {ledgerCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {code} — {t('pages.cards.debtInline')}:{' '}
+                        {fc(
+                          code === primaryCurrency
+                            ? paymentTargetCard.currentDebtDop
+                            : paymentTargetCard.currentDebtUsd,
+                          code
+                        )}
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}
               <div>
-                <label className="label">Fecha</label>
+                <label className="label">{t('pages.cards.date')}</label>
                 <input
                   type="date"
                   value={cardPaymentForm.paymentDate}
@@ -646,7 +711,7 @@ const Cards: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Monto</label>
+                <label className="label">{t('pages.cards.amount')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -657,17 +722,17 @@ const Cards: React.FC = () => {
                   required
                 />
                 <p className="text-xs text-dark-500 mt-1">
-                  Se aplicará hasta el saldo de la deuda en {cardPaymentForm.payCurrency}.
+                  {t('pages.cards.paymentAppliesHint', { currency: cardPaymentForm.payCurrency })}
                 </p>
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.cards.sourceAccountOptional')}</label>
                 <select
                   value={cardPaymentForm.bankAccountId}
                   onChange={(e) => setCardPaymentForm({ ...cardPaymentForm, bankAccountId: e.target.value })}
                   className="input w-full"
                 >
-                  <option value="">Sin vincular saldo</option>
+                  <option value="">{t('pages.cards.unlinkedBalance')}</option>
                   {accountsForCardPayment.map((a: BankAccount) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -677,7 +742,7 @@ const Cards: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="label">Notas (opcional)</label>
+                <label className="label">{t('pages.cards.notesOptional')}</label>
                 <textarea
                   value={cardPaymentForm.notes}
                   onChange={(e) => setCardPaymentForm({ ...cardPaymentForm, notes: e.target.value })}
@@ -687,7 +752,7 @@ const Cards: React.FC = () => {
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">
-                  Registrar
+                  {t('pages.cards.register')}
                 </button>
                 <button
                   type="button"
@@ -697,13 +762,13 @@ const Cards: React.FC = () => {
                   }}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
             {recentCardPayments.length > 0 && (
               <div className="mt-6 border-t border-dark-600 pt-4">
-                <h3 className="text-sm font-semibold text-dark-300 mb-2">Pagos recientes</h3>
+                <h3 className="text-sm font-semibold text-dark-300 mb-2">{t('pages.cards.recentPayments')}</h3>
                 <ul className="space-y-2 text-sm">
                   {recentCardPayments.map((p) => (
                     <li
@@ -712,14 +777,13 @@ const Cards: React.FC = () => {
                     >
                       <span className="min-w-0 flex-1 text-dark-300">
                         <span className="block">
-                          {p.paymentDate?.slice(0, 10)} — {p.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          {p.currency}
+                          {p.paymentDate?.slice(0, 10)} — {fc(p.amount, p.currency)}
                         </span>
                         <span className="block text-xs text-dark-500 mt-0.5">
-                          Origen:{' '}
+                          {t('pages.cards.source')}:{' '}
                           {p.bankAccountId != null
-                            ? bankAccountNameById.get(p.bankAccountId) ?? `Cuenta #${p.bankAccountId}`
-                            : 'Sin cuenta vinculada'}
+                            ? bankAccountNameById.get(p.bankAccountId) ?? t('pages.cards.accountNumber', { id: p.bankAccountId })
+                            : t('pages.cards.noLinkedAccount')}
                         </span>
                       </span>
                       <button
@@ -727,7 +791,7 @@ const Cards: React.FC = () => {
                         onClick={() => handleDeleteCardPayment(p.id)}
                         className="text-xs text-red-400 hover:text-red-300"
                       >
-                        Eliminar
+                        {t('common.actions.delete')}
                       </button>
                     </li>
                   ))}
@@ -759,12 +823,12 @@ const Cards: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="cards-modal-title" className="text-2xl font-bold text-white mb-6">
-              {editingCard ? 'Editar Tarjeta' : 'Nueva Tarjeta'}
+              {editingCard ? t('pages.cards.editCard') : t('pages.cards.newCard')}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Banco</label>
+                  <label className="label">{t('pages.cards.bank')}</label>
                   <input
                     type="text"
                     value={formData.bankName}
@@ -774,7 +838,7 @@ const Cards: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="label">Nombre de Tarjeta</label>
+                  <label className="label">{t('pages.cards.cardName')}</label>
                   <input
                     type="text"
                     value={formData.cardName}
@@ -786,23 +850,25 @@ const Cards: React.FC = () => {
               </div>
 
               <div>
-                <label className="label">Tipo de Moneda</label>
+                <label className="label">{t('pages.cards.currencyType')}</label>
                 <select
                   value={formData.currencyType}
                   onChange={(e) => setFormData({ ...formData, currencyType: e.target.value as any })}
                   className="input w-full"
                   required
                 >
-                  <option value="DOP">DOP</option>
-                  <option value="USD">USD</option>
-                  <option value="DUAL">DUAL</option>
+                  <option value="DOP">{primaryCurrency}</option>
+                  <option value="USD">{secondaryCurrency}</option>
+                  <option value="DUAL">
+                    {primaryCurrency} + {secondaryCurrency} (DUAL)
+                  </option>
                 </select>
               </div>
 
               {(formData.currencyType === 'DOP' || formData.currencyType === 'DUAL') && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="label">Límite de Crédito (DOP)</label>
+                    <label className="label">{t('pages.cards.creditLimitCurrency', { currency: primaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -813,7 +879,7 @@ const Cards: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="label">Deuda Actual (DOP)</label>
+                    <label className="label">{t('pages.cards.currentDebtCurrency', { currency: primaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -823,14 +889,14 @@ const Cards: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="label">Pago Mínimo (DOP)</label>
+                    <label className="label">{t('pages.cards.minimumPaymentCurrency', { currency: primaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
                       value={formData.minimumPaymentDop}
                       onChange={(e) => setFormData({ ...formData, minimumPaymentDop: e.target.value })}
                       className="input w-full"
-                      placeholder="Opcional"
+                      placeholder={t('pages.cards.optional')}
                     />
                   </div>
                 </div>
@@ -839,7 +905,7 @@ const Cards: React.FC = () => {
               {(formData.currencyType === 'USD' || formData.currencyType === 'DUAL') && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="label">Límite de Crédito (USD)</label>
+                    <label className="label">{t('pages.cards.creditLimitCurrency', { currency: secondaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -850,7 +916,7 @@ const Cards: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="label">Deuda Actual (USD)</label>
+                    <label className="label">{t('pages.cards.currentDebtCurrency', { currency: secondaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -860,14 +926,14 @@ const Cards: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="label">Pago Mínimo (USD)</label>
+                    <label className="label">{t('pages.cards.minimumPaymentCurrency', { currency: secondaryCurrency })}</label>
                     <input
                       type="number"
                       step="0.01"
                       value={formData.minimumPaymentUsd}
                       onChange={(e) => setFormData({ ...formData, minimumPaymentUsd: e.target.value })}
                       className="input w-full"
-                      placeholder="Opcional"
+                      placeholder={t('pages.cards.optional')}
                     />
                   </div>
                 </div>
@@ -875,7 +941,7 @@ const Cards: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Día de Corte</label>
+                  <label className="label">{t('pages.cards.cutOffDay')}</label>
                   <input
                     type="number"
                     min="1"
@@ -887,7 +953,7 @@ const Cards: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="label">Día Límite de Pago</label>
+                  <label className="label">{t('pages.cards.paymentDueDay')}</label>
                   <input
                     type="number"
                     min="1"
@@ -902,7 +968,7 @@ const Cards: React.FC = () => {
 
               <div className="flex space-x-4 pt-4">
                 <button type="submit" className="btn-primary flex-1">
-                  {editingCard ? 'Actualizar' : 'Crear'}
+                  {editingCard ? t('pages.cards.update') : t('pages.cards.create')}
                 </button>
                 <button
                   type="button"
@@ -912,7 +978,7 @@ const Cards: React.FC = () => {
                   }}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>

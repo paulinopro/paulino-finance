@@ -1,0 +1,3 @@
+/*! For license information please see 14960.ee46d7c2.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[14960],{14960(n,e,c){c.r(e),c.d(e,{default:()=>a});const a=(0,c(21639).A)("Bitcoin",[["path",{d:"M11.767 19.089c4.924.868 6.14-6.025 1.216-6.894m-1.216 6.894L5.86 18.047m5.908 1.042-.347 1.97m1.563-8.864c4.924.869 6.14-6.025 1.215-6.893m-1.215 6.893-3.94-.694m5.155-6.2L8.29 4.26m5.908 1.042.348-1.97M7.48 20.364l3.126-17.727",key:"yr8idg"}]])}}]);
+//# sourceMappingURL=14960.ee46d7c2.chunk.js.map

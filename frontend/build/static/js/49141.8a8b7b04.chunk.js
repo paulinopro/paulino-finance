@@ -1,0 +1,3 @@
+/*! For license information please see 49141.8a8b7b04.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[49141],{49141(e,n,a){a.r(n),a.d(n,{default:()=>c});const c=(0,a(21639).A)("GitCommitVertical",[["path",{d:"M12 3v6",key:"1holv5"}],["circle",{cx:"12",cy:"12",r:"3",key:"1v7zrd"}],["path",{d:"M12 15v6",key:"a9ows0"}]])}}]);
+//# sourceMappingURL=49141.8a8b7b04.chunk.js.map

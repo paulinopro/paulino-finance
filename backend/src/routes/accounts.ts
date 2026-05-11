@@ -5,6 +5,7 @@ import {
   createAccount,
   updateAccount,
   deleteAccount,
+  listBankAccountMovements,
 } from '../controllers/accountController';
 import { listAccountTransfers, createAccountTransfer } from '../controllers/accountTransferController';
 import { listCashAdjustments, createCashAdjustment } from '../controllers/cashAdjustmentController';
@@ -23,6 +24,7 @@ router.get('/cash-adjustments', listCashAdjustments);
 router.get('/', getAccounts);
 router.post('/', createAccount);
 router.post('/:id/cash-adjustments', createCashAdjustment);
+router.get('/:id/movements', listBankAccountMovements);
 router.get('/:id', getAccount);
 router.put('/:id', updateAccount);
 router.delete('/:id', deleteAccount);

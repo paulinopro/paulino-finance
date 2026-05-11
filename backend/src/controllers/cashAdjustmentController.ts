@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta } from '../services/accountBalance';
+import { getUserCurrencyPair, validateLedgerCurrencyForUser } from '../utils/userCurrencyPair';
 
 export const listCashAdjustments = async (req: AuthRequest, res: Response) => {
   try {
@@ -50,15 +51,21 @@ export const createCashAdjustment = async (req: AuthRequest, res: Response) => {
   if (isNaN(delta) || delta === 0) {
     return res.status(400).json({ message: 'amountDelta must be a non-zero number' });
   }
-  if (String(currency) !== 'DOP' && String(currency) !== 'USD') {
-    return res.status(400).json({ message: 'currency must be DOP or USD' });
+  const pair = await getUserCurrencyPair(userId);
+  const ledErr = validateLedgerCurrencyForUser(pair, String(currency));
+  if (ledErr) {
+    return res.status(400).json({ message: ledErr });
   }
 
   const client = await getClient();
   try {
     await client.query('BEGIN');
 
-    await applyBalanceDelta(userId, accountId, String(currency), delta, client);
+    const rsn = reason && String(reason).trim() ? `: ${String(reason).trim()}` : '';
+    await applyBalanceDelta(userId, accountId, String(currency), delta, client, {
+      description:
+        delta > 0 ? `Entrada por ajuste de caja${rsn}` : `Salida por ajuste de caja${rsn}`,
+    });
 
     const ins = await client.query(
       `INSERT INTO cash_adjustments (user_id, bank_account_id, amount_delta, currency, reason, counted_total)

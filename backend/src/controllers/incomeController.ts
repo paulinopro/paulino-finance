@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { amountToPrimary, getConversionContextForUser } from '../services/userCurrencyConversion';
 import { applyBalanceDelta } from '../services/accountBalance';
 import {
   validateIncomeUpdateForLinkedReceivable,
@@ -12,6 +12,62 @@ import { FREQUENCY_VALUES, normalizeFrequency, type Nature, type RecurrenceType 
 import { parseRecurrenceBoundaryFromBody } from '../utils/recurrenceBoundary';
 import { deleteCalendarEventsForRelated } from '../services/calendarService';
 import { toYmdFromPgDate } from '../utils/dateUtils';
+import {
+  getUserCurrencyPair,
+  isCurrencyInUserPair,
+  validateLedgerCurrencyForUser,
+} from '../utils/userCurrencyPair';
+import {
+  deleteIncomePeriodAmount,
+  getIncomePeriodAmount,
+  upsertIncomePeriodAmount,
+} from '../services/recurringPeriodAmounts';
+
+function isMonthlyRecurringIncome(row: {
+  recurrence_type?: string;
+  frequency?: string | null;
+}): boolean {
+  return row.recurrence_type === 'recurrent' && normalizeFrequency(row.frequency ?? undefined) === 'monthly';
+}
+
+function amountForVariableMonthlyIncomeRow(
+  row: { nature?: string; amount: unknown; period_amount?: unknown | null },
+  receivedThisMonth: boolean,
+  monthlyRec: boolean
+): number {
+  const base = parseFloat(String(row.amount));
+  if (!monthlyRec || row.nature !== 'variable' || !receivedThisMonth) return base;
+  const pv = row.period_amount;
+  if (pv != null && pv !== '') {
+    const n = parseFloat(String(pv));
+    if (!Number.isNaN(n)) return n;
+  }
+  return base;
+}
+
+/** Estado «recibido este mes» para recurrentes mensuales con tracking; compatibilidad si last_received es null. */
+function incomeDisplayedReceived(
+  row: {
+    is_received: boolean;
+    last_received_month: number | null;
+    last_received_year: number | null;
+    recurrence_type: string;
+    frequency: string | null;
+  },
+  currentMonth: number,
+  currentYear: number
+): boolean {
+  if (!isMonthlyRecurringIncome(row)) {
+    return Boolean(row.is_received);
+  }
+  if (row.last_received_month != null && row.last_received_year != null) {
+    if (row.last_received_month !== currentMonth || row.last_received_year !== currentYear) {
+      return false;
+    }
+    return Boolean(row.is_received);
+  }
+  return Boolean(row.is_received);
+}
 
 /** Ingresos recurrentes: valida frecuencia y campos de calendario (independiente de nature fijo/variable). */
 function validateRecurrentIncomeSchedule(
@@ -125,11 +181,20 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
     // Save params before adding limit/offset for totals query
     const paramsBeforePagination = [...params];
 
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const currentYear = currentDate.getFullYear();
+
     // Get paginated results
     let queryText = `
       SELECT id, description, amount, currency, nature, recurrence_type, frequency,
               receipt_day, date, bank_account_id, is_received,
-              recurrence_start_date, recurrence_end_date, created_at, updated_at
+              last_received_month, last_received_year,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at,
+              (SELECT ipa.amount FROM income_period_amounts ipa
+               WHERE ipa.income_id = income.id AND ipa.user_id = income.user_id
+                 AND ipa.year = ${currentYear} AND ipa.month = ${currentMonth}
+               LIMIT 1) AS period_amount
        FROM income
        ${whereClause}
        ORDER BY created_at DESC
@@ -139,23 +204,37 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
 
     const result = await query(queryText, params);
 
-    const income = result.rows.map((row) => ({
-      id: row.id,
-      description: row.description,
-      amount: parseFloat(row.amount),
-      currency: row.currency,
-      nature: row.nature,
-      recurrenceType: row.recurrence_type,
-      frequency: row.frequency,
-      receiptDay: row.receipt_day,
-      date: row.date,
-      bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
-      isReceived: Boolean(row.is_received),
-      recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
-      recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const income = result.rows.map((row) => {
+      const isReceived = incomeDisplayedReceived(
+        {
+          is_received: Boolean(row.is_received),
+          last_received_month: row.last_received_month,
+          last_received_year: row.last_received_year,
+          recurrence_type: row.recurrence_type,
+          frequency: row.frequency,
+        },
+        currentMonth,
+        currentYear
+      );
+      const monthlyRec = isMonthlyRecurringIncome(row);
+      return {
+        id: row.id,
+        description: row.description,
+        amount: amountForVariableMonthlyIncomeRow(row, isReceived, monthlyRec),
+        currency: row.currency,
+        nature: row.nature,
+        recurrenceType: row.recurrence_type,
+        frequency: row.frequency,
+        receiptDay: row.receipt_day,
+        date: row.date,
+        bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        isReceived,
+        recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
+        recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
 
     // Calculate totals for all income (not just current page)
     // Use params without limit and offset
@@ -163,17 +242,17 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
       `SELECT amount, currency FROM income ${whereClause}`,
       paramsBeforePagination
     );
-    const totalDop = allIncomeResult.rows
-      .filter((row) => row.currency === 'DOP')
-      .reduce((sum, row) => sum + parseFloat(row.amount), 0);
-    const totalUsd = allIncomeResult.rows
-      .filter((row) => row.currency === 'USD')
-      .reduce((sum, row) => sum + parseFloat(row.amount), 0);
-    
-    // Get exchange rate for total calculation
-    const userResult = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
-    const totalAmount = totalDop + (totalUsd * exchangeRate);
+    const ctx = await getConversionContextForUser(userId);
+    const totalsByCurrency: Record<string, number> = {};
+    let totalInPrimary = 0;
+    for (const row of allIncomeResult.rows) {
+      const amt = parseFloat(row.amount);
+      const c = String(row.currency || 'DOP').toUpperCase();
+      totalsByCurrency[c] = (totalsByCurrency[c] || 0) + amt;
+      totalInPrimary += amountToPrimary(amt, c, ctx);
+    }
+    const totalPrimary = totalsByCurrency[ctx.pair.primary] ?? 0;
+    const totalSecondary = totalsByCurrency[ctx.pair.secondary] ?? 0;
 
     const totalPages = Math.ceil(total / limitNum);
 
@@ -181,8 +260,15 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
       success: true,
       income,
       summary: {
-        totalDop,
-        totalUsd,
+        totalsByCurrency,
+        totalInPrimary,
+        totalPrimary,
+        totalSecondary,
+        primaryCurrency: ctx.pair.primary,
+        secondaryCurrency: ctx.pair.secondary,
+        exchangeRate: ctx.pairRateSecondaryPerPrimary,
+        totalDop: totalsByCurrency.DOP ?? 0,
+        totalUsd: totalsByCurrency.USD ?? 0,
         totalIncome: total,
       },
       pagination: {
@@ -203,10 +289,19 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const incomeId = parseInt(req.params.id);
 
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const currentYear = currentDate.getFullYear();
+
     const result = await query(
       `SELECT id, description, amount, currency, nature, recurrence_type, frequency,
               receipt_day, date, bank_account_id, is_received,
-              recurrence_start_date, recurrence_end_date, created_at, updated_at
+              last_received_month, last_received_year,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at,
+              (SELECT ipa.amount FROM income_period_amounts ipa
+               WHERE ipa.income_id = income.id AND ipa.user_id = income.user_id
+                 AND ipa.year = ${currentYear} AND ipa.month = ${currentMonth}
+               LIMIT 1) AS period_amount
        FROM income
        WHERE id = $1 AND user_id = $2`,
       [incomeId, userId]
@@ -217,12 +312,24 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
     }
 
     const row = result.rows[0];
+    const isReceived = incomeDisplayedReceived(
+      {
+        is_received: Boolean(row.is_received),
+        last_received_month: row.last_received_month,
+        last_received_year: row.last_received_year,
+        recurrence_type: row.recurrence_type,
+        frequency: row.frequency,
+      },
+      currentMonth,
+      currentYear
+    );
+    const monthlyRec = isMonthlyRecurringIncome(row);
     res.json({
       success: true,
       income: {
         id: row.id,
         description: row.description,
-        amount: parseFloat(row.amount),
+        amount: amountForVariableMonthlyIncomeRow(row, isReceived, monthlyRec),
         currency: row.currency,
         nature: row.nature,
         recurrenceType: row.recurrence_type,
@@ -230,7 +337,7 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
         receiptDay: row.receipt_day,
         date: row.date,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
-        isReceived: Boolean(row.is_received),
+        isReceived,
         recurrenceStartDate: row.recurrence_start_date ? toYmdFromPgDate(row.recurrence_start_date) : null,
         recurrenceEndDate: row.recurrence_end_date ? toYmdFromPgDate(row.recurrence_end_date) : null,
         createdAt: row.created_at,
@@ -280,10 +387,31 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
     }
   }
 
-  const cur = currency || 'DOP';
+  const pair = await getUserCurrencyPair(userId);
+  const cur =
+    currency != null && String(currency).trim() !== ''
+      ? String(currency).trim().toUpperCase()
+      : pair.primary;
+  if (!isCurrencyInUserPair(pair, cur)) {
+    return res.status(400).json({
+      message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+    });
+  }
   const bankAccountId = parseBankAccountIdFromBody(req.body, 'create', null);
+  if (bankAccountId) {
+    const ledErr = validateLedgerCurrencyForUser(pair, cur);
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
+    }
+  }
   const amt = parseFloat(String(amount));
   const initialReceived = typeof isReceived === 'boolean' ? isReceived : false;
+  const ledgerIncomeDesc = `Ingreso: ${String(description)}`;
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const monthlyReceivedInitial =
+    initialReceived && recurrenceType === 'recurrent' && freqNorm === 'monthly';
 
   let recurrenceStartDate: string | null = null;
   let recurrenceEndDate: string | null = null;
@@ -302,8 +430,8 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
 
     const result = await client.query(
       `INSERT INTO income 
-       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, last_received_month, last_received_year)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency,
                  receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
       [
@@ -320,12 +448,21 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
         initialReceived,
         recurrenceType === 'recurrent' ? recurrenceStartDate : null,
         recurrenceType === 'recurrent' ? recurrenceEndDate : null,
+        monthlyReceivedInitial ? currentMonth : null,
+        monthlyReceivedInitial ? currentYear : null,
       ]
     );
 
+    const newId = result.rows[0].id as number;
+    if (monthlyReceivedInitial && nature === 'variable') {
+      await upsertIncomePeriodAmount(client, userId, newId, currentYear, currentMonth, amt);
+    }
+
     if (initialReceived && bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, cur, amt, client);
+        await applyBalanceDelta(userId, bankAccountId, cur, amt, client, {
+          description: ledgerIncomeDesc,
+        });
       } catch (e: any) {
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
           await client.query('ROLLBACK');
@@ -401,6 +538,13 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   const newDesc = description !== undefined ? description : old.description;
   const newAmount = amount !== undefined ? parseFloat(String(amount)) : parseFloat(old.amount);
   const newCurrency = currency !== undefined ? currency : old.currency;
+  const pair = await getUserCurrencyPair(userId);
+  const curNorm = String(newCurrency).trim().toUpperCase();
+  if (!isCurrencyInUserPair(pair, curNorm)) {
+    return res.status(400).json({
+      message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+    });
+  }
   let newNature: Nature =
     req.body.nature !== undefined ? (req.body.nature as Nature) : (old.nature as Nature);
   let newRecurrence: RecurrenceType =
@@ -426,6 +570,13 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   const newReceiptDay = receiptDay !== undefined ? receiptDay : old.receipt_day;
   const newDate = date !== undefined ? date : old.date;
   const newBankId = parseBankAccountIdFromBody(req.body, 'update', old.bank_account_id);
+
+  if (newBankId) {
+    const ledErr = validateLedgerCurrencyForUser(pair, curNorm);
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
+    }
+  }
 
   const receivableLink = await query(
     `SELECT 1 FROM accounts_receivable_payments WHERE income_id = $1 AND user_id = $2 LIMIT 1`,
@@ -481,7 +632,8 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
         old.bank_account_id,
         old.currency,
         -parseFloat(old.amount),
-        client
+        client,
+        { description: `Reversión: «${old.description}»` }
       );
     }
 
@@ -523,7 +675,9 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
 
     if (newBankId && newIsReceived) {
       try {
-        await applyBalanceDelta(userId, newBankId, newCurrency, newAmount, client);
+        await applyBalanceDelta(userId, newBankId, newCurrency, newAmount, client, {
+          description: `Ingreso: ${newDesc}`,
+        });
       } catch (e: any) {
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
           await client.query('ROLLBACK');
@@ -579,7 +733,7 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
     const incomeId = parseInt(req.params.id);
 
     const pre = await query(
-      `SELECT bank_account_id, amount, currency, is_received FROM income WHERE id = $1 AND user_id = $2`,
+      `SELECT bank_account_id, amount, currency, is_received, description FROM income WHERE id = $1 AND user_id = $2`,
       [incomeId, userId]
     );
     if (pre.rows.length === 0) {
@@ -596,7 +750,9 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
           userId,
           row.bank_account_id,
           row.currency,
-          -parseFloat(row.amount)
+          -parseFloat(row.amount),
+          undefined,
+          { description: `Reversión por eliminación: «${row.description}»` }
         );
       } catch (e: any) {
         console.error('Reverse balance on income delete:', e);
@@ -624,18 +780,36 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
   }
 };
 
+function resolveMonthlyIncomeReceiptAmount(
+  row: { nature: string; amount: unknown },
+  monthlyRec: boolean,
+  actualAmountRaw: unknown
+): number {
+  const base = parseFloat(String(row.amount));
+  if (!monthlyRec || row.nature !== 'variable') return base;
+  if (actualAmountRaw === undefined || actualAmountRaw === null || actualAmountRaw === '') return base;
+  const n = typeof actualAmountRaw === 'number' ? actualAmountRaw : parseFloat(String(actualAmountRaw));
+  if (Number.isNaN(n) || n <= 0) {
+    throw new Error('INVALID_ACTUAL_AMOUNT');
+  }
+  return n;
+}
+
 export const updateIncomeReceiptStatus = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const incomeId = parseInt(req.params.id);
     const { isReceived } = req.body;
+    const actualAmountRaw = req.body.actualAmount;
 
     if (typeof isReceived !== 'boolean') {
       return res.status(400).json({ message: 'isReceived must be a boolean' });
     }
 
     const checkResult = await query(
-      `SELECT is_received, bank_account_id, amount, currency FROM income WHERE id = $1 AND user_id = $2`,
+      `SELECT is_received, description, bank_account_id, amount, currency, nature, recurrence_type, frequency,
+              last_received_month, last_received_year
+       FROM income WHERE id = $1 AND user_id = $2`,
       [incomeId, userId]
     );
 
@@ -655,60 +829,197 @@ export const updateIncomeReceiptStatus = async (req: AuthRequest, res: Response)
     }
 
     const row = checkResult.rows[0];
-    if (row.is_received === isReceived) {
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth() + 1;
+    const currentYear = currentDate.getFullYear();
+
+    const displayedReceived = incomeDisplayedReceived(
+      {
+        is_received: Boolean(row.is_received),
+        last_received_month: row.last_received_month,
+        last_received_year: row.last_received_year,
+        recurrence_type: row.recurrence_type,
+        frequency: row.frequency,
+      },
+      currentMonth,
+      currentYear
+    );
+
+    if (displayedReceived === isReceived) {
       return res.json({
         success: true,
         message: 'Receipt status unchanged',
         income: {
           id: incomeId,
-          isReceived: row.is_received,
+          isReceived: displayedReceived,
         },
       });
     }
+
+    const monthlyRec = isMonthlyRecurringIncome(row);
 
     const client = await getClient();
     try {
       await client.query('BEGIN');
 
-      if (row.bank_account_id) {
-        const amt = parseFloat(row.amount);
-        const delta = isReceived ? amt : -amt;
-        try {
-          await applyBalanceDelta(userId, row.bank_account_id, row.currency, delta, client);
-        } catch (e: any) {
-          if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
-            await client.query('ROLLBACK');
-            return res.status(400).json({
-              message:
-                e.message === 'CURRENCY_MISMATCH'
-                  ? 'La moneda no coincide con la cuenta seleccionada'
-                  : 'Cuenta no encontrada',
+      if (!monthlyRec) {
+        if (row.bank_account_id) {
+          const amt = parseFloat(String(row.amount));
+          const delta = isReceived ? amt : -amt;
+          try {
+            await applyBalanceDelta(userId, row.bank_account_id, row.currency, delta, client, {
+              description:
+                delta > 0
+                  ? `Ingreso recibido: «${row.description}»`
+                  : `Ingreso dejado pendiente (reversión): «${row.description}»`,
             });
+          } catch (e: any) {
+            if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
+              await client.query('ROLLBACK');
+              return res.status(400).json({
+                message:
+                  e.message === 'CURRENCY_MISMATCH'
+                    ? 'La moneda no coincide con la cuenta seleccionada'
+                    : 'Cuenta no encontrada',
+              });
+            }
+            throw e;
           }
-          throw e;
         }
+
+        const result = await client.query(
+          `UPDATE income
+           SET is_received = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND user_id = $3
+           RETURNING id, is_received, updated_at`,
+          [isReceived, incomeId, userId]
+        );
+
+        await client.query('COMMIT');
+
+        const r = result.rows[0];
+        res.json({
+          success: true,
+          message: 'Receipt status updated successfully',
+          income: {
+            id: r.id,
+            isReceived: r.is_received,
+            updatedAt: r.updated_at,
+          },
+        });
+        return;
       }
 
-      const result = await client.query(
-        `UPDATE income
-         SET is_received = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND user_id = $3
-         RETURNING id, is_received, updated_at`,
-        [isReceived, incomeId, userId]
-      );
+      let receiptAmt: number;
+      try {
+        receiptAmt = resolveMonthlyIncomeReceiptAmount(row, monthlyRec, actualAmountRaw);
+      } catch {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'actualAmount must be a positive number' });
+      }
 
-      await client.query('COMMIT');
+      const alreadyReceivedThisPeriod =
+        row.last_received_month === currentMonth &&
+        row.last_received_year === currentYear &&
+        Boolean(row.is_received);
 
-      const r = result.rows[0];
-      res.json({
-        success: true,
-        message: 'Receipt status updated successfully',
-        income: {
-          id: r.id,
-          isReceived: r.is_received,
-          updatedAt: r.updated_at,
-        },
-      });
+      if (isReceived) {
+        if (row.nature === 'variable') {
+          await upsertIncomePeriodAmount(client, userId, incomeId, currentYear, currentMonth, receiptAmt);
+        }
+        if (row.bank_account_id && !alreadyReceivedThisPeriod) {
+          try {
+            await applyBalanceDelta(userId, row.bank_account_id, row.currency, receiptAmt, client, {
+              description: `Ingreso recibido: «${row.description}»`,
+            });
+          } catch (e: any) {
+            if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
+              await client.query('ROLLBACK');
+              return res.status(400).json({
+                message:
+                  e.message === 'CURRENCY_MISMATCH'
+                    ? 'La moneda no coincide con la cuenta seleccionada'
+                    : 'Cuenta no encontrada',
+              });
+            }
+            throw e;
+          }
+        }
+
+        const result = await client.query(
+          `UPDATE income
+           SET is_received = true,
+               last_received_month = $1,
+               last_received_year = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $3 AND user_id = $4
+           RETURNING id, is_received, updated_at`,
+          [currentMonth, currentYear, incomeId, userId]
+        );
+
+        await client.query('COMMIT');
+
+        const r = result.rows[0];
+        res.json({
+          success: true,
+          message: 'Receipt status updated successfully',
+          income: {
+            id: r.id,
+            isReceived: r.is_received,
+            updatedAt: r.updated_at,
+          },
+        });
+      } else {
+        let reverseAmt = parseFloat(String(row.amount));
+        if (row.nature === 'variable') {
+          const stored = await getIncomePeriodAmount(userId, incomeId, currentYear, currentMonth, client);
+          if (stored != null) reverseAmt = stored;
+        }
+
+        if (displayedReceived && row.bank_account_id) {
+          try {
+            await applyBalanceDelta(userId, row.bank_account_id, row.currency, -reverseAmt, client, {
+              description: `Ingreso dejado pendiente (reversión): «${row.description}»`,
+            });
+          } catch (e: any) {
+            if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
+              await client.query('ROLLBACK');
+              return res.status(400).json({
+                message:
+                  e.message === 'CURRENCY_MISMATCH'
+                    ? 'La moneda no coincide con la cuenta seleccionada'
+                    : 'Cuenta no encontrada',
+              });
+            }
+            throw e;
+          }
+        }
+
+        if (row.nature === 'variable') {
+          await deleteIncomePeriodAmount(client, userId, incomeId, currentYear, currentMonth);
+        }
+
+        const result = await client.query(
+          `UPDATE income
+           SET is_received = false, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND user_id = $2
+           RETURNING id, is_received, updated_at`,
+          [incomeId, userId]
+        );
+
+        await client.query('COMMIT');
+
+        const r = result.rows[0];
+        res.json({
+          success: true,
+          message: 'Receipt status updated successfully',
+          income: {
+            id: r.id,
+            isReceived: r.is_received,
+            updatedAt: r.updated_at,
+          },
+        });
+      }
     } catch (error: any) {
       await client.query('ROLLBACK');
       throw error;

@@ -1,0 +1,10 @@
+{
+  "dev": "Push only registers on production builds. For local development set REACT_APP_ENABLE_PUSH_SYNC=true.",
+  "pwaDisabled": "PWA disabled (REACT_APP_ENABLE_PWA=false in the frontend build).",
+  "unsupported": "This browser cannot use push notifications (missing service worker or PushManager).",
+  "noPermission": "Grant notification permission first.",
+  "noVapid": "The backend does not have VAPID configured (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY on the server).",
+  "noSwTimeout": "No active service worker in time (HTTPS / PWA build?). Reload or open as an installed PWA and try again.",
+  "errorSubscribe": "Subscribe failed (network or server). Check the browser console for details.",
+  "fallback": "Could not register for push notifications."
+}

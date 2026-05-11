@@ -14,6 +14,11 @@ export declare function resolveBillingIntervalForRow(row: {
     paypal_plan_id_monthly?: string | null;
     paypal_plan_id_yearly?: string | null;
 }): BillingInterval | null;
+/**
+ * Módulos permitidos para el usuario: super admin = todos; si no, proviene de
+ * `subscription_plans.enabled_modules` del plan vinculado a `user_subscriptions` (solo filas
+ * con suscripción activa/trialing y periodo no vencido). Ver `modulesFromJson`.
+ */
 export declare function getAllowedModulesForUserId(userId: number): Promise<string[]>;
 export declare function getSubscriptionDetailsForUser(userId: number): Promise<{
     isSuperAdmin: boolean;

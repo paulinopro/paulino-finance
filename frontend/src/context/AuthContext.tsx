@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
+import i18n from '../i18n/config';
 import { authService } from '../services/authService';
 import { adminService } from '../services/adminService';
 
@@ -21,6 +22,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [impersonatedBy, setImpersonatedBy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loc = user?.localePreference ?? 'es';
+    const lng = loc === 'en' || loc === 'de' ? loc : 'es';
+    void i18n.changeLanguage(lng);
+    document.documentElement.lang = lng;
+  }, [user?.localePreference]);
 
   useEffect(() => {
     const initAuth = async () => {

@@ -189,12 +189,13 @@ const deleteFinancialGoal = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
-        const gRes = await client.query(`SELECT id, currency FROM financial_goals WHERE id = $1 AND user_id = $2`, [id, userId]);
+        const gRes = await client.query(`SELECT id, currency, name FROM financial_goals WHERE id = $1 AND user_id = $2`, [id, userId]);
         if (gRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ message: 'Financial goal not found' });
         }
         const cur = String(gRes.rows[0].currency);
+        const goalNameDel = String(gRes.rows[0].name ?? '').trim() || `Meta #${id}`;
         const movs = await client.query(`SELECT bank_account_id, source_bank_account_id, amount FROM financial_goal_movements WHERE goal_id = $1 AND user_id = $2`, [id, userId]);
         for (const row of movs.rows) {
             const destId = row.bank_account_id;
@@ -202,10 +203,14 @@ const deleteFinancialGoal = async (req, res) => {
             const amt = parseFloat(row.amount);
             try {
                 if (srcId) {
-                    await (0, accountBalance_1.applyBalanceDelta)(userId, srcId, cur, amt, client);
+                    await (0, accountBalance_1.applyBalanceDelta)(userId, srcId, cur, amt, client, {
+                        description: `[Meta financiera «${goalNameDel}»] Eliminación de meta · devolución a cuenta origen`,
+                    });
                 }
                 if (destId) {
-                    await (0, accountBalance_1.applyBalanceDelta)(userId, destId, cur, -amt, client);
+                    await (0, accountBalance_1.applyBalanceDelta)(userId, destId, cur, -amt, client, {
+                        description: `[Meta financiera «${goalNameDel}»] Eliminación de meta · retiro de cuenta vinculada`,
+                    });
                 }
             }
             catch (e) {

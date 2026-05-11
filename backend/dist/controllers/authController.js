@@ -11,6 +11,7 @@ const jwt_1 = require("../utils/jwt");
 const emailService_1 = require("../services/emailService");
 const notificationTemplateSeed_1 = require("../services/notificationTemplateSeed");
 const exchangeRate_1 = require("../utils/exchangeRate");
+const userPreferences_1 = require("../constants/userPreferences");
 function hashResetToken(token) {
     return crypto_1.default.createHash('sha256').update(token, 'utf8').digest('hex');
 }
@@ -70,7 +71,7 @@ const register = async (req, res) => {
         const defaultRate = (0, exchangeRate_1.getDefaultExchangeRateDopUsd)();
         const result = await (0, database_1.query)(`INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper, defaultRate]);
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, locale_preference, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper, defaultRate]);
         const user = result.rows[0];
         const freePlan = await (0, database_1.query)(`SELECT id FROM subscription_plans WHERE slug = 'free' LIMIT 1`);
         if (freePlan.rows[0]) {
@@ -100,6 +101,7 @@ const register = async (req, res) => {
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference || 'DOP',
+                localePreference: user.locale_preference || 'es',
                 exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: !!user.is_super_admin,
@@ -122,7 +124,7 @@ const login = async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.cedula, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.email = $1`, [email]);
         if (result.rows.length === 0) {
@@ -153,6 +155,7 @@ const login = async (req, res) => {
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
                 currencyPreference: user.currency_preference || 'DOP',
+                localePreference: user.locale_preference || 'es',
                 exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,
@@ -172,7 +175,7 @@ const getMe = async (req, res) => {
     try {
         const userId = req.userId;
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.cedula, u.telegram_chat_id,
-              u.currency_preference, u.exchange_rate_dop_usd, u.timezone, u.created_at,
+              u.currency_preference, u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.created_at,
               u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1`, [userId]);
@@ -189,7 +192,8 @@ const getMe = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference,
+                currencyPreference: user.currency_preference || 'DOP',
+                localePreference: user.locale_preference || 'es',
                 exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,
@@ -210,7 +214,7 @@ exports.getMe = getMe;
 const updateMe = async (req, res) => {
     try {
         const userId = req.userId;
-        const { firstName, lastName, cedula, telegramChatId, exchangeRateDopUsd, timezone, email } = req.body;
+        const { firstName, lastName, cedula, telegramChatId, exchangeRateDopUsd, timezone, email, currencyPreference, localePreference } = req.body;
         // Handle null/empty values explicitly
         // For telegramChatId: if provided (even if empty string), update it; if undefined, keep current value
         let telegramValue = null;
@@ -270,6 +274,24 @@ const updateMe = async (req, res) => {
             values.push(timezone || 'America/Santo_Domingo');
             paramIndex++;
         }
+        if (currencyPreference !== undefined) {
+            const cur = (0, userPreferences_1.normalizeCurrencyPreference)(currencyPreference);
+            if (!cur) {
+                return res.status(400).json({ message: 'Moneda no válida' });
+            }
+            updates.push(`currency_preference = $${paramIndex}`);
+            values.push(cur);
+            paramIndex++;
+        }
+        if (localePreference !== undefined) {
+            const loc = (0, userPreferences_1.normalizeLocalePreference)(localePreference);
+            if (!loc) {
+                return res.status(400).json({ message: 'Idioma no válido' });
+            }
+            updates.push(`locale_preference = $${paramIndex}`);
+            values.push(loc);
+            paramIndex++;
+        }
         if (email !== undefined) {
             const emailNorm = String(email).trim().toLowerCase();
             if (!emailNorm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
@@ -292,7 +314,7 @@ const updateMe = async (req, res) => {
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex}
        RETURNING id, email, first_name, last_name, cedula, telegram_chat_id,
-                 currency_preference, exchange_rate_dop_usd, timezone, created_at, is_super_admin`, values);
+                 currency_preference, exchange_rate_dop_usd, timezone, locale_preference, created_at, is_super_admin`, values);
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -307,7 +329,8 @@ const updateMe = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference,
+                currencyPreference: user.currency_preference || 'DOP',
+                localePreference: user.locale_preference || 'es',
                 exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
                 timezone: user.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: user.is_super_admin === true,

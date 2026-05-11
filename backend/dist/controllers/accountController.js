@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.getAccount = exports.getAccounts = void 0;
+exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.listBankAccountMovements = exports.getAccount = exports.getAccounts = void 0;
 const database_1 = require("../config/database");
+const accountBalance_1 = require("../services/accountBalance");
+const BAL_EPS = 1e-9;
 const getAccounts = async (req, res) => {
     try {
         const userId = req.userId;
@@ -122,6 +124,50 @@ const getAccount = async (req, res) => {
     }
 };
 exports.getAccount = getAccount;
+const listBankAccountMovements = async (req, res) => {
+    try {
+        const userId = req.userId;
+        const accountId = parseInt(req.params.id);
+        if (Number.isNaN(accountId)) {
+            return res.status(400).json({ message: 'Invalid account id' });
+        }
+        const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200);
+        const offset = Math.max(parseInt(String(req.query.offset || '0'), 10) || 0, 0);
+        const own = await (0, database_1.query)('SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2', [
+            accountId,
+            userId,
+        ]);
+        if (own.rows.length === 0) {
+            return res.status(404).json({ message: 'Account not found' });
+        }
+        const [result, countR] = await Promise.all([
+            (0, database_1.query)(`SELECT id, amount, currency, direction, description, status, occurred_at
+         FROM bank_account_movements
+         WHERE user_id = $1 AND bank_account_id = $2
+         ORDER BY occurred_at DESC, id DESC
+         LIMIT $3 OFFSET $4`, [userId, accountId, limit, offset]),
+            (0, database_1.query)(`SELECT COUNT(*)::int AS c FROM bank_account_movements WHERE user_id = $1 AND bank_account_id = $2`, [userId, accountId]),
+        ]);
+        res.json({
+            success: true,
+            movements: result.rows.map((r) => ({
+                id: r.id,
+                amount: parseFloat(r.amount),
+                currency: r.currency,
+                direction: r.direction,
+                description: r.description,
+                status: r.status,
+                occurredAt: r.occurred_at,
+            })),
+            total: countR.rows[0]?.c ?? 0,
+        });
+    }
+    catch (error) {
+        console.error('List account movements error:', error);
+        res.status(500).json({ message: 'Error listing movements', error: error.message });
+    }
+};
+exports.listBankAccountMovements = listBankAccountMovements;
 const createAccount = async (req, res) => {
     try {
         const userId = req.userId;
@@ -145,6 +191,16 @@ const createAccount = async (req, res) => {
             kind,
         ]);
         const row = result.rows[0];
+        const accId = row.id;
+        const ct = row.currency_type;
+        const bd = parseFloat(row.balance_dop || 0);
+        const bu = parseFloat(row.balance_usd || 0);
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'DOP') && bd > BAL_EPS) {
+            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, 'DOP', 'IN', bd, 'Saldo inicial (DOP)');
+        }
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'USD') && bu > BAL_EPS) {
+            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, 'USD', 'IN', bu, 'Saldo inicial (USD)');
+        }
         res.status(201).json({
             success: true,
             message: 'Account created successfully',
@@ -173,10 +229,13 @@ const updateAccount = async (req, res) => {
         const userId = req.userId;
         const accountId = parseInt(req.params.id);
         const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } = req.body;
-        const checkResult = await (0, database_1.query)('SELECT id FROM bank_accounts WHERE id = $1 AND user_id = $2', [accountId, userId]);
+        const checkResult = await (0, database_1.query)(`SELECT id, balance_dop, balance_usd, currency_type FROM bank_accounts WHERE id = $1 AND user_id = $2`, [accountId, userId]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({ message: 'Account not found' });
         }
+        const prev = checkResult.rows[0];
+        const oldDop = parseFloat(prev.balance_dop || 0);
+        const oldUsd = parseFloat(prev.balance_usd || 0);
         const kindUpdate = accountKind === 'cash' || accountKind === 'wallet' || accountKind === 'bank' ? accountKind : null;
         const result = await (0, database_1.query)(`UPDATE bank_accounts
        SET bank_name = COALESCE($1, bank_name),
@@ -201,6 +260,21 @@ const updateAccount = async (req, res) => {
             userId,
         ]);
         const row = result.rows[0];
+        const ct = row.currency_type;
+        const newDop = parseFloat(row.balance_dop || 0);
+        const newUsd = parseFloat(row.balance_usd || 0);
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'DOP')) {
+            const dDop = newDop - oldDop;
+            if (Math.abs(dDop) > BAL_EPS) {
+                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, 'DOP', dDop > 0 ? 'IN' : 'OUT', Math.abs(dDop), 'Ajuste manual de balance (DOP)');
+            }
+        }
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'USD')) {
+            const dUsd = newUsd - oldUsd;
+            if (Math.abs(dUsd) > BAL_EPS) {
+                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, 'USD', dUsd > 0 ? 'IN' : 'OUT', Math.abs(dUsd), 'Ajuste manual de balance (USD)');
+            }
+        }
         res.json({
             success: true,
             message: 'Account updated successfully',

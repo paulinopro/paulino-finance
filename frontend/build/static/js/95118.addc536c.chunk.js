@@ -1,0 +1,3 @@
+/*! For license information please see 95118.addc536c.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[95118],{95118(e,n,a){a.r(n),a.d(n,{default:()=>l});const l=(0,a(21639).A)("Cylinder",[["ellipse",{cx:"12",cy:"5",rx:"9",ry:"3",key:"msslwz"}],["path",{d:"M3 5v14a9 3 0 0 0 18 0V5",key:"aqi0yr"}]])}}]);
+//# sourceMappingURL=95118.addc536c.chunk.js.map

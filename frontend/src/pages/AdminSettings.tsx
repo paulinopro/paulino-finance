@@ -4,8 +4,10 @@ import { Settings, UserCheck, Wrench, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { adminService } from '../services/adminService';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
+import { useTranslation } from 'react-i18next';
 
 const AdminSettings: React.FC = () => {
+  const { t } = useTranslation();
   const [regEnabled, setRegEnabled] = useState(true);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -20,10 +22,10 @@ const AdminSettings: React.FC = () => {
         setMaintenanceMode(s.maintenanceMode);
       })
       .catch(() => {
-        toast.error('No se pudieron cargar los ajustes');
+        toast.error(t('toast.adminSettings.loadError'));
       })
       .finally(() => setInitialLoad(false));
-  }, []);
+  }, [t]);
 
   const toggleRegistration = async () => {
     setSettingsLoading(true);
@@ -31,9 +33,9 @@ const AdminSettings: React.FC = () => {
       const next = !regEnabled;
       await adminService.updateSettings({ registrationEnabled: next });
       setRegEnabled(next);
-      toast.success(next ? 'Registro de usuarios habilitado' : 'Registro de usuarios deshabilitado');
+      toast.success(next ? t('toast.adminSettings.registrationEnabled') : t('toast.adminSettings.registrationDisabled'));
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al guardar');
+      toast.error(e.response?.data?.message || t('toast.adminSettings.saveError'));
     } finally {
       setSettingsLoading(false);
     }
@@ -46,13 +48,9 @@ const AdminSettings: React.FC = () => {
       const data = await adminService.updateSettings({ maintenanceMode: next });
       setMaintenanceMode(data.maintenanceMode);
       setRegEnabled(data.registrationEnabled);
-      toast.success(
-        next
-          ? 'Mantenimiento activo: el resto de usuarios queda en solo lectura'
-          : 'Mantenimiento desactivado'
-      );
+      toast.success(next ? t('toast.adminSettings.maintenanceOn') : t('toast.adminSettings.maintenanceOff'));
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al guardar');
+      toast.error(e.response?.data?.message || t('toast.adminSettings.saveError'));
     } finally {
       setMaintenanceLoading(false);
     }
@@ -61,7 +59,7 @@ const AdminSettings: React.FC = () => {
   if (initialLoad) {
     return (
       <div className="p-4 md:p-8 max-w-2xl mx-auto">
-        <p className="text-dark-500">Cargando…</p>
+        <p className="text-dark-500">{t('common.actions.loading')}</p>
       </div>
     );
   }
@@ -75,8 +73,8 @@ const AdminSettings: React.FC = () => {
             <Settings className="w-8 h-8" />
           </div>
           <div>
-            <h1 className="page-title">Configuración global</h1>
-            <p className="text-dark-400 text-sm">Banderas del sistema; solo super administradores</p>
+            <h1 className="page-title">{t('pages.adminGlobalSettings.title')}</h1>
+            <p className="text-dark-400 text-sm">{t('pages.adminGlobalSettings.subtitle')}</p>
           </div>
         </div>
 
@@ -85,11 +83,10 @@ const AdminSettings: React.FC = () => {
             <div className="flex items-start gap-3 mb-4">
               <UserCheck className="w-5 h-5 text-emerald-400/90 shrink-0 mt-0.5" />
               <div>
-                <h2 className="text-base font-semibold text-white">Registro de nuevas cuentas</h2>
+                <h2 className="text-base font-semibold text-white">{t('pages.adminGlobalSettings.registrationHeading')}</h2>
                 <p className="text-sm text-dark-400 mt-1 flex items-start gap-2">
                   <Info className="w-4 h-4 shrink-0 text-dark-500 mt-0.5" aria-hidden />
-                  Si está deshabilitado, el endpoint de registro rechaza nuevas altas. El inicio de sesión de
-                  usuarios existentes no cambia.
+                  {t('pages.adminGlobalSettings.registrationHelp')}
                 </p>
               </div>
             </div>
@@ -106,8 +103,8 @@ const AdminSettings: React.FC = () => {
               {settingsLoading
                 ? '…'
                 : regEnabled
-                  ? 'Habilitado — clic para deshabilitar el registro'
-                  : 'Deshabilitado — clic para permitir registro'}
+                  ? t('pages.adminGlobalSettings.registrationEnabled')
+                  : t('pages.adminGlobalSettings.registrationDisabled')}
             </button>
           </div>
 
@@ -115,12 +112,10 @@ const AdminSettings: React.FC = () => {
             <div className="flex items-start gap-3 mb-4">
               <Wrench className="w-5 h-5 text-amber-400/90 shrink-0 mt-0.5" />
               <div>
-                <h2 className="text-base font-semibold text-white">Modo mantenimiento (solo lectura)</h2>
+                <h2 className="text-base font-semibold text-white">{t('pages.adminGlobalSettings.maintenanceHeading')}</h2>
                 <p className="text-sm text-dark-400 mt-1 flex items-start gap-2">
                   <Info className="w-4 h-4 shrink-0 text-dark-500 mt-0.5" aria-hidden />
-                  Con la opción activa, los usuarios no super admin no pueden realizar acciones de escritura en la
-                  API (POST, PUT, PATCH, DELETE), salvo rutas de autenticación, suscripción y administración. Los
-                  super administradores conservan acceso completo.
+                  {t('pages.adminGlobalSettings.maintenanceHelp')}
                 </p>
               </div>
             </div>
@@ -137,8 +132,8 @@ const AdminSettings: React.FC = () => {
               {maintenanceLoading
                 ? '…'
                 : maintenanceMode
-                  ? 'Activo — clic para desactivar mantenimiento'
-                  : 'Inactivo — clic para activar solo lectura para usuarios'}
+                  ? t('pages.adminGlobalSettings.maintenanceActive')
+                  : t('pages.adminGlobalSettings.maintenanceInactive')}
             </button>
           </div>
         </div>

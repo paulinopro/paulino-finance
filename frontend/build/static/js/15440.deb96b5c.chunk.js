@@ -1,0 +1,3 @@
+/*! For license information please see 15440.deb96b5c.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[15440],{15440(e,n,a){a.r(n),a.d(n,{default:()=>t});const t=(0,a(21639).A)("BluetoothOff",[["path",{d:"m17 17-5 5V12l-5 5",key:"v5aci6"}],["path",{d:"m2 2 20 20",key:"1ooewy"}],["path",{d:"M14.5 9.5 17 7l-5-5v4.5",key:"1kddfz"}]])}}]);
+//# sourceMappingURL=15440.deb96b5c.chunk.js.map

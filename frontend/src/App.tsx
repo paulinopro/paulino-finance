@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
+import { IntlFormattingProvider } from './context/IntlFormattingContext';
 import { SubscriptionProvider } from './context/SubscriptionContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
@@ -66,7 +67,8 @@ function App() {
 
   return (
     <AuthProvider>
-      <SubscriptionProvider>
+      <IntlFormattingProvider>
+        <SubscriptionProvider>
         <Router
           future={{
             v7_startTransition: true,
@@ -139,7 +141,8 @@ function App() {
             </Routes>
           </Suspense>
         </Router>
-      </SubscriptionProvider>
+        </SubscriptionProvider>
+      </IntlFormattingProvider>
     </AuthProvider>
   );
 }

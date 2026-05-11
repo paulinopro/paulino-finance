@@ -61,8 +61,15 @@ const createAccountTransfer = async (req, res) => {
             await client.query('ROLLBACK');
             return res.status(400).json({ message: 'Insufficient balance in the source account for this currency' });
         }
-        await (0, accountBalance_1.applyBalanceDelta)(userId, Number(fromAccountId), currency, -amt, client);
-        await (0, accountBalance_1.applyBalanceDelta)(userId, Number(toAccountId), currency, amt, client);
+        const fromLabel = String(from.bank_name ?? '').trim() || 'Otra cuenta';
+        const toLabel = String(to.bank_name ?? '').trim() || 'Otra cuenta';
+        const notePart = note && String(note).trim() ? ` — ${String(note).trim()}` : '';
+        await (0, accountBalance_1.applyBalanceDelta)(userId, Number(fromAccountId), currency, -amt, client, {
+            description: `Salida: transferencia a «${toLabel}»${notePart}`,
+        });
+        await (0, accountBalance_1.applyBalanceDelta)(userId, Number(toAccountId), currency, amt, client, {
+            description: `Entrada: transferencia desde «${fromLabel}»${notePart}`,
+        });
         const ins = await client.query(`INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, currency, note)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, created_at`, [userId, Number(fromAccountId), Number(toAccountId), amt, currency, note ?? null]);

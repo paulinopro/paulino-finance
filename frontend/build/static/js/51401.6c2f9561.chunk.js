@@ -1,0 +1,3 @@
+/*! For license information please see 51401.6c2f9561.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[51401],{73782(n,e,i){i.r(e),i.d(e,{default:()=>o});const o=(0,i(21639).A)("TrendingDown",[["polyline",{points:"22 17 13.5 8.5 8.5 13.5 2 7",key:"1r2t7k"}],["polyline",{points:"16 17 22 17 22 11",key:"11uiuu"}]])}}]);
+//# sourceMappingURL=51401.6c2f9561.chunk.js.map

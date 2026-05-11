@@ -1,11 +1,16 @@
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import { amountToPrimary, getConversionContextForUser } from '../services/userCurrencyConversion';
 import { applyBalanceDelta } from '../services/accountBalance';
 import { removeExpenseForUser } from '../services/expenseDeletionService';
 import { getExpenseCategoryNameForUser } from '../services/vehicleExpenseLinkSync';
 import { expenseUsesImmediateBalance } from '../constants/incomeExpenseTaxonomy';
+import {
+  getUserCurrencyPair,
+  isCurrencyInUserPair,
+  validateLedgerCurrencyForUser,
+} from '../utils/userCurrencyPair';
 
 /** Gasto de vehículo vinculado a `expenses`: puntual (variable, sin frecuencia). */
 const VEHICLE_LINKED_EXPENSE_TAXONOMY = {
@@ -21,6 +26,17 @@ function parseBankAccountIdFromBody(body: Record<string, unknown>): number | nul
   return Number.isNaN(n) ? null : n;
 }
 
+/** Etiqueta legible para el libro de cuenta (movimientos). */
+function vehicleLedgerTag(
+  row: { make?: string | null; model?: string | null; license_plate?: string | null } | undefined,
+  vehicleId: string | number
+): string {
+  const mk = `${row?.make ?? ''} ${row?.model ?? ''}`.trim();
+  if (mk) return mk;
+  if (row?.license_plate) return `Pat. ${String(row.license_plate)}`;
+  return `Vehículo #${vehicleId}`;
+}
+
 export const getVehicles = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -33,12 +49,7 @@ export const getVehicles = async (req: AuthRequest, res: Response) => {
       [userId]
     );
 
-    // Get user's exchange rate once
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
 
     const vehicles = await Promise.all(
       result.rows.map(async (vehicle) => {
@@ -54,7 +65,7 @@ export const getVehicles = async (req: AuthRequest, res: Response) => {
         let totalExpenses = 0;
         expensesResult.rows.forEach((row) => {
           const amount = parseFloat(row.total || 0);
-          totalExpenses += row.currency === 'USD' ? amount * exchangeRate : amount;
+          totalExpenses += amountToPrimary(amount, String(row.currency || 'DOP'), ctx);
         });
 
         return {
@@ -93,6 +104,16 @@ export const createVehicle = async (req: AuthRequest, res: Response) => {
 
     if (!make || !model) {
       return res.status(400).json({ message: 'Make and model are required' });
+    }
+
+    if (currency != null && String(currency).trim() !== '') {
+      const pair = await getUserCurrencyPair(userId);
+      const cur = String(currency).trim().toUpperCase();
+      if (!isCurrencyInUserPair(pair, cur)) {
+        return res.status(400).json({
+          message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+        });
+      }
     }
 
     const result = await query(
@@ -147,6 +168,23 @@ export const updateVehicle = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { make, model, year, licensePlate, color, mileage, purchaseDate, purchasePrice, currency, notes } = req.body;
 
+    const prevV = await query(`SELECT currency FROM vehicles WHERE id = $1 AND user_id = $2`, [id, userId]);
+    if (prevV.rows.length === 0) {
+      return res.status(404).json({ message: 'Vehicle not found' });
+    }
+    const pair = await getUserCurrencyPair(userId);
+    const mergedCur =
+      currency !== undefined && currency !== null && String(currency).trim() !== ''
+        ? String(currency).trim().toUpperCase()
+        : prevV.rows[0].currency != null && String(prevV.rows[0].currency).trim() !== ''
+          ? String(prevV.rows[0].currency).trim().toUpperCase()
+          : '';
+    if (mergedCur !== '' && !isCurrencyInUserPair(pair, mergedCur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
+
     const result = await query(
       `UPDATE vehicles
        SET make = COALESCE($1, make),
@@ -171,12 +209,7 @@ export const updateVehicle = async (req: AuthRequest, res: Response) => {
 
     const vehicle = result.rows[0];
 
-    // Get user's exchange rate
-    const userResult = await query(
-      'SELECT exchange_rate_dop_usd FROM users WHERE id = $1',
-      [userId]
-    );
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
+    const ctx = await getConversionContextForUser(userId);
 
     // Get total expenses
     const expensesResult = await query(
@@ -190,7 +223,7 @@ export const updateVehicle = async (req: AuthRequest, res: Response) => {
     let totalExpenses = 0;
     expensesResult.rows.forEach((row) => {
       const amount = parseFloat(row.total || 0);
-      totalExpenses += row.currency === 'USD' ? amount * exchangeRate : amount;
+      totalExpenses += amountToPrimary(amount, String(row.currency || 'DOP'), ctx);
     });
 
     res.json({
@@ -339,9 +372,27 @@ export const createVehicleExpense = async (req: AuthRequest, res: Response) => {
     return res.status(404).json({ message: 'Vehicle not found' });
   }
 
+  const vLblRows = await query(
+    `SELECT make, model, license_plate FROM vehicles WHERE id = $1 AND user_id = $2`,
+    [vehicleId, userId]
+  );
+  const vehTag = vehicleLedgerTag(vLblRows.rows[0], vehicleId);
+
   const amt = parseFloat(String(amount));
-  const cur = String(currency);
+  const pair = await getUserCurrencyPair(userId);
+  const cur = String(currency).trim().toUpperCase();
+  if (!isCurrencyInUserPair(pair, cur)) {
+    return res.status(400).json({
+      message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+    });
+  }
   const bankAccountId = parseBankAccountIdFromBody(body);
+  if (bankAccountId) {
+    const ledErr = validateLedgerCurrencyForUser(pair, cur);
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
+    }
+  }
   const client = await getClient();
 
   try {
@@ -369,7 +420,9 @@ export const createVehicleExpense = async (req: AuthRequest, res: Response) => {
 
     if (bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, cur, -amt, client);
+        await applyBalanceDelta(userId, bankAccountId, cur, -amt, client, {
+          description: `[Vehículos · ${vehTag}] ${spendKind}: ${description}`,
+        });
       } catch (e: any) {
         await client.query('ROLLBACK');
         if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -536,6 +589,12 @@ export const updateVehicleExpense = async (req: AuthRequest, res: Response) => {
     const resolvedBank =
       'bankAccountId' in body ? newBankId : (old.bank_account_id as number | null);
 
+    const vehRow = await query(
+      `SELECT make, model, license_plate FROM vehicles WHERE id = $1 AND user_id = $2`,
+      [vehicleId, userId]
+    );
+    const vehTag = vehicleLedgerTag(vehRow.rows[0], vehicleId);
+
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -546,7 +605,10 @@ export const updateVehicleExpense = async (req: AuthRequest, res: Response) => {
           old.bank_account_id,
           old.currency,
           parseFloat(old.amount),
-          client
+          client,
+          {
+            description: `[Vehículos · ${vehTag}] Actualización gasto — reversión «${old.description}»`,
+          }
         );
       }
 
@@ -579,7 +641,9 @@ export const updateVehicleExpense = async (req: AuthRequest, res: Response) => {
         resolvedBank
       ) {
         try {
-          await applyBalanceDelta(userId, resolvedBank, newCur, -newAmt, client);
+          await applyBalanceDelta(userId, resolvedBank, newCur, -newAmt, client, {
+            description: `[Vehículos · ${vehTag}] Gasto actualizado · ${newDesc}`,
+          });
         } catch (e: any) {
           await client.query('ROLLBACK');
           if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {

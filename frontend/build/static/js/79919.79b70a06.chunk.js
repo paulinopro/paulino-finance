@@ -1,0 +1,3 @@
+/*! For license information please see 79919.79b70a06.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[79919],{79919(e,n,a){a.r(n),a.d(n,{default:()=>t});const t=(0,a(21639).A)("RadioReceiver",[["path",{d:"M5 16v2",key:"g5qcv5"}],["path",{d:"M19 16v2",key:"1gbaio"}],["rect",{width:"20",height:"8",x:"2",y:"8",rx:"2",key:"vjsjur"}],["path",{d:"M18 12h0",key:"1ucjzd"}]])}}]);
+//# sourceMappingURL=79919.79b70a06.chunk.js.map

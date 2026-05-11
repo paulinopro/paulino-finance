@@ -4,6 +4,7 @@ exports.isCurrencyAllowedForAccount = isCurrencyAllowedForAccount;
 exports.getAccountRow = getAccountRow;
 exports.parseBalanceForCurrency = parseBalanceForCurrency;
 exports.applyBalanceDelta = applyBalanceDelta;
+exports.recordBankAccountMovement = recordBankAccountMovement;
 const database_1 = require("../config/database");
 function isCurrencyAllowedForAccount(currencyType, currency) {
     if (currencyType === 'DUAL')
@@ -20,9 +21,21 @@ async function runQuery(text, params, client) {
     return (0, database_1.query)(text, params);
 }
 async function getAccountRow(userId, accountId, client) {
-    const r = await runQuery(`SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind
+    const r = await runQuery(`SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind, bank_name
      FROM bank_accounts WHERE id = $1 AND user_id = $2`, [accountId, userId], client);
     return r.rows[0];
+}
+const EPS_BAL = 1e-9;
+async function insertBankAccountMovementLedger(userId, accountId, currency, direction, magnitude, description, status, client) {
+    const mag = Math.abs(magnitude);
+    if (!(mag > EPS_BAL))
+        return;
+    const run = client != null
+        ? (text, params) => client.query(text, params)
+        : (text, params) => (0, database_1.query)(text, params);
+    await run(`INSERT INTO bank_account_movements
+     (user_id, bank_account_id, amount, currency, direction, description, status, occurred_at)
+     VALUES ($1, $2, $3::numeric, $4, $5, $6, $7, CURRENT_TIMESTAMP)`, [userId, accountId, mag, currency.toUpperCase(), direction, description, status]);
 }
 function parseBalanceForCurrency(row, currency) {
     const v = currency === 'DOP' ? row.balance_dop : row.balance_usd;
@@ -31,7 +44,7 @@ function parseBalanceForCurrency(row, currency) {
 /**
  * Adds delta to the balance in the given currency leg (DOP or USD).
  */
-async function applyBalanceDelta(userId, accountId, currency, delta, client) {
+async function applyBalanceDelta(userId, accountId, currency, delta, client, movement) {
     const acc = await getAccountRow(userId, accountId, client);
     if (!acc) {
         throw new Error('ACCOUNT_NOT_FOUND');
@@ -50,5 +63,17 @@ async function applyBalanceDelta(userId, accountId, currency, delta, client) {
     else {
         throw new Error('CURRENCY_MISMATCH');
     }
+    if (Math.abs(delta) > EPS_BAL) {
+        const direction = delta > 0 ? 'IN' : 'OUT';
+        const description = (movement?.description && movement.description.trim())
+            ? movement.description.trim()
+            : 'Movimiento de cuenta';
+        const stat = movement?.status ?? 'completed';
+        await insertBankAccountMovementLedger(userId, accountId, currency, direction, Math.abs(delta), description, stat, client);
+    }
+}
+/** Registra un movimiento en el libro de la cuenta sin modificar saldo (p. ej. saldo inicial o ajuste manual ya reflejado en `bank_accounts`). */
+async function recordBankAccountMovement(userId, accountId, currency, direction, amount, description, status = 'completed', client) {
+    await insertBankAccountMovementLedger(userId, accountId, currency, direction, amount, description, status, client);
 }
 //# sourceMappingURL=accountBalance.js.map

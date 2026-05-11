@@ -1,0 +1,3 @@
+/*! For license information please see 6187.beed6680.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[6187],{6187(n,a,e){e.r(a),e.d(a,{default:()=>f});const f=(0,e(21639).A)("Command",[["path",{d:"M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3",key:"11bfej"}]])}}]);
+//# sourceMappingURL=6187.beed6680.chunk.js.map

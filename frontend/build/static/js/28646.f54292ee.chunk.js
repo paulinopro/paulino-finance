@@ -1,0 +1,3 @@
+/*! For license information please see 28646.f54292ee.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[28646],{28646(e,n,y){y.r(n),y.d(n,{default:()=>a});const a=(0,y(21639).A)("Calendar",[["rect",{width:"18",height:"18",x:"3",y:"4",rx:"2",ry:"2",key:"eu3xkr"}],["line",{x1:"16",x2:"16",y1:"2",y2:"6",key:"m3sa8f"}],["line",{x1:"8",x2:"8",y1:"2",y2:"6",key:"18kwsl"}],["line",{x1:"3",x2:"21",y1:"10",y2:"10",key:"xt86sb"}]])}}]);
+//# sourceMappingURL=28646.f54292ee.chunk.js.map

@@ -13,12 +13,12 @@ export const DEFAULT_NOTIFICATION_TEMPLATES: Record<
 <b>Tarjeta:</b> {cardName}
 <b>Tipo de moneda:</b> {currencyTypeLabel}
 
-{{#if creditLimitDop}}<b>Límite de crédito (DOP):</b> {creditLimitDop}{{/if}}
-{{#if currentDebtDop}}<b>Deuda actual (DOP):</b> {currentDebtDop}{{/if}}
-{{#if minimumPaymentDop}}<b>Pago mínimo (DOP):</b> {minimumPaymentDop}{{/if}}
-{{#if creditLimitUsd}}<b>Límite de crédito (USD):</b> {creditLimitUsd}{{/if}}
-{{#if currentDebtUsd}}<b>Deuda actual (USD):</b> {currentDebtUsd}{{/if}}
-{{#if minimumPaymentUsd}}<b>Pago mínimo (USD):</b> {minimumPaymentUsd}{{/if}}
+{{#if creditLimitDop}}<b>Límite de crédito ({primaryCurrency}):</b> {creditLimitDop}{{/if}}
+{{#if currentDebtDop}}<b>Deuda actual ({primaryCurrency}):</b> {currentDebtDop}{{/if}}
+{{#if minimumPaymentDop}}<b>Pago mínimo ({primaryCurrency}):</b> {minimumPaymentDop}{{/if}}
+{{#if creditLimitUsd}}<b>Límite de crédito ({secondaryCurrency}):</b> {creditLimitUsd}{{/if}}
+{{#if currentDebtUsd}}<b>Deuda actual ({secondaryCurrency}):</b> {currentDebtUsd}{{/if}}
+{{#if minimumPaymentUsd}}<b>Pago mínimo ({secondaryCurrency}):</b> {minimumPaymentUsd}{{/if}}
 
 <b>Deuda resumida:</b> {debtText}
 <b>Día de corte:</b> {cutOffDay}
@@ -28,7 +28,7 @@ export const DEFAULT_NOTIFICATION_TEMPLATES: Record<
   LOAN_PAYMENT: {
     title: 'Recordatorio de Pago de Préstamo',
     message:
-      '🔔 <b>Recordatorio de Pago de Préstamo</b> 🔔\n\n<b>Préstamo:</b> {loanName}\n<b>Monto de cuota:</b> {installmentAmount} {currency}\n<b>Progreso:</b> {paidInstallments}/{totalInstallments} cuotas\n<b>Próximo pago:</b> {nextPaymentDate}\n<b>Días restantes:</b> {days}',
+      '🔔 <b>Recordatorio de Pago de Préstamo</b> 🔔\n\n<b>Préstamo:</b> {loanName}\n<b>Monto de cuota:</b> {installmentAmountFormatted}\n<b>Progreso:</b> {paidInstallments}/{totalInstallments} cuotas\n<b>Próximo pago:</b> {nextPaymentDate}\n<b>Días restantes:</b> {days}',
   },
   RECURRING_EXPENSE: {
     title: 'Recordatorio de Gasto Recurrente',

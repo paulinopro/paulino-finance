@@ -1,0 +1,3 @@
+/*! For license information please see 76438.86153ba5.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[76438],{76438(n,e,a){a.r(e),a.d(e,{default:()=>t});const t=(0,a(21639).A)("CloudFog",[["path",{d:"M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",key:"1pljnt"}],["path",{d:"M16 17H7",key:"pygtm1"}],["path",{d:"M17 21H9",key:"1u2q02"}]])}}]);
+//# sourceMappingURL=76438.86153ba5.chunk.js.map

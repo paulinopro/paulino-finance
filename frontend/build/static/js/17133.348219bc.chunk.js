@@ -1,0 +1,3 @@
+/*! For license information please see 17133.348219bc.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[17133],{17133(e,n,t){t.r(n),t.d(n,{default:()=>a});const a=(0,t(21639).A)("AlarmClockMinus",[["circle",{cx:"12",cy:"13",r:"8",key:"3y4lt7"}],["path",{d:"M5 3 2 6",key:"18tl5t"}],["path",{d:"m22 6-3-3",key:"1opdir"}],["path",{d:"M6.38 18.7 4 21",key:"17xu3x"}],["path",{d:"M17.64 18.67 20 21",key:"kv2oe2"}],["path",{d:"M9 13h6",key:"1uhe8q"}]])}}]);
+//# sourceMappingURL=17133.348219bc.chunk.js.map

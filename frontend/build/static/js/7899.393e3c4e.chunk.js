@@ -1,0 +1,3 @@
+/*! For license information please see 7899.393e3c4e.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[7899],{7899(a,n,e){e.r(n),e.d(n,{default:()=>h});const h=(0,e(21639).A)("Headphones",[["path",{d:"M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3",key:"1xhozi"}]])}}]);
+//# sourceMappingURL=7899.393e3c4e.chunk.js.map

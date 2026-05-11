@@ -1,13 +1,19 @@
 import { Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import {
+  resolveCategoryIconCreate,
+  resolveCategoryColorCreate,
+  resolveCategoryIconUpdate,
+  resolveCategoryColorUpdate,
+} from '../services/categoryFieldValidation';
 
 export const getCategories = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
 
     const result = await query(
-      `SELECT id, name, created_at
+      `SELECT id, name, icon, color, created_at
        FROM expense_categories
        WHERE user_id = $1
        ORDER BY name ASC`,
@@ -19,6 +25,8 @@ export const getCategories = async (req: AuthRequest, res: Response) => {
       categories: result.rows.map((row) => ({
         id: row.id,
         name: row.name,
+        icon: row.icon != null ? String(row.icon) : null,
+        color: row.color != null ? String(row.color) : null,
         createdAt: row.created_at,
       })),
     });
@@ -37,12 +45,21 @@ export const createCategory = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Category name is required' });
     }
 
+    let icon: string | null;
+    let color: string | null;
+    try {
+      icon = resolveCategoryIconCreate(req.body.icon);
+      color = resolveCategoryColorCreate(req.body.color);
+    } catch (e: any) {
+      return res.status(400).json({ message: e.message || 'Datos inválidos' });
+    }
+
     const result = await query(
-      `INSERT INTO expense_categories (user_id, name)
-       VALUES ($1, $2)
+      `INSERT INTO expense_categories (user_id, name, icon, color)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, name) DO NOTHING
-       RETURNING id, name, created_at`,
-      [userId, name.trim()]
+       RETURNING id, name, icon, color, created_at`,
+      [userId, name.trim(), icon, color]
     );
 
     if (result.rows.length === 0) {
@@ -55,6 +72,8 @@ export const createCategory = async (req: AuthRequest, res: Response) => {
       category: {
         id: result.rows[0].id,
         name: result.rows[0].name,
+        icon: result.rows[0].icon != null ? String(result.rows[0].icon) : null,
+        color: result.rows[0].color != null ? String(result.rows[0].color) : null,
         createdAt: result.rows[0].created_at,
       },
     });
@@ -77,12 +96,18 @@ export const updateCategory = async (req: AuthRequest, res: Response) => {
   }
 
   const newName = String(name).trim();
+
   const client = await getClient();
 
   try {
     await client.query('BEGIN');
-    const sel = await client.query<{ name: string; created_at: Date }>(
-      `SELECT name, created_at FROM expense_categories WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+    const sel = await client.query<{
+      name: string;
+      created_at: Date;
+      icon: string | null;
+      color: string | null;
+    }>(
+      `SELECT name, created_at, icon, color FROM expense_categories WHERE id = $1 AND user_id = $2 FOR UPDATE`,
       [categoryId, userId]
     );
 
@@ -91,40 +116,49 @@ export const updateCategory = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Categoría no encontrada' });
     }
 
-    const oldName = sel.rows[0].name;
-    const createdAt = sel.rows[0].created_at;
+    const row = sel.rows[0];
+    const oldName = row.name;
+    const createdAt = row.created_at;
+    const pi = row.icon != null ? String(row.icon) : null;
+    const pc = row.color != null ? String(row.color) : null;
 
-    if (oldName === newName) {
-      await client.query('COMMIT');
-      return res.json({
-        success: true,
-        category: {
-          id: categoryId,
-          name: newName,
-          createdAt,
-        },
-      });
+    let nextIconResolved: string | null;
+    let nextColorResolved: string | null;
+    try {
+      const iu = resolveCategoryIconUpdate(req.body.icon, pi);
+      const cu = resolveCategoryColorUpdate(req.body.color, pc);
+      nextIconResolved = iu === undefined ? pi : iu;
+      nextColorResolved = cu === undefined ? pc : cu;
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ message: e.message || 'Datos inválidos' });
     }
 
     await client.query(
-      `UPDATE expense_categories SET name = $1 WHERE id = $2 AND user_id = $3`,
-      [newName, categoryId, userId]
+      `UPDATE expense_categories
+       SET name = $1,
+           icon = $2,
+           color = $3
+       WHERE id = $4 AND user_id = $5`,
+      [newName, nextIconResolved, nextColorResolved, categoryId, userId]
     );
 
-    await client.query(
-      `UPDATE expenses SET category = $1 WHERE user_id = $2 AND category = $3`,
-      [newName, userId, oldName]
-    );
+    if (oldName !== newName) {
+      await client.query(
+        `UPDATE expenses SET category = $1 WHERE user_id = $2 AND category = $3`,
+        [newName, userId, oldName]
+      );
 
-    await client.query(
-      `UPDATE vehicle_expenses SET category = $1 WHERE user_id = $2 AND category = $3`,
-      [newName, userId, oldName]
-    );
+      await client.query(
+        `UPDATE vehicle_expenses SET category = $1 WHERE user_id = $2 AND category = $3`,
+        [newName, userId, oldName]
+      );
 
-    await client.query(
-      `UPDATE budgets SET category = $1 WHERE user_id = $2 AND category = $3`,
-      [newName, userId, oldName]
-    );
+      await client.query(
+        `UPDATE budgets SET category = $1 WHERE user_id = $2 AND category = $3`,
+        [newName, userId, oldName]
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -134,6 +168,8 @@ export const updateCategory = async (req: AuthRequest, res: Response) => {
       category: {
         id: categoryId,
         name: newName,
+        icon: nextIconResolved,
+        color: nextColorResolved,
         createdAt,
       },
     });

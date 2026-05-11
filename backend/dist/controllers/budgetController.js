@@ -29,27 +29,49 @@ const getBudgets = async (req, res) => {
         // Calculate spent amounts from expenses and accounts payable
         for (const budget of result.rows) {
             let spent = 0;
-            // Get expenses for the budget period
-            const spentResult = await (0, database_1.query)(`SELECT SUM(amount) as total
-         FROM expenses
-         WHERE user_id = $1
-           AND currency = $2
-           AND (category = $3 OR $3 IS NULL)
-           AND (
-             (recurrence_type = 'non_recurrent' AND EXTRACT(YEAR FROM date) = $4 ${budget.period_type === 'MONTHLY' ? 'AND EXTRACT(MONTH FROM date) = $5' : ''})
-             OR (
-               recurrence_type = 'recurrent'
-               AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
-               AND $6 = 'MONTHLY'
-             )
-             OR (
-               recurrence_type = 'recurrent'
-               AND LOWER(TRIM(COALESCE(frequency, ''))) = 'annual'
-               AND EXTRACT(YEAR FROM date) = $4
-             )
-           )`, budget.period_type === 'MONTHLY'
+            // Gastos del período: consultas distintas para mensual vs anual (placeholders y tipos alineados).
+            const isMonthly = budget.period_type === 'MONTHLY';
+            const spentSql = isMonthly
+                ? `SELECT SUM(amount) as total
+           FROM expenses
+           WHERE user_id = $1
+             AND currency = $2
+             AND (category = $3 OR $3 IS NULL)
+             AND (
+               (recurrence_type = 'non_recurrent' AND EXTRACT(YEAR FROM date) = $4 AND EXTRACT(MONTH FROM date) = $5)
+               OR (
+                 recurrence_type = 'recurrent'
+                 AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
+                 AND $6 = 'MONTHLY'
+               )
+               OR (
+                 recurrence_type = 'recurrent'
+                 AND LOWER(TRIM(COALESCE(frequency, ''))) = 'annual'
+                 AND EXTRACT(YEAR FROM date) = $4
+               )
+             )`
+                : `SELECT SUM(amount) as total
+           FROM expenses
+           WHERE user_id = $1
+             AND currency = $2
+             AND (category = $3 OR $3 IS NULL)
+             AND (
+               (recurrence_type = 'non_recurrent' AND EXTRACT(YEAR FROM date) = $4)
+               OR (
+                 recurrence_type = 'recurrent'
+                 AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
+                 AND $5 = 'MONTHLY'
+               )
+               OR (
+                 recurrence_type = 'recurrent'
+                 AND LOWER(TRIM(COALESCE(frequency, ''))) = 'annual'
+                 AND EXTRACT(YEAR FROM date) = $4
+               )
+             )`;
+            const spentParams = isMonthly
                 ? [userId, budget.currency, budget.category, budget.period_year, budget.period_month, budget.period_type]
-                : [userId, budget.currency, budget.category, budget.period_year, budget.period_type]);
+                : [userId, budget.currency, budget.category, budget.period_year, budget.period_type];
+            const spentResult = await (0, database_1.query)(spentSql, spentParams);
             spent += parseFloat(spentResult.rows[0]?.total || 0);
             // Get accounts payable paid in the period
             const accountsPayableResult = await (0, database_1.query)(`SELECT SUM(amount) as total

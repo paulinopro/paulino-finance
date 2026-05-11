@@ -1,0 +1,3 @@
+/*! For license information please see 18896.27690ced.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[18896],{18896(e,n,a){a.r(n),a.d(n,{default:()=>k});const k=(0,a(21639).A)("Tally3",[["path",{d:"M4 4v16",key:"6qkkli"}],["path",{d:"M9 4v16",key:"81ygyz"}],["path",{d:"M14 4v16",key:"12vmem"}]])}}]);
+//# sourceMappingURL=18896.27690ced.chunk.js.map

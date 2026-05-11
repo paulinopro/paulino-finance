@@ -1,0 +1,3 @@
+/*! For license information please see 79187.9ea1c216.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[79187],{79187(e,n,t){t.r(n),t.d(n,{default:()=>h});const h=(0,t(21639).A)("SmartphoneCharging",[["rect",{width:"14",height:"20",x:"5",y:"2",rx:"2",ry:"2",key:"1yt0o3"}],["path",{d:"M12.667 8 10 12h4l-2.667 4",key:"h9lk2d"}]])}}]);
+//# sourceMappingURL=79187.9ea1c216.chunk.js.map

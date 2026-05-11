@@ -3,13 +3,42 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startNotificationScheduler = void 0;
+exports.startNotificationScheduler = exports.NOTIFICATION_DAILY_CRON = void 0;
+exports.getNotificationSchedulerStatus = getNotificationSchedulerStatus;
 const node_cron_1 = __importDefault(require("node-cron"));
 const database_1 = require("../config/database");
 const telegramService_1 = require("./telegramService");
 const templateService_1 = require("./templateService");
 const webPushService_1 = require("./webPushService");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
+/** Cron diario revisión tarjetas / préstamos / gastos recurrentes (hora local del proceso o TZ). */
+exports.NOTIFICATION_DAILY_CRON = '0 9 * * *';
+let schedulerConfiguredAtIso = null;
+let dailyNotificationCronTask = null;
+let lastNotificationSweep = null;
+function finalizeNotificationSweep(startedAt, ok, errorMessage) {
+    lastNotificationSweep = {
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        ok,
+        ...(errorMessage ? { errorMessage } : {}),
+    };
+}
+/** Estado del job programado `node-cron` (solo lectura, para panel super admin). */
+function getNotificationSchedulerStatus() {
+    const expressionValid = node_cron_1.default.validate(exports.NOTIFICATION_DAILY_CRON);
+    const schedulerRegistered = dailyNotificationCronTask != null;
+    return {
+        cronExpression: exports.NOTIFICATION_DAILY_CRON,
+        expressionValid,
+        schedulerRegistered,
+        schedulerConfiguredAt: schedulerConfiguredAtIso,
+        timezone: typeof process.env.TZ === 'string' && process.env.TZ.trim() !== '' ? process.env.TZ.trim() : null,
+        cronTimeNoteEs: 'Ejecución diaria a las 9:00 según la zona del proceso Node: variable TZ si existe; si no, la zona local del servidor.',
+        dailyJobActive: expressionValid && schedulerRegistered,
+        lastSweep: lastNotificationSweep,
+    };
+}
 // Initialize Telegram Bot
 (0, telegramService_1.initializeTelegramBot)();
 function formatMoneyOpt(v) {
@@ -61,6 +90,7 @@ function buildCardPaymentTemplateVariables(card, days) {
     };
 }
 const checkAndSendNotifications = async () => {
+    const sweepStartedAt = new Date().toISOString();
     try {
         const today = new Date();
         const currentDay = today.getDate();
@@ -86,7 +116,8 @@ const checkAndSendNotifications = async () => {
                 };
             });
             // Check credit card payment due dates (in-app + push si aplica; Telegram opcional)
-            if (settings['CARD_PAYMENT']?.enabled) {
+            // settings solo incluye tipos con enabled=true en BD (query arriba); no hay propiedad .enabled en el objeto.
+            if (settings['CARD_PAYMENT']) {
                 const cardsResult = await (0, database_1.query)(`SELECT id, bank_name, card_name, currency_type,
                   credit_limit_dop, credit_limit_usd,
                   current_debt_dop, current_debt_usd,
@@ -145,7 +176,7 @@ const checkAndSendNotifications = async () => {
                 }
             }
             // Check loan payment due dates
-            if (settings['LOAN_PAYMENT']?.enabled) {
+            if (settings['LOAN_PAYMENT']) {
                 const loansResult = await (0, database_1.query)(`SELECT id, loan_name, installment_amount, paid_installments, total_installments, currency
            FROM loans
            WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
@@ -176,16 +207,27 @@ const checkAndSendNotifications = async () => {
                                 nextPaymentDate: nextPaymentDate.toLocaleDateString('es-DO'),
                                 days: days,
                             });
-                            await (0, database_1.query)(`INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
+                            const plainTitle = title.replace(/<[^>]*>/g, '').trim();
+                            const ins = await (0, database_1.query)(`INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
                  VALUES ($1, 'LOAN_PAYMENT', $2, $3, $4, 'LOAN')
-                 ON CONFLICT DO NOTHING`, [userId, title.replace(/<[^>]*>/g, ''), message, loan.id]);
-                            await (0, telegramService_1.sendTelegramMessage)(telegramChatId, message);
+                 RETURNING id`, [userId, plainTitle, message, loan.id]);
+                            const nid = ins.rows[0]?.id;
+                            if (nid != null) {
+                                await (0, webPushService_1.sendPushForNotification)(userId, {
+                                    title: plainTitle,
+                                    message,
+                                    notificationId: nid,
+                                });
+                            }
+                            if (settings['LOAN_PAYMENT']?.telegramEnabled && telegramChatId) {
+                                await (0, telegramService_1.sendTelegramMessage)(telegramChatId, message);
+                            }
                         }
                     }
                 }
             }
             // Check recurring expenses
-            if (settings['RECURRING_EXPENSE']?.enabled) {
+            if (settings['RECURRING_EXPENSE']) {
                 // Only check expenses that haven't been paid this month
                 const expensesResult = await (0, database_1.query)(`SELECT id, description, amount, currency, payment_day, last_paid_month, last_paid_year,
                   nature, category, frequency, recurrence_type
@@ -252,19 +294,26 @@ const checkAndSendNotifications = async () => {
     }
     catch (error) {
         console.error('Error checking notifications:', error);
+        finalizeNotificationSweep(sweepStartedAt, false, error?.message ?? String(error));
+        return;
     }
+    finalizeNotificationSweep(sweepStartedAt, true);
 };
 const startNotificationScheduler = () => {
-    // Run every day at 9:00 AM
-    node_cron_1.default.schedule('0 9 * * *', () => {
+    if (!node_cron_1.default.validate(exports.NOTIFICATION_DAILY_CRON)) {
+        console.error('[notifications] Expresión cron inválida (no se registró el job):', exports.NOTIFICATION_DAILY_CRON);
+        dailyNotificationCronTask = null;
+        schedulerConfiguredAtIso = null;
+        return;
+    }
+    dailyNotificationCronTask = node_cron_1.default.schedule(exports.NOTIFICATION_DAILY_CRON, () => {
         console.log('Running notification check...');
-        checkAndSendNotifications();
+        void checkAndSendNotifications();
     });
-    // Also run immediately on startup (for testing)
-    setTimeout(() => {
-        checkAndSendNotifications();
-    }, 5000);
-    console.log('Notification scheduler configured to run daily at 9:00 AM');
+    schedulerConfiguredAtIso = new Date().toISOString();
+    // También ejecutar poco después del arranque del API (útiles para pruebas / primer barrido).
+    setTimeout(() => void checkAndSendNotifications(), 5000);
+    console.log('Notification scheduler configured to run daily at 9:00 AM (timezone del proceso / TZ)');
 };
 exports.startNotificationScheduler = startNotificationScheduler;
 //# sourceMappingURL=notificationService.js.map

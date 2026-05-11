@@ -4,6 +4,7 @@ exports.deleteAccountReceivable = exports.receiveAccountReceivable = exports.upd
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
+const calendarService_1 = require("../services/calendarService");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -136,7 +137,9 @@ const addAccountReceivablePayment = async (req, res) => {
         const incomeId = incomeResult.rows[0].id;
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, payAmount);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, payAmount, undefined, {
+                    description: `[CxC] Abono por cobrar · «${account.description}»`,
+                });
             }
             catch (e) {
                 console.error('AR payment balance:', e);
@@ -234,7 +237,9 @@ const updateAccountReceivablePayment = async (req, res) => {
                 const cur = String(account.currency);
                 if (prevIncomeBank) {
                     try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, prevIncomeBank, cur, -prevAmt, client);
+                        await (0, accountBalance_1.applyBalanceDelta)(userId, prevIncomeBank, cur, -prevAmt, client, {
+                            description: `[CxC] Ajuste de abono · reversión «${account.description}»`,
+                        });
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
@@ -250,7 +255,9 @@ const updateAccountReceivablePayment = async (req, res) => {
            WHERE id = $6 AND user_id = $7`, [payAmount, paymentDate, desc, account.currency, newBankId, incomeId, userId]);
                 if (newBankId) {
                     try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, cur, payAmount, client);
+                        await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, cur, payAmount, client, {
+                            description: `[CxC] Ajuste de abono · nueva acreditación «${account.description}»`,
+                        });
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
@@ -318,6 +325,7 @@ const deleteAccountReceivablePayment = async (req, res) => {
         const incomeId = payRow.rows[0].income_id;
         if (incomeId) {
             await (0, database_1.query)(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
+            await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, incomeId, ['INCOME']);
         }
         await (0, database_1.query)(`DELETE FROM accounts_receivable_payments WHERE id = $1 AND account_receivable_id = $2 AND user_id = $3`, [paymentId, id, userId]);
         await (0, accountsPaymentLinkSync_1.recalculateReceivableStatus)(Number(id), userId);
@@ -480,7 +488,9 @@ const receiveAccountReceivable = async (req, res) => {
         const incomeId = incomeResult.rows[0].id;
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, remaining);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, remaining, undefined, {
+                    description: `[CxC] Cobro total por cobrar · «${account.description}»`,
+                });
             }
             catch (e) {
                 console.error('AR receive balance:', e);
@@ -528,7 +538,9 @@ const deleteAccountReceivable = async (req, res) => {
         const incRows = await (0, database_1.query)(`SELECT income_id FROM accounts_receivable_payments
        WHERE account_receivable_id = $1 AND income_id IS NOT NULL`, [id]);
         for (const row of incRows.rows) {
-            await (0, database_1.query)(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [row.income_id, userId]);
+            const incId = row.income_id;
+            await (0, database_1.query)(`DELETE FROM income WHERE id = $1 AND user_id = $2`, [incId, userId]);
+            await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, incId, ['INCOME']);
         }
         const result = await (0, database_1.query)('DELETE FROM accounts_receivable WHERE id = $1 AND user_id = $2 RETURNING id', [id, userId]);
         if (result.rows.length === 0) {

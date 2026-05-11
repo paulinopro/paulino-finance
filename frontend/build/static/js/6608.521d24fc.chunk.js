@@ -1,0 +1,3 @@
+/*! For license information please see 6608.521d24fc.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[6608],{6608(n,e,a){a.r(e),a.d(e,{default:()=>t});const t=(0,a(21639).A)("Megaphone",[["path",{d:"m3 11 18-5v12L3 14v-3z",key:"n962bs"}],["path",{d:"M11.6 16.8a3 3 0 1 1-5.8-1.6",key:"1yl0tm"}]])}}]);
+//# sourceMappingURL=6608.521d24fc.chunk.js.map

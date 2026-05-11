@@ -1,0 +1,61 @@
+{
+  "types": {
+    "cardPayment": {
+      "name": "Card payments",
+      "conditionalHelp": "{{#if variable}}…{{/if}} only renders when the variable is non-empty and not 0 (e.g. 0, 0.00). Example: {{#if creditLimitDop}}<b>Limit (DOP):</b> {creditLimitDop}{{/if}} — For USD-only cards, DOP variables are empty."
+    },
+    "loanPayment": { "name": "Loan payments" },
+    "recurringExpense": { "name": "Recurring expenses" }
+  },
+  "vars": {
+    "bankName": "Bank",
+    "cardName": "Card name",
+    "currencyType": "Currency mode in the system (DOP, USD, DUAL)",
+    "currencyTypeLabel": "Human-readable currency label",
+    "creditLimitDop": "Credit limit in DOP (empty if card is USD-only)",
+    "creditLimitUsd": "Credit limit in USD (empty if card is DOP-only)",
+    "currentDebtDop": "Current debt in DOP",
+    "currentDebtUsd": "Current debt in USD",
+    "minimumPaymentDop": "Minimum payment in DOP",
+    "minimumPaymentUsd": "Minimum payment in USD",
+    "cutOffDay": "Statement closing day",
+    "dueDay": "Payment due day",
+    "debtText": "Debt summary (per card currency)",
+    "days": "Days until reminder",
+    "loanName": "Loan name",
+    "installmentAmount": "Installment amount",
+    "currency": "Currency",
+    "paidInstallments": "Paid installments",
+    "totalInstallments": "Total installments",
+    "nextPaymentDate": "Next payment date",
+    "expenseScheduleLabel": "Expense schedule label (e.g. monthly recurring)",
+    "expenseTypeLabel": "Alias of expenseScheduleLabel (legacy templates)",
+    "category": "Expense category (empty if none)",
+    "description": "Expense description",
+    "amount": "Amount",
+    "paymentDay": "Payment day"
+  },
+  "page": {
+    "title": "Notification templates",
+    "subtitle": "Customize Telegram messages for each notification type. Use variables in braces {variable} for dynamic content.",
+    "loading": "Loading templates…",
+    "fieldLabel": "Field",
+    "placeholderPaypalOptional": "Optional if you use Sync PayPal",
+    "saving": "Saving…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "testSending": "Sending…",
+    "test": "Test",
+    "restore": "Restore",
+    "variablesHeading": "Available variables",
+    "conditionalsLabel": "Conditionals:",
+    "notificationTitle": "Notification title",
+    "notificationMessage": "Message",
+    "placeholderTitle": "E.g. Card payment reminder",
+    "placeholderMessage": "Write the message here. Use {variable} for dynamic values.",
+    "emptyTitle": "No title",
+    "emptyMessage": "No message",
+    "htmlHint": "You can use basic HTML like <b>text</b> for bold and line breaks. For conditionals, the engine supports Handlebars-style «if» blocks on non-empty variables not equal to zero."
+  }
+}

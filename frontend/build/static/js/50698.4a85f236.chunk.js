@@ -1,0 +1,3 @@
+/*! For license information please see 50698.4a85f236.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[50698],{50698(e,t,i){i.r(t),i.d(t,{default:()=>n});const n=(0,i(21639).A)("AlignVerticalJustifyCenter",[["rect",{width:"14",height:"6",x:"5",y:"16",rx:"2",key:"1i8z2d"}],["rect",{width:"10",height:"6",x:"7",y:"2",rx:"2",key:"ypihtt"}],["path",{d:"M2 12h20",key:"9i4pu4"}]])}}]);
+//# sourceMappingURL=50698.4a85f236.chunk.js.map

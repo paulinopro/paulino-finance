@@ -1,0 +1,3 @@
+/*! For license information please see 38298.0b0f6b8f.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[38298],{38298(n,e,f){f.r(e),f.d(e,{default:()=>o});const o=(0,f(21639).A)("Filter",[["polygon",{points:"22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3",key:"1yg77f"}]])}}]);
+//# sourceMappingURL=38298.0b0f6b8f.chunk.js.map

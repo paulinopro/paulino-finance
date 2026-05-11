@@ -6,6 +6,7 @@ import {
   getAccountRow,
   parseBalanceForCurrency,
 } from '../services/accountBalance';
+import { getUserCurrencyPair, validateLedgerCurrencyForUser } from '../utils/userCurrencyPair';
 
 export const listAccountTransfers = async (req: AuthRequest, res: Response) => {
   try {
@@ -51,8 +52,10 @@ export const createAccountTransfer = async (req: AuthRequest, res: Response) => 
   if (!fromAccountId || !toAccountId || !currency || amount == null || isNaN(amt) || amt <= 0) {
     return res.status(400).json({ message: 'fromAccountId, toAccountId, amount (>0) and currency are required' });
   }
-  if (String(currency) !== 'DOP' && String(currency) !== 'USD') {
-    return res.status(400).json({ message: 'currency must be DOP or USD' });
+  const pair = await getUserCurrencyPair(userId);
+  const ledErr = validateLedgerCurrencyForUser(pair, String(currency));
+  if (ledErr) {
+    return res.status(400).json({ message: ledErr });
   }
   if (Number(fromAccountId) === Number(toAccountId)) {
     return res.status(400).json({ message: 'Source and destination accounts must differ' });
@@ -69,14 +72,22 @@ export const createAccountTransfer = async (req: AuthRequest, res: Response) => 
       return res.status(404).json({ message: 'Account not found' });
     }
 
-    const fromBal = parseBalanceForCurrency(from, currency);
+    const fromBal = parseBalanceForCurrency(from, currency, pair);
     if (fromBal + 1e-9 < amt) {
       await client.query('ROLLBACK');
       return res.status(400).json({ message: 'Insufficient balance in the source account for this currency' });
     }
 
-    await applyBalanceDelta(userId, Number(fromAccountId), currency, -amt, client);
-    await applyBalanceDelta(userId, Number(toAccountId), currency, amt, client);
+    const fromLabel = String(from.bank_name ?? '').trim() || 'Otra cuenta';
+    const toLabel = String(to.bank_name ?? '').trim() || 'Otra cuenta';
+    const notePart = note && String(note).trim() ? ` — ${String(note).trim()}` : '';
+
+    await applyBalanceDelta(userId, Number(fromAccountId), currency, -amt, client, {
+      description: `Salida: transferencia a «${toLabel}»${notePart}`,
+    });
+    await applyBalanceDelta(userId, Number(toAccountId), currency, amt, client, {
+      description: `Entrada: transferencia desde «${fromLabel}»${notePart}`,
+    });
 
     const ins = await client.query(
       `INSERT INTO account_transfers (user_id, from_account_id, to_account_id, amount, currency, note)

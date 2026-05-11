@@ -1,0 +1,7 @@
+{
+  "description": "Description",
+  "amount": "Amount",
+  "paymentDate": "Due date",
+  "daysLeft_one": "{{count}} day until payment.",
+  "daysLeft_other": "{{count}} days until payment."
+}

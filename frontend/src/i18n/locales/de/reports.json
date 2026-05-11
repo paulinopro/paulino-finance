@@ -1,0 +1,135 @@
+{
+  "types": {
+    "expenses": { "title": "Ausgaben", "description": "Bewegungen nach Status und Kategorie" },
+    "loans": { "title": "Kredite", "description": "Aktiv, bezahlt und Salden" },
+    "cards": { "title": "Karten", "description": "Limits, Schulden und verfügbar" },
+    "accounts": { "title": "Konten", "description": "DOP- und USD-Salden" },
+    "comprehensive": { "title": "Gesamt", "description": "Gesamtüberblick über Ihr Portfolio" }
+  },
+  "summary": {
+    "total": "Einträge / gesamt",
+    "paid": "Bezahlt",
+    "pending": "Ausstehend",
+    "active": "Aktiv",
+    "totalPaid": "Summe bezahlt",
+    "totalPending": "Summe ausstehend",
+    "totalActive": "Summe aktiv",
+    "totalDebt": "Gesamtschulden",
+    "totalLimit": "Gesamtlimit",
+    "totalBalance": "Gesamtsaldo (DOP-Äquivalent)",
+    "totalBalanceDop": "DOP-Saldo",
+    "totalBalanceUsd": "USD-Saldo",
+    "savings": "Sparkonten",
+    "checking": "Girokonten",
+    "totalCardDebt": "Kreditkartenschulden",
+    "totalLoanDebt": "Kreditschulden",
+    "netWorth": "Nettovermögen"
+  },
+  "reportResultTitle": {
+    "comprehensive": "Gesamtbericht — Portfolioüberblick",
+    "typed": "Bericht: {{type}}"
+  },
+  "periodPreset": {
+    "today": "Heute",
+    "yesterday": "Gestern",
+    "this_week": "Diese Woche",
+    "this_month": "Dieser Monat",
+    "last_month": "Letzter Monat",
+    "last_7_days": "Letzte 7 Tage",
+    "last_30_days": "Letzte 30 Tage",
+    "this_year": "Dieses Jahr",
+    "custom": "Benutzerdefiniert"
+  },
+  "pdfSlug": {
+    "expenses": "ausgaben",
+    "loans": "kredite",
+    "cards": "karten",
+    "accounts": "konten",
+    "comprehensive": "gesamt"
+  },
+  "pdfFilenamePrefix": "bericht",
+  "ui": {
+    "reportTypeSection": "Berichtstyp",
+    "filtersSection": "Filter",
+    "periodLabel": "Zeitraum",
+    "dateFrom": "Von Datum",
+    "dateTo": "Bis Datum",
+    "statusLabel": "Status",
+    "statusPendingExpenses": "Ausstehend",
+    "statusPendingLoans": "Aktiv (unbezahlt)",
+    "loading": "Wird erzeugt…",
+    "resultSection": "Ergebnis",
+    "periodLine": "Zeitraum: {{range}}"
+  },
+  "statusFilter": {
+    "all": "Alle",
+    "paid": "Bezahlt",
+    "pending": "Ausstehend"
+  },
+  "actions": {
+    "generate": "Bericht erzeugen",
+    "exportPdf": "PDF exportieren"
+  },
+  "emptyState": "Erzeugen Sie einen Bericht, um Daten hier zu sehen.",
+  "tables": {
+    "common": {
+      "na": "k. A.",
+      "description": "Beschreibung",
+      "amount": "Betrag",
+      "category": "Kategorie",
+      "status": "Status",
+      "bank": "Bank",
+      "loan": "Kredit",
+      "totalAmount": "Gesamtbetrag",
+      "progress": "Fortschritt",
+      "card": "Karte",
+      "limit": "Limit",
+      "debt": "Schulden",
+      "available": "Verfügbar",
+      "type": "Typ",
+      "number": "Nummer",
+      "balanceDop": "DOP-Saldo",
+      "balanceUsd": "USD-Saldo"
+    },
+    "expenses": {
+      "emptyPeriod": "Keine Ausgaben im gewählten Zeitraum."
+    },
+    "loans": {
+      "emptyPeriod": "Keine Kredite im gewählten Zeitraum."
+    },
+    "cards": {
+      "empty": "Keine Karten entsprechen den Kriterien."
+    },
+    "accounts": {
+      "empty": "Keine Konten vorhanden."
+    }
+  },
+  "expenseStatus": {
+    "paid": "Bezahlt",
+    "pending": "Ausstehend"
+  },
+  "loanStatus": {
+    "paid": "Bezahlt",
+    "active": "Aktiv",
+    "delinquent": "In Verzug"
+  },
+  "accountType": {
+    "savings": "Sparkonto",
+    "checking": "Girokonto"
+  },
+  "comprehensive": {
+    "overviewTitle": "Gesamtüberblick",
+    "balanceTotal": "Gesamtsaldo",
+    "expensesSection": "Ausgaben",
+    "loansSection": "Kredite",
+    "cardsSection": "Kreditkarten",
+    "accountsSection": "Bankkonten"
+  },
+  "pagination": {
+    "expenses": "Ausgaben",
+    "loans": "Kredite",
+    "cards": "Karten",
+    "accounts": "Konten",
+    "rows": "Zeilen"
+  }
+}

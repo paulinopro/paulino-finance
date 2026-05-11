@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import { query } from '../config/database';
+import { getUserCurrencyPair, validateLedgerCurrencyForUser } from '../utils/userCurrencyPair';
 import { deleteCalendarEventsForRelated } from '../services/calendarService';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta } from '../services/accountBalance';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -88,11 +88,6 @@ export const getCards = async (req: AuthRequest, res: Response) => {
       }
       return sum;
     }, 0);
-
-    // Get exchange rate for total calculation
-    const userResult = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-    const exchangeRate = resolveExchangeRateDopUsd(userResult.rows[0]?.exchange_rate_dop_usd);
-    const total = totalDebtDop + (totalDebtUsd * exchangeRate);
 
     res.json({
       success: true,
@@ -396,13 +391,15 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
     if (!amount || isNaN(amt) || amt <= 0) {
       return res.status(400).json({ message: 'amount must be greater than zero' });
     }
-    if (currency !== 'DOP' && currency !== 'USD') {
-      return res.status(400).json({ message: 'currency must be DOP or USD' });
+    const pair = await getUserCurrencyPair(userId);
+    const ledErr = validateLedgerCurrencyForUser(pair, String(currency));
+    if (ledErr) {
+      return res.status(400).json({ message: ledErr });
     }
     const dateStr = paymentDate || new Date().toISOString().slice(0, 10);
 
     const cardResult = await query(
-      `SELECT id, current_debt_dop, current_debt_usd, currency_type
+      `SELECT id, bank_name, card_name, current_debt_dop, current_debt_usd, currency_type
        FROM credit_cards WHERE id = $1 AND user_id = $2`,
       [cardId, userId]
     );
@@ -412,23 +409,23 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
 
     const c = cardResult.rows[0];
     const ct = c.currency_type as string;
-    if (ct === 'DOP' && currency !== 'DOP') {
-      return res.status(400).json({ message: 'This card only tracks DOP debt' });
+    const cur = String(currency).trim().toUpperCase();
+    if (ct === 'DOP' && cur !== pair.primary) {
+      return res.status(400).json({ message: `This card only tracks ${pair.primary} debt` });
     }
-    if (ct === 'USD' && currency !== 'USD') {
-      return res.status(400).json({ message: 'This card only tracks USD debt' });
-    }
-    if (ct === 'DUAL' && currency !== 'DOP' && currency !== 'USD') {
-      return res.status(400).json({ message: 'currency must be DOP or USD' });
+    if (ct === 'USD' && cur !== pair.secondary) {
+      return res.status(400).json({ message: `This card only tracks ${pair.secondary} debt` });
     }
 
     const debtDop = parseFloat(c.current_debt_dop || 0);
     const debtUsd = parseFloat(c.current_debt_usd || 0);
-    const currentDebt = currency === 'DOP' ? debtDop : debtUsd;
+    const currentDebt = cur === pair.primary ? debtDop : debtUsd;
     const payApply = Math.min(amt, currentDebt);
     if (payApply <= 0) {
       return res.status(400).json({ message: 'No debt to pay in this currency' });
     }
+
+    const cardTag = `[Tarjeta ${String(c.bank_name ?? '').trim() || '?'} · ${String(c.card_name ?? '').trim() || '?'}]`;
 
     const ins = await query(
       `INSERT INTO credit_card_payments (user_id, credit_card_id, amount, currency, payment_date, bank_account_id, notes)
@@ -437,7 +434,7 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
       [userId, cardId, payApply, currency, dateStr, bankAccountId, notes ?? null]
     );
 
-    if (currency === 'DOP') {
+    if (cur === pair.primary) {
       await query(
         `UPDATE credit_cards SET current_debt_dop = GREATEST(0, current_debt_dop - $1::numeric), updated_at = CURRENT_TIMESTAMP
          WHERE id = $2 AND user_id = $3`,
@@ -453,10 +450,12 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
 
     if (bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, currency, -payApply);
+        await applyBalanceDelta(userId, bankAccountId, cur, -payApply, undefined, {
+          description: `${cardTag} Abono desde cuenta`,
+        });
       } catch (e: any) {
         await query('DELETE FROM credit_card_payments WHERE id = $1', [ins.rows[0].id]);
-        if (currency === 'DOP') {
+        if (cur === pair.primary) {
           await query(
             `UPDATE credit_cards SET current_debt_dop = current_debt_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3`,
             [payApply, cardId, userId]
@@ -485,7 +484,7 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
       payment: {
         id: ins.rows[0].id,
         amount: payApply,
-        currency,
+        currency: cur,
         paymentDate: dateStr,
         bankAccountId,
         createdAt: ins.rows[0].created_at,
@@ -503,8 +502,11 @@ export const deleteCardPayment = async (req: AuthRequest, res: Response) => {
     const paymentId = parseInt(req.params.paymentId);
 
     const pr = await query(
-      `SELECT id, credit_card_id, amount, currency, bank_account_id
-       FROM credit_card_payments WHERE id = $1 AND user_id = $2`,
+      `SELECT id, credit_card_id, amount, currency, bank_account_id,
+              c.bank_name, c.card_name
+       FROM credit_card_payments p
+       JOIN credit_cards c ON c.id = p.credit_card_id AND c.user_id = p.user_id
+       WHERE p.id = $1 AND p.user_id = $2`,
       [paymentId, userId]
     );
     if (pr.rows.length === 0) {
@@ -515,16 +517,21 @@ export const deleteCardPayment = async (req: AuthRequest, res: Response) => {
     const cardId = p.credit_card_id;
     const payApply = parseFloat(p.amount);
     const currency = p.currency as string;
+    const pairRm = await getUserCurrencyPair(userId);
+    const curRm = String(currency).trim().toUpperCase();
+    const cardTagRm = `[Tarjeta ${String(p.bank_name ?? '').trim() || '?'} · ${String(p.card_name ?? '').trim() || '?'}]`;
 
     if (p.bank_account_id) {
       try {
-        await applyBalanceDelta(userId, p.bank_account_id, currency, payApply);
+        await applyBalanceDelta(userId, p.bank_account_id, curRm, payApply, undefined, {
+          description: `${cardTagRm} Eliminación de abono (reversión a cuenta)`,
+        });
       } catch (e: any) {
         console.error('Revert card payment balance:', e);
       }
     }
 
-    if (currency === 'DOP') {
+    if (curRm === pairRm.primary) {
       await query(
         `UPDATE credit_cards SET current_debt_dop = current_debt_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
          WHERE id = $2 AND user_id = $3`,

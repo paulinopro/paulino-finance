@@ -1,0 +1,3 @@
+/*! For license information please see 59212.86445d88.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[59212],{59212(a,n,e){e.r(n),e.d(n,{default:()=>t});const t=(0,e(21639).A)("HdmiPort",[["path",{d:"M22 9a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h1l2 2h12l2-2h1a1 1 0 0 0 1-1Z",key:"2128wb"}],["path",{d:"M7.5 12h9",key:"1t0ckc"}]])}}]);
+//# sourceMappingURL=59212.86445d88.chunk.js.map

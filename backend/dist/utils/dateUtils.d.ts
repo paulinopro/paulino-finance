@@ -8,6 +8,11 @@ export declare function dateToYmdLocal(d: Date): string;
  */
 export declare function toYmdFromPgDate(value: unknown): string;
 /**
+ * Parsea `YYYY-MM-DD` como inicio del día en hora local (no UTC).
+ * Evita el desfase de `new Date('YYYY-MM-DD')`, que en ECMAScript es medianoche UTC.
+ */
+export declare function parseYmdLocal(ymd: string): Date;
+/**
  * Get user timezone from database
  */
 export declare const getUserTimezone: (userId: number) => Promise<string>;
@@ -40,7 +45,13 @@ export type FixedIncomeRow = {
     frequency: string | null;
     receipt_day?: number | null;
     date?: unknown;
+    /** Primera fecha en que aplica la serie (inclusive). Opcional. */
+    recurrence_start_date?: unknown;
+    /** Última fecha en que aplica la serie (inclusive). Opcional. */
+    recurrence_end_date?: unknown;
 };
+/** Recorta ocurrencias YYYY-MM-DD por vigencia opcional de la serie recurrente. */
+export declare function filterOccurrencesByRecurrenceWindow(dates: string[], recurrenceStart: unknown, recurrenceEnd: unknown): string[];
 /**
  * Fechas de ocurrencia de un ingreso fijo en [periodStart, periodEnd] (inclusive).
  * Cubre: MONTHLY, DAILY, WEEKLY, BIWEEKLY, SEMI_MONTHLY, ANNUAL.
@@ -59,6 +70,8 @@ export type ExpenseScheduleRow = {
     payment_day?: number | null;
     payment_month?: number | null;
     date?: unknown;
+    recurrence_start_date?: unknown;
+    recurrence_end_date?: unknown;
 };
 /**
  * Fechas en [periodStart, periodEnd] donde aplica un gasto recurrente.

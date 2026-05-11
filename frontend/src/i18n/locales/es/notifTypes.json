@@ -1,0 +1,13 @@
+{
+  "card": "Tarjeta",
+  "loan": "Préstamo",
+  "recurring": "Recurrente",
+  "system": "Sistema",
+  "CARD_PAYMENT": "Pago de tarjeta",
+  "LOAN_PAYMENT": "Pago de préstamo",
+  "RECURRING_EXPENSE": "Gasto recurrente",
+  "EXPENSE": "Gasto",
+  "INCOME": "Ingreso",
+  "REMINDER": "Recordatorio",
+  "SYSTEM": "Sistema"
+}

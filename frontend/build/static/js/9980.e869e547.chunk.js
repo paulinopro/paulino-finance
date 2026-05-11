@@ -1,0 +1,3 @@
+/*! For license information please see 9980.e869e547.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[9980],{9980(e,n,t){t.r(n),t.d(n,{default:()=>a});const a=(0,t(21639).A)("Touchpad",[["rect",{width:"20",height:"16",x:"2",y:"4",rx:"2",key:"18n3k1"}],["path",{d:"M2 14h20",key:"myj16y"}],["path",{d:"M12 20v-6",key:"1rm09r"}]])}}]);
+//# sourceMappingURL=9980.e869e547.chunk.js.map

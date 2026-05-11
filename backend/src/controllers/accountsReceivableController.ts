@@ -9,6 +9,7 @@ import {
   incomeDescriptionForReceivable,
 } from '../services/accountsPaymentLinkSync';
 import { deleteCalendarEventsForRelated } from '../services/calendarService';
+import { getUserCurrencyPair, isCurrencyInUserPair } from '../utils/userCurrencyPair';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -173,7 +174,9 @@ export const addAccountReceivablePayment = async (req: AuthRequest, res: Respons
 
     if (bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, account.currency, payAmount);
+        await applyBalanceDelta(userId, bankAccountId, account.currency, payAmount, undefined, {
+          description: `[CxC] Abono por cobrar · «${account.description}»`,
+        });
       } catch (e: any) {
         console.error('AR payment balance:', e);
       }
@@ -304,7 +307,9 @@ export const updateAccountReceivablePayment = async (req: AuthRequest, res: Resp
 
         if (prevIncomeBank) {
           try {
-            await applyBalanceDelta(userId, prevIncomeBank, cur, -prevAmt, client);
+            await applyBalanceDelta(userId, prevIncomeBank, cur, -prevAmt, client, {
+              description: `[CxC] Ajuste de abono · reversión «${account.description}»`,
+            });
           } catch (e: any) {
             await client.query('ROLLBACK');
             console.error('AR update revert balance:', e);
@@ -324,7 +329,9 @@ export const updateAccountReceivablePayment = async (req: AuthRequest, res: Resp
 
         if (newBankId) {
           try {
-            await applyBalanceDelta(userId, newBankId, cur, payAmount, client);
+            await applyBalanceDelta(userId, newBankId, cur, payAmount, client, {
+              description: `[CxC] Ajuste de abono · nueva acreditación «${account.description}»`,
+            });
           } catch (e: any) {
             await client.query('ROLLBACK');
             if (e?.message === 'ACCOUNT_NOT_FOUND' || e?.message === 'CURRENCY_MISMATCH') {
@@ -454,6 +461,14 @@ export const createAccountReceivable = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Description, amount, currency, and due date are required' });
     }
 
+    const pair = await getUserCurrencyPair(userId);
+    const cur = String(currency).trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, cur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
+
     const result = await query(
       `INSERT INTO accounts_receivable (user_id, description, amount, currency, due_date, category, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -491,6 +506,24 @@ export const updateAccountReceivable = async (req: AuthRequest, res: Response) =
     const userId = req.userId!;
     const { id } = req.params;
     const { description, amount, currency, dueDate, category, notes } = req.body;
+
+    const pair = await getUserCurrencyPair(userId);
+    const prevRow = await query(`SELECT currency FROM accounts_receivable WHERE id = $1 AND user_id = $2`, [
+      id,
+      userId,
+    ]);
+    if (prevRow.rows.length === 0) {
+      return res.status(404).json({ message: 'Account receivable not found' });
+    }
+    const mergedCur =
+      currency !== undefined && currency !== null && String(currency).trim() !== ''
+        ? String(currency).trim().toUpperCase()
+        : String(prevRow.rows[0].currency || '').trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, mergedCur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
 
     if (amount != null) {
       const recv = await getTotalReceivedReceivable(Number(id));
@@ -601,7 +634,9 @@ export const receiveAccountReceivable = async (req: AuthRequest, res: Response) 
 
     if (bankAccountId) {
       try {
-        await applyBalanceDelta(userId, bankAccountId, account.currency, remaining);
+        await applyBalanceDelta(userId, bankAccountId, account.currency, remaining, undefined, {
+          description: `[CxC] Cobro total por cobrar · «${account.description}»`,
+        });
       } catch (e: any) {
         console.error('AR receive balance:', e);
       }

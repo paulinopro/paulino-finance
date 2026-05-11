@@ -1,0 +1,292 @@
+{
+  "generic": {
+    "fallbackError": "Error",
+    "loadFailed": "Error al cargar",
+    "saveFailed": "Error al guardar",
+    "deleteFailed": "Error al eliminar",
+    "exportFailed": "Error al exportar",
+    "invalidAmount": "Indique un monto válido",
+    "selectAccount": "Selecciona una cuenta",
+    "selectCategory": "Selecciona una categoría",
+    "statusUpdated": "Estado actualizado",
+    "statusUpdateFailed": "Error al actualizar estado",
+    "copied": "Datos copiados al portapapeles",
+    "copyFailed": "No se pudo copiar al portapapeles"
+  },
+  "adminAudit": {
+    "loadError": "Error al cargar auditoría",
+    "exportSuccess": "Descarga lista",
+    "exportError": "Error al exportar"
+  },
+  "amortization": {
+    "loadError": "Error al cargar tabla de amortización",
+    "paymentRegistered": "Pago registrado exitosamente",
+    "paymentRegisterError": "Error al registrar pago",
+    "paymentUpdated": "Pago actualizado exitosamente",
+    "paymentUpdateError": "Error al actualizar pago",
+    "paymentDeleted": "Pago eliminado exitosamente",
+    "paymentDeleteError": "Error al eliminar pago"
+  },
+  "calendar": {
+    "loadEventsError": "Error al cargar eventos del calendario",
+    "statusUpdated": "Estado actualizado exitosamente",
+    "statusUpdateError": "Error al actualizar estado",
+    "eventsUpdated": "Eventos actualizados",
+    "eventsUpdatedWithHidden": "Eventos actualizados. {{count}} evento(s) sin origen activo ya no se muestran en el calendario (siguen en Historial).",
+    "refreshError": "Error al actualizar eventos"
+  },
+  "adminDashboard": {
+    "statsLoadError": "No se pudieron cargar las estadísticas"
+  },
+  "adminUserDetail": {
+    "invalidId": "ID inválido",
+    "choosePlan": "Elige un plan",
+    "invalidPlan": "Plan no válido",
+    "planUpdated": "Plan actualizado",
+    "planAssignError": "Error al asignar plan",
+    "loadError": "Error al cargar",
+    "noChangesToApply": "Sin cambios que aplicar"
+  },
+  "adminUsers": {
+    "plansLoadError": "No se pudieron cargar los planes",
+    "usersLoadError": "Error al cargar usuarios",
+    "csvStarted": "Descarga de CSV iniciada",
+    "userDisabled": "Usuario deshabilitado",
+    "userEnabled": "Usuario habilitado",
+    "usersUpdateError": "Error al actualizar usuarios",
+    "planUpdated": "Plan actualizado",
+    "planAssignError": "Error al asignar plan",
+    "impersonateSuccess": "Sesión como {{email}}",
+    "impersonateError": "Error al suplantar"
+  },
+  "subscription": {
+    "plansLoadError": "No se pudieron cargar los planes",
+    "paypalStartError": "No se pudo iniciar PayPal",
+    "paypalReturnHint": "Si completaste el pago en PayPal, tu plan se actualizará en breve.",
+    "paypalCancelled": "Pago cancelado"
+  },
+  "notificationHistory": {
+    "notFound": "No se encontró la notificación.",
+    "loadError": "Error al cargar notificaciones",
+    "markReadError": "Error al marcar como leída",
+    "allMarkedRead": "Todas las notificaciones marcadas como leídas",
+    "markAllReadError": "Error al marcar todas como leídas",
+    "deleted": "Notificación eliminada",
+    "deleteError": "Error al eliminar notificación"
+  },
+  "vehicles": {
+    "loadError": "Error al cargar vehículos",
+    "expensesLoadError": "Error al cargar gastos del vehículo",
+    "updated": "Vehículo actualizado",
+    "created": "Vehículo creado",
+    "saveError": "Error al guardar vehículo",
+    "expenseUpdated": "Gasto actualizado",
+    "expenseAdded": "Gasto agregado",
+    "expenseSaveError": "Error al guardar gasto",
+    "deleted": "Vehículo eliminado",
+    "deleteError": "Error al eliminar vehículo",
+    "expenseDeleted": "Gasto eliminado",
+    "expenseDeleteError": "Error al eliminar gasto"
+  },
+  "projections": {
+    "loadError": "Error al cargar proyecciones"
+  },
+  "cashFlow": {
+    "loadError": "Error al cargar flujo de caja"
+  },
+  "dashboard": {
+    "loadError": "Error al cargar datos del dashboard",
+    "healthLoadError": "Error al cargar datos de salud financiera"
+  },
+  "reports": {
+    "needDateRange": "Indica la fecha desde y la fecha hasta.",
+    "dateRangeInvalid": "La fecha desde no puede ser posterior a la fecha hasta.",
+    "pdfDownloaded": "Reporte PDF descargado exitosamente",
+    "generated": "Reporte generado exitosamente",
+    "generateError": "Error al generar reporte"
+  },
+  "loans": {
+    "loadError": "Error al cargar préstamos",
+    "updated": "Préstamo actualizado",
+    "created": "Préstamo creado",
+    "saveError": "Error al guardar préstamo",
+    "paymentRegistered": "Pago registrado",
+    "paymentRegisterError": "Error al registrar pago",
+    "paymentDeleted": "Pago eliminado",
+    "paymentDeleteError": "Error al eliminar pago",
+    "deleted": "Préstamo eliminado",
+    "deleteError": "Error al eliminar préstamo",
+    "detailLoadError": "Error al cargar detalles",
+    "paymentsHistoryLoadError": "Error al cargar historial de pagos",
+    "editLoadError": "Error al cargar préstamo para editar"
+  },
+  "accounts": {
+    "loadError": "Error al cargar cuentas",
+    "updated": "Cuenta actualizada",
+    "created": "Cuenta creada",
+    "saveError": "Error al guardar cuenta",
+    "transferDone": "Transferencia realizada",
+    "transferError": "Error en transferencia",
+    "adjustmentRegistered": "Ajuste registrado",
+    "adjustmentError": "Error al registrar ajuste",
+    "deleted": "Cuenta eliminada",
+    "deleteError": "Error al eliminar cuenta",
+    "movementsLoadError": "No se pudieron cargar los movimientos"
+  },
+  "cards": {
+    "loadError": "Error al cargar tarjetas",
+    "paymentRegistered": "Pago registrado",
+    "paymentRegisterError": "Error al registrar pago",
+    "paymentDeleted": "Pago eliminado",
+    "paymentDeleteError": "Error al eliminar",
+    "updated": "Tarjeta actualizada",
+    "created": "Tarjeta creada",
+    "saveError": "Error al guardar tarjeta",
+    "deleted": "Tarjeta eliminada",
+    "deleteError": "Error al eliminar tarjeta"
+  },
+  "accountsReceivable": {
+    "loadError": "Error al cargar cuentas por cobrar",
+    "dueDateRequired": "Seleccione la fecha de vencimiento",
+    "updated": "Cuenta por cobrar actualizada",
+    "created": "Cuenta por cobrar creada",
+    "saveError": "Error al guardar cuenta por cobrar",
+    "incomeDateRequired": "Seleccione la fecha del ingreso",
+    "markedReceived": "Cuenta marcada como cobrada; ingreso registrado en la fecha indicada",
+    "markReceivedError": "Error al marcar como cobrada",
+    "paymentDateRequired": "Seleccione la fecha del abono",
+    "paymentRegistered": "Abono registrado como ingreso",
+    "paymentRegisterError": "Error al registrar abono",
+    "paymentsLoadError": "Error al cargar abonos",
+    "paymentUpdatedSync": "Abono actualizado; el ingreso fue sincronizado",
+    "paymentUpdateError": "Error al actualizar abono",
+    "paymentDeleted": "Abono eliminado",
+    "paymentDeleteError": "Error al eliminar abono",
+    "deleted": "Cuenta por cobrar eliminada",
+    "deleteError": "Error al eliminar cuenta por cobrar"
+  },
+  "accountsPayable": {
+    "loadError": "Error al cargar cuentas por pagar",
+    "dueDateRequired": "Seleccione la fecha de vencimiento",
+    "updated": "Cuenta por pagar actualizada",
+    "created": "Cuenta por pagar creada",
+    "saveError": "Error al guardar cuenta por pagar",
+    "expenseDateRequired": "Seleccione la fecha del gasto",
+    "markedPaid": "Cuenta marcada como pagada; gasto registrado en la fecha indicada",
+    "markPaidError": "Error al marcar como pagada",
+    "paymentDateRequired": "Seleccione la fecha del abono",
+    "paymentRegistered": "Abono registrado como gasto",
+    "paymentRegisterError": "Error al registrar abono",
+    "paymentsLoadError": "Error al cargar abonos",
+    "paymentUpdatedSync": "Abono actualizado; el gasto fue sincronizado",
+    "paymentUpdateError": "Error al actualizar abono",
+    "paymentDeleted": "Abono eliminado",
+    "paymentDeleteError": "Error al eliminar abono",
+    "deleted": "Cuenta por pagar eliminada",
+    "deleteError": "Error al eliminar cuenta por pagar"
+  },
+  "budgets": {
+    "loadError": "Error al cargar presupuestos",
+    "updated": "Presupuesto actualizado",
+    "created": "Presupuesto creado",
+    "saveError": "Error al guardar presupuesto",
+    "deleted": "Presupuesto eliminado",
+    "deleteError": "Error al eliminar presupuesto"
+  },
+  "financialGoals": {
+    "loadError": "Error al cargar metas financieras",
+    "updated": "Meta financiera actualizada",
+    "created": "Meta financiera creada",
+    "saveError": "Error al guardar meta financiera",
+    "noPendingBalance": "No hay saldo pendiente para abonar en esta meta.",
+    "paymentDateRequired": "Seleccione la fecha del abono",
+    "paymentRegistered": "Abono registrado",
+    "paymentRegisterError": "Error al registrar abono",
+    "historyUpdateError": "Error al actualizar historial",
+    "historyLoadError": "Error al cargar historial de abonos",
+    "paymentUpdated": "Abono actualizado",
+    "paymentUpdateError": "Error al actualizar abono",
+    "paymentDeleted": "Abono eliminado",
+    "paymentDeleteError": "Error al eliminar abono",
+    "deleted": "Meta financiera eliminada",
+    "deleteError": "Error al eliminar meta financiera",
+    "statusUpdated": "Estado actualizado",
+    "statusUpdateError": "Error al actualizar estado"
+  },
+  "expenses": {
+    "loadError": "Error al cargar gastos",
+    "updated": "Gasto actualizado",
+    "created": "Gasto creado",
+    "saveError": "Error al guardar gasto",
+    "deleted": "Gasto eliminado",
+    "deleteError": "Error al eliminar gasto"
+  },
+  "income": {
+    "loadError": "Error al cargar ingresos",
+    "updated": "Ingreso actualizado",
+    "created": "Ingreso creado",
+    "saveError": "Error al guardar ingreso",
+    "deleted": "Ingreso eliminado",
+    "deleteError": "Error al eliminar ingreso"
+  },
+  "adminStatus": {
+    "healthError": "No se pudo consultar el estado del sistema",
+    "countsError": "No se pudieron cargar los conteos de periodos",
+    "schedulerError": "No se pudo consultar el programador de notificaciones"
+  },
+  "categories": {
+    "loadError": "Error al cargar categorías",
+    "suggestionsApplied": "Ícono y color sugeridos aplicados",
+    "nameRequired": "El nombre de la categoría es requerido",
+    "created": "Categoría creada",
+    "createError": "Error al crear categoría",
+    "nameEmpty": "El nombre no puede estar vacío",
+    "updated": "Categoría actualizada",
+    "updateError": "Error al actualizar categoría",
+    "deleted": "Categoría eliminada",
+    "deleteError": "Error al eliminar categoría"
+  },
+  "adminPlans": {
+    "loadError": "Error al cargar planes",
+    "modulesRequired": "Seleccione al menos un módulo para el plan",
+    "saved": "Plan guardado",
+    "saveError": "Error al guardar",
+    "nameRequired": "Indica un nombre para el plan",
+    "slugInvalid": "Slug inválido: use minúsculas, números y guiones (ej. premium-plus)",
+    "createdHint": "Plan creado. Puedes editar precios, módulos y PayPal a continuación.",
+    "createError": "Error al crear el plan",
+    "paypalCreated": "PayPal: creado {{parts}}",
+    "paypalSyncedNoop": "Ya estaba sincronizado (sin cambios en PayPal)",
+    "paypalSyncError": "Error al sincronizar con PayPal",
+    "deleted": "Eliminado",
+    "deleteError": "No se puede eliminar",
+    "paypalProduct": "producto",
+    "paypalMonthly": "plan mensual",
+    "paypalYearly": "plan anual"
+  },
+  "adminSettings": {
+    "loadError": "No se pudieron cargar los ajustes",
+    "registrationEnabled": "Registro de usuarios habilitado",
+    "registrationDisabled": "Registro de usuarios deshabilitado",
+    "maintenanceOn": "Mantenimiento activo: el resto de usuarios queda en solo lectura",
+    "maintenanceOff": "Mantenimiento desactivado",
+    "saveError": "Error al guardar"
+  },
+  "notificationTemplates": {
+    "loadError": "Error al cargar plantillas",
+    "updated": "Plantilla actualizada exitosamente",
+    "saveError": "Error al guardar plantilla",
+    "restored": "Plantilla restaurada a valores por defecto",
+    "restoreError": "Error al restaurar plantilla",
+    "testSent": "Mensaje de prueba enviado. Revisa tu Telegram.",
+    "testError": "Error al enviar mensaje de prueba"
+  },
+  "profile": {
+    "accountUpdated": "Datos de cuenta actualizados",
+    "saveError": "No se pudo guardar",
+    "passwordMismatch": "Las contraseñas nuevas no coinciden",
+    "passwordTooShort": "La nueva contraseña debe tener al menos 6 caracteres",
+    "passwordUpdated": "Contraseña actualizada",
+    "passwordChangeError": "No se pudo cambiar la contraseña"
+  }
+}

@@ -14,9 +14,12 @@ import { LIST_CARD_SHELL, listCardBtnEdit, listCardBtnDanger } from '../utils/li
 import { formatDateForInput, formatDateDdMmYyyy, formatCalendarDateLongEs } from '../utils/dateUtils';
 import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
@@ -53,9 +56,17 @@ interface GoalMovement {
   updatedAt: string;
 }
 
-function accountMatchesGoalCurrency(acc: BankAccount, goalCurrency: string): boolean {
-  if (acc.currencyType === 'DUAL') return goalCurrency === 'DOP' || goalCurrency === 'USD';
-  return acc.currencyType === goalCurrency;
+function accountMatchesGoalCurrency(
+  acc: BankAccount,
+  goalCurrency: string,
+  primary: string,
+  secondary: string
+): boolean {
+  const g = goalCurrency.toUpperCase();
+  if (acc.currencyType === 'DUAL') return g === primary || g === secondary;
+  if (acc.currencyType === 'DOP') return g === primary;
+  if (acc.currencyType === 'USD') return g === secondary;
+  return false;
 }
 
 function todayYmd(): string {
@@ -103,7 +114,17 @@ function goalCanAddAbono(goal: FinancialGoal): boolean {
 }
 
 const FinancialGoals: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    currencySelectLabel,
+    defaultTransactionCurrency,
+    transactionCurrencyOptions,
+    primaryCurrency,
+    secondaryCurrency,
+    localeTag,
+  } = useIntlFormatting();
   const { pageSize: goalsPageSize, setPageSize: setGoalsPageSize, pageSizeOptions: goalsPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:financialGoals', TABLE_PAGE_SIZE_GOALS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
@@ -138,7 +159,7 @@ const FinancialGoals: React.FC = () => {
     name: '',
     description: '',
     targetAmount: '',
-    currency: 'DOP',
+    currency: defaultTransactionCurrency,
     targetDate: '',
     bankAccountId: '',
   });
@@ -151,11 +172,11 @@ const FinancialGoals: React.FC = () => {
       const response = await api.get('/financial-goals', { params });
       setGoals(response.data.goals);
     } catch (error: any) {
-      toast.error('Error al cargar metas financieras');
+      toast.error(t('toast.financialGoals.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, t]);
 
   useEffect(() => {
     fetchGoals();
@@ -173,38 +194,41 @@ const FinancialGoals: React.FC = () => {
   }, []);
 
   const accountsForGoalCurrency = useMemo(
-    () => bankAccounts.filter((a) => accountMatchesGoalCurrency(a, formData.currency)),
-    [bankAccounts, formData.currency]
+    () =>
+      bankAccounts.filter((a) =>
+        accountMatchesGoalCurrency(a, formData.currency, primaryCurrency, secondaryCurrency)
+      ),
+    [bankAccounts, formData.currency, primaryCurrency, secondaryCurrency]
   );
 
   const accountsForAbonoSource = useMemo(() => {
     if (!abonoTarget) return [];
     return bankAccounts.filter(
       (a) =>
-        accountMatchesGoalCurrency(a, abonoTarget.currency) &&
+        accountMatchesGoalCurrency(a, abonoTarget.currency, primaryCurrency, secondaryCurrency) &&
         (abonoTarget.bankAccountId == null || a.id !== abonoTarget.bankAccountId)
     );
-  }, [bankAccounts, abonoTarget]);
+  }, [bankAccounts, abonoTarget, primaryCurrency, secondaryCurrency]);
 
   const accountsForEditMovementSource = useMemo(() => {
     if (!historyGoal || !movementBeingEdited) return [];
     const g = goals.find((x) => x.id === historyGoal.id) ?? historyGoal;
     return bankAccounts.filter(
       (a) =>
-        accountMatchesGoalCurrency(a, g.currency) &&
+        accountMatchesGoalCurrency(a, g.currency, primaryCurrency, secondaryCurrency) &&
         (g.bankAccountId == null || a.id !== g.bankAccountId)
     );
-  }, [bankAccounts, historyGoal, movementBeingEdited, goals]);
+  }, [bankAccounts, historyGoal, movementBeingEdited, goals, primaryCurrency, secondaryCurrency]);
 
   useEffect(() => {
     if (!formData.bankAccountId || bankAccounts.length === 0) return;
     const id = parseInt(formData.bankAccountId, 10);
     if (Number.isNaN(id)) return;
     const acc = bankAccounts.find((a) => a.id === id);
-    if (!acc || !accountMatchesGoalCurrency(acc, formData.currency)) {
+    if (!acc || !accountMatchesGoalCurrency(acc, formData.currency, primaryCurrency, secondaryCurrency)) {
       setFormData((f) => ({ ...f, bankAccountId: '' }));
     }
-  }, [formData.currency, bankAccounts, formData.bankAccountId]);
+  }, [formData.currency, bankAccounts, formData.bankAccountId, primaryCurrency, secondaryCurrency]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,17 +248,17 @@ const FinancialGoals: React.FC = () => {
 
       if (editingGoal) {
         await api.put(`/financial-goals/${editingGoal.id}`, data);
-        toast.success('Meta financiera actualizada');
+        toast.success(t('toast.financialGoals.updated'));
       } else {
         await api.post('/financial-goals', data);
-        toast.success('Meta financiera creada');
+        toast.success(t('toast.financialGoals.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchGoals();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar meta financiera');
+      toast.error(error.response?.data?.message || t('toast.financialGoals.saveError'));
     }
   };
 
@@ -251,7 +275,7 @@ const FinancialGoals: React.FC = () => {
     if (!historyGoal) return;
     const latest = goals.find((g) => g.id === historyGoal.id) ?? historyGoal;
     if (!goalCanAddAbono(latest)) {
-      toast.error('No hay saldo pendiente para abonar en esta meta.');
+      toast.error(t('toast.financialGoals.noPendingBalance'));
       return;
     }
     setShowHistoryModal(false);
@@ -263,11 +287,11 @@ const FinancialGoals: React.FC = () => {
     if (!abonoTarget) return;
     const amt = parseFloat(abonoAmount);
     if (isNaN(amt) || amt <= 0) {
-      toast.error('Indique un monto válido');
+      toast.error(t('toast.generic.invalidAmount'));
       return;
     }
     if (!abonoDate) {
-      toast.error('Seleccione la fecha del abono');
+      toast.error(t('toast.financialGoals.paymentDateRequired'));
       return;
     }
     try {
@@ -277,13 +301,13 @@ const FinancialGoals: React.FC = () => {
       }
       await api.post(`/financial-goals/${abonoTarget.id}/movements`, body);
       const gid = abonoTarget.id;
-      toast.success('Abono registrado');
+      toast.success(t('toast.financialGoals.paymentRegistered'));
       setShowAbonoModal(false);
       setAbonoTarget(null);
       await fetchGoals();
       await reloadHistoryIfOpen(gid);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al registrar abono');
+      toast.error(error.response?.data?.message || t('toast.financialGoals.paymentRegisterError'));
     }
   };
 
@@ -294,7 +318,7 @@ const FinancialGoals: React.FC = () => {
         const response = await api.get(`/financial-goals/${goalId}/movements`);
         setHistoryMovements(response.data.movements || []);
       } catch {
-        toast.error('Error al actualizar historial');
+        toast.error(t('toast.financialGoals.historyUpdateError'));
       } finally {
         setHistoryLoading(false);
       }
@@ -310,7 +334,7 @@ const FinancialGoals: React.FC = () => {
       const response = await api.get(`/financial-goals/${goal.id}/movements`);
       setHistoryMovements(response.data.movements || []);
     } catch {
-      toast.error('Error al cargar historial de abonos');
+      toast.error(t('toast.financialGoals.historyLoadError'));
     } finally {
       setHistoryLoading(false);
     }
@@ -330,11 +354,11 @@ const FinancialGoals: React.FC = () => {
     if (!historyGoal || !movementBeingEdited) return;
     const amt = parseFloat(editMovAmount);
     if (isNaN(amt) || amt <= 0) {
-      toast.error('Indique un monto válido');
+      toast.error(t('toast.generic.invalidAmount'));
       return;
     }
     if (!editMovDate) {
-      toast.error('Seleccione la fecha del abono');
+      toast.error(t('toast.financialGoals.paymentDateRequired'));
       return;
     }
     try {
@@ -343,51 +367,51 @@ const FinancialGoals: React.FC = () => {
         movementDate: editMovDate,
         sourceBankAccountId: editMovSourceBankAccountId ? parseInt(editMovSourceBankAccountId, 10) : null,
       });
-      toast.success('Abono actualizado');
+      toast.success(t('toast.financialGoals.paymentUpdated'));
       setMovementBeingEdited(null);
       await fetchGoals();
       await reloadHistoryIfOpen(historyGoal.id);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al actualizar abono');
+      toast.error(error.response?.data?.message || t('toast.financialGoals.paymentUpdateError'));
     }
   };
 
   const handleDeleteMovement = async (m: GoalMovement) => {
     if (!historyGoal) return;
-    if (!window.confirm('¿Eliminar este abono? Se actualizará el progreso de la meta.')) {
+    if (!window.confirm(t('confirm.deleteGoalPayment'))) {
       return;
     }
     try {
       await api.delete(`/financial-goals/${historyGoal.id}/movements/${m.id}`);
-      toast.success('Abono eliminado');
+      toast.success(t('toast.financialGoals.paymentDeleted'));
       await fetchGoals();
       await reloadHistoryIfOpen(historyGoal.id);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al eliminar abono');
+      toast.error(error.response?.data?.message || t('toast.financialGoals.paymentDeleteError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar esta meta financiera?')) {
+    if (!window.confirm(t('confirm.deleteFinancialGoal'))) {
       return;
     }
 
     try {
       await api.delete(`/financial-goals/${id}`);
-      toast.success('Meta financiera eliminada');
+      toast.success(t('toast.financialGoals.deleted'));
       fetchGoals();
     } catch (error: any) {
-      toast.error('Error al eliminar meta financiera');
+      toast.error(t('toast.financialGoals.deleteError'));
     }
   };
 
   const handleStatusChange = async (id: number, status: string) => {
     try {
       await api.put(`/financial-goals/${id}`, { status });
-      toast.success('Estado actualizado');
+      toast.success(t('toast.financialGoals.statusUpdated'));
       fetchGoals();
     } catch (error: any) {
-      toast.error('Error al actualizar estado');
+      toast.error(t('toast.financialGoals.statusUpdateError'));
     }
   };
 
@@ -396,7 +420,7 @@ const FinancialGoals: React.FC = () => {
       name: '',
       description: '',
       targetAmount: '',
-      currency: 'DOP',
+      currency: defaultTransactionCurrency,
       targetDate: '',
       bankAccountId: '',
     });
@@ -472,20 +496,27 @@ const FinancialGoals: React.FC = () => {
     return orderedFiltered.slice(start, start + goalsPageSize);
   }, [orderedFiltered, goalsMainPageSafe, goalsPageSize]);
   const goalListStart = (goalsMainPageSafe - 1) * goalsPageSize;
-  const listDnd = useListOrderPageDnd(pagedGoals, goalListStart, orderedFiltered, commitGoalOrder);
+  const listDnd = useListOrderPageDnd(pagedGoals, goalListStart, orderedFiltered, commitGoalOrder, {
+    ghostLabel: (g) => g.name,
+  });
 
   const goalsSummaryKpis = useMemo(() => {
+    const p = primaryCurrency;
+    const s = secondaryCurrency;
     let active = 0;
-    let dop = 0;
-    let usd = 0;
+    let primaryTotal = 0;
+    let secondaryTotal = 0;
     for (const g of orderedFiltered) {
       if (g.status === 'ACTIVE') active += 1;
-      const c = String(g.currency || 'DOP').toUpperCase();
-      if (c === 'USD') usd += g.targetAmount;
-      else dop += g.targetAmount;
+      const c = String(g.currency || p).toUpperCase();
+      if (c === p) primaryTotal += g.targetAmount;
+      else if (c === s) secondaryTotal += g.targetAmount;
+      else if (c === 'DOP') primaryTotal += g.targetAmount;
+      else if (c === 'USD') secondaryTotal += g.targetAmount;
+      else primaryTotal += g.targetAmount;
     }
-    return { count: orderedFiltered.length, active, dop, usd };
-  }, [orderedFiltered]);
+    return { count: orderedFiltered.length, active, primaryTotal, secondaryTotal };
+  }, [orderedFiltered, primaryCurrency, secondaryCurrency]);
 
   if (loading) {
     return (
@@ -498,8 +529,8 @@ const FinancialGoals: React.FC = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Metas Financieras"
-        subtitle="Establece y rastrea tus metas financieras"
+        title={t('pages.financialGoals.title')}
+        subtitle={t('pages.financialGoals.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -512,7 +543,7 @@ const FinancialGoals: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
             >
               <Plus size={20} />
-              Nueva Meta
+              {t('pages.financialGoals.newGoal')}
             </button>
           </div>
         }
@@ -523,23 +554,23 @@ const FinancialGoals: React.FC = () => {
           <div className="metrics-cq">
             <div className="metrics-summary-strip">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Objetivo total (DOP)</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.financialGoals.kpiTotalTarget', { currency: primaryCurrency })}</p>
               <p className="text-2xl font-bold text-white">
-                {goalsSummaryKpis.dop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                {fc(goalsSummaryKpis.primaryTotal, primaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Objetivo total (USD)</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.financialGoals.kpiTotalTarget', { currency: secondaryCurrency })}</p>
               <p className="text-2xl font-bold text-white">
-                {goalsSummaryKpis.usd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD
+                {fc(goalsSummaryKpis.secondaryTotal, secondaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Activas</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.financialGoals.kpiActive')}</p>
               <p className="text-2xl font-bold text-white">{goalsSummaryKpis.active}</p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Metas</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.financialGoals.kpiGoalCount')}</p>
               <p className="text-2xl font-bold text-white">{goalsSummaryKpis.count}</p>
             </div>
             </div>
@@ -554,7 +585,7 @@ const FinancialGoals: React.FC = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar..."
+              placeholder={t('pages.financialGoals.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -565,10 +596,10 @@ const FinancialGoals: React.FC = () => {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
-            <option value="">Todos los estados</option>
-            <option value="ACTIVE">Activa</option>
-            <option value="COMPLETED">Completada</option>
-            <option value="CANCELLED">Cancelada</option>
+            <option value="">{t('pages.financialGoals.statusFilterAll')}</option>
+            <option value="ACTIVE">{t('pages.financialGoals.statusActive')}</option>
+            <option value="COMPLETED">{t('pages.financialGoals.statusCompleted')}</option>
+            <option value="CANCELLED">{t('pages.financialGoals.statusCancelled')}</option>
           </select>
         </div>
       </div>
@@ -576,7 +607,7 @@ const FinancialGoals: React.FC = () => {
       {/* Goals List */}
       {orderedFiltered.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
-          <p className="text-dark-400">No hay metas financieras</p>
+          <p className="text-dark-400">{t('pages.financialGoals.emptyState')}</p>
         </div>
       ) : (
         <>
@@ -588,12 +619,16 @@ const FinancialGoals: React.FC = () => {
                   key={goal.id}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  onDragOver={listDnd.onDragOver}
-                  onDrop={listDnd.onDrop(goal.id)}
+                  {...listDnd.droppableAttr(goal.id)}
                   className={[
                     LIST_CARD_SHELL,
                     goalListAccent(goal),
-                    listDnd.dragId === goal.id ? 'opacity-60' : '',
+                    listDnd.dragId === goal.id ? 'opacity-[0.22]' : '',
+                    listDnd.dragId !== null &&
+                    listDnd.pointerOverItemId === goal.id &&
+                    listDnd.dragId !== goal.id
+                      ? 'ring-2 ring-primary-400/75 z-[1]'
+                      : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
@@ -603,12 +638,12 @@ const FinancialGoals: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Target className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                          Meta
+                          {t('pages.financialGoals.badgeGoal')}
                         </span>
                         <span className="text-xs text-dark-500 sm:text-sm">
-                          {goal.status === 'ACTIVE' && 'Activa'}
-                          {goal.status === 'COMPLETED' && 'Completada'}
-                          {goal.status === 'CANCELLED' && 'Cancelada'}
+                          {goal.status === 'ACTIVE' && t('pages.financialGoals.statusActive')}
+                          {goal.status === 'COMPLETED' && t('pages.financialGoals.statusCompleted')}
+                          {goal.status === 'CANCELLED' && t('pages.financialGoals.statusCancelled')}
                         </span>
                         {goal.status === 'COMPLETED' && <CheckCircle className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden />}
                       </div>
@@ -617,15 +652,15 @@ const FinancialGoals: React.FC = () => {
                       {goal.targetDate && (
                         <p className="inline-flex items-center gap-1.5 text-xs text-dark-500">
                           <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                          Objetivo: {formatCalendarDateLongEs(goal.targetDate)}
+                          {t('pages.financialGoals.targetDatePrefix')}{' '}
+                          {formatCalendarDateLongEs(goal.targetDate, localeTag)}
                         </p>
                       )}
                     </div>
                     <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={goal.id}
-                        onDragStart={listDnd.onDragStart}
-                        onDragEnd={listDnd.onDragEnd}
+                        gripBinder={listDnd.gripBinder}
                         disabled={pagedGoals.length < 2}
                       />
                       {canAbono && (
@@ -633,8 +668,8 @@ const FinancialGoals: React.FC = () => {
                           type="button"
                           onClick={() => openAbonoModal(goal)}
                           className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
-                          title="Agregar abono"
-                          aria-label="Agregar abono"
+                          title={t('pages.financialGoals.addContributionAria')}
+                          aria-label={t('pages.financialGoals.addContributionAria')}
                         >
                           <Banknote className="h-5 w-5" />
                         </button>
@@ -643,17 +678,29 @@ const FinancialGoals: React.FC = () => {
                         type="button"
                         onClick={() => openHistoryModal(goal)}
                         className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
-                        title="Historial de abonos"
-                        aria-label="Historial de abonos"
+                        title={t('pages.financialGoals.contributionHistoryAria')}
+                        aria-label={t('pages.financialGoals.contributionHistoryAria')}
                       >
                         <History className="h-5 w-5" />
                       </button>
                       {goal.status === 'ACTIVE' && (
-                        <button type="button" onClick={() => openEditModal(goal)} className={listCardBtnEdit} title="Editar" aria-label="Editar meta">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(goal)}
+                          className={listCardBtnEdit}
+                          title={t('common.actions.edit')}
+                          aria-label={t('pages.financialGoals.editGoalAria')}
+                        >
                           <Edit className="h-5 w-5" />
                         </button>
                       )}
-                      <button type="button" onClick={() => handleDelete(goal.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar meta">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(goal.id)}
+                        className={listCardBtnDanger}
+                        title={t('common.actions.delete')}
+                        aria-label={t('pages.financialGoals.deleteGoalAria')}
+                      >
                         <Trash2 className="h-5 w-5" />
                       </button>
                     </div>
@@ -662,7 +709,7 @@ const FinancialGoals: React.FC = () => {
                   <div className="mt-4 flex flex-col gap-3 border-t border-dark-700/80 pt-4">
                     <div className="flex items-center gap-2.5 sm:gap-3">
                       <span className="shrink-0 text-[0.65rem] font-medium uppercase tracking-wide text-dark-500">
-                        Progreso
+                        {t('pages.financialGoals.progress')}
                       </span>
                       <div
                         className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-dark-700/85"
@@ -670,7 +717,9 @@ const FinancialGoals: React.FC = () => {
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(Math.min(100, Math.max(0, goal.progress)))}
-                        aria-label={`Progreso ${formatGoalProgressPercentValue(goal.progress)} por ciento`}
+                        aria-label={t('pages.financialGoals.progressAria', {
+                          percent: formatGoalProgressPercentValue(goal.progress),
+                        })}
                       >
                         <div
                           className="h-full rounded-full transition-[width] duration-300 ease-out"
@@ -690,39 +739,44 @@ const FinancialGoals: React.FC = () => {
                     <div className="metrics-cq w-full max-w-md sm:max-w-none">
                       <div className="metrics-row-3">
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Meta</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.financialGoals.metricTarget')}
+                        </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                          {goal.targetAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                          {fc(goal.targetAmount, goal.currency)}
                         </p>
                       </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Actual</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.financialGoals.metricCurrent')}
+                        </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-400 sm:text-base">
-                          {goal.currentAmount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                          {fc(goal.currentAmount, goal.currency)}
                         </p>
                       </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Restante</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.financialGoals.metricRemaining')}
+                        </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-primary-400 sm:text-base">
-                          {goal.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{goal.currency}</span>
+                          {fc(goal.remaining, goal.currency)}
                         </p>
                       </div>
                     </div>
                   </div>
 
                     <div>
-                      <label className="mb-1 block text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Estado</label>
+                      <label className="mb-1 block text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                        {t('pages.financialGoals.statusField')}
+                      </label>
                       <select
                         value={goal.status}
                         onChange={(e) => handleStatusChange(goal.id, e.target.value)}
                         className="input w-full text-sm"
                       >
-                        <option value="ACTIVE">Activa</option>
-                        <option value="COMPLETED">Completada</option>
-                        <option value="CANCELLED">Cancelada</option>
+                        <option value="ACTIVE">{t('pages.financialGoals.statusActive')}</option>
+                        <option value="COMPLETED">{t('pages.financialGoals.statusCompleted')}</option>
+                        <option value="CANCELLED">{t('pages.financialGoals.statusCancelled')}</option>
                       </select>
                     </div>
                   </div>
@@ -730,6 +784,7 @@ const FinancialGoals: React.FC = () => {
               );
             })}
           </div>
+          <ListOrderDragGhostPortal ghost={listDnd.dragGhost} />
           <TablePagination
             className="mt-4 sm:mt-5"
             currentPage={goalsMainPageSafe}
@@ -737,7 +792,7 @@ const FinancialGoals: React.FC = () => {
             totalItems={orderedFiltered.length}
             itemsPerPage={goalsPageSize}
             onPageChange={setGoalsListPage}
-            itemLabel="metas"
+            itemLabel={t('pages.financialGoals.itemsLabel')}
             variant="card"
             pageSizeOptions={goalsPageSizeOptions}
             onPageSizeChange={setGoalsPageSize}
@@ -767,7 +822,7 @@ const FinancialGoals: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="financial-goal-form-title" className="text-xl font-semibold text-white">
-                {editingGoal ? 'Editar Meta Financiera' : 'Nueva Meta Financiera'}
+                {editingGoal ? t('pages.financialGoals.editGoalTitle') : t('pages.financialGoals.newGoalTitle')}
               </h2>
               <button
                 onClick={() => {
@@ -782,7 +837,7 @@ const FinancialGoals: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Nombre *</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.name')}</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -793,7 +848,7 @@ const FinancialGoals: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Descripción</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.description')}</label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -804,7 +859,7 @@ const FinancialGoals: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Monto Objetivo *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.targetAmount')}</label>
                   <input
                     type="number"
                     step="0.01"
@@ -815,20 +870,23 @@ const FinancialGoals: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Moneda *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.currency')}</label>
                   <select
                     value={formData.currency}
                     onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                     className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
-                    <option value="DOP">DOP</option>
-                    <option value="USD">USD</option>
+                    {transactionCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {currencySelectLabel(code)}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Fecha Objetivo</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.targetDate')}</label>
                 <input
                   type="date"
                   value={formData.targetDate}
@@ -838,15 +896,13 @@ const FinancialGoals: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">
-                  Cuenta para el ahorro (opcional)
-                </label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">{t('pages.financialGoals.savingsAccount')}</label>
                 <select
                   value={formData.bankAccountId}
                   onChange={(e) => setFormData({ ...formData, bankAccountId: e.target.value })}
                   className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  <option value="">Sin vincular — no actualiza saldos</option>
+                  <option value="">{t('pages.financialGoals.unlinkedNoBalance')}</option>
                   {accountsForGoalCurrency.map((a) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -854,14 +910,12 @@ const FinancialGoals: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <p className="mt-1.5 text-xs text-dark-500">
-                  Si eliges una cuenta, cada abono incrementará el saldo de esa cuenta en la moneda de la meta.
-                </p>
+                <p className="mt-1.5 text-xs text-dark-500">{t('pages.financialGoals.savingsAccountHint')}</p>
               </div>
 
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  {editingGoal ? 'Actualizar' : 'Crear'}
+                  {editingGoal ? t('pages.financialGoals.update') : t('pages.financialGoals.create')}
                 </button>
                 <button
                   type="button"
@@ -871,7 +925,7 @@ const FinancialGoals: React.FC = () => {
                   }}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -894,20 +948,20 @@ const FinancialGoals: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="fg-abono-modal-title" className="text-xl font-semibold text-white">
-                Agregar abono
+                {t('pages.financialGoals.addContributionTitle')}
               </h2>
               <button type="button" onClick={() => setShowAbonoModal(false)} className="text-dark-400 hover:text-white">
                 <X size={24} />
               </button>
             </div>
             <p className="text-sm text-dark-400 mb-4">
-              Máximo:{' '}
-              {abonoTarget.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-              {abonoTarget.currency}
+              {t('pages.financialGoals.maxRemaining', {
+                amount: fc(abonoTarget.remaining, abonoTarget.currency),
+              })}
             </p>
             <form onSubmit={submitAbono} className="space-y-4">
               <div>
-                <label className="label">Monto del abono *</label>
+                <label className="label">{t('pages.financialGoals.contributionAmount')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -919,17 +973,17 @@ const FinancialGoals: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Fecha del abono *</label>
+                <label className="label">{t('pages.financialGoals.contributionDate')}</label>
                 <input type="date" className="input" value={abonoDate} onChange={(e) => setAbonoDate(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.financialGoals.sourceAccountOptional')}</label>
                 <select
                   className="input w-full"
                   value={abonoSourceBankAccountId}
                   onChange={(e) => setAbonoSourceBankAccountId(e.target.value)}
                 >
-                  <option value="">Sin origen — solo progreso de la meta</option>
+                  <option value="">{t('pages.financialGoals.noSourceProgressOnly')}</option>
                   {accountsForAbonoSource.map((a) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -937,16 +991,14 @@ const FinancialGoals: React.FC = () => {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-dark-500 mt-1">
-                  Si eliges origen, el monto se descuenta de esa cuenta hacia la cuenta de la meta (si la meta tiene cuenta).
-                </p>
+                <p className="text-xs text-dark-500 mt-1">{t('pages.financialGoals.contributionSourceHint')}</p>
               </div>
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Registrar abono
+                  {t('pages.financialGoals.registerContribution')}
                 </button>
                 <button type="button" className="btn-secondary flex-1" onClick={() => setShowAbonoModal(false)}>
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -970,24 +1022,23 @@ const FinancialGoals: React.FC = () => {
             <div className="border-b border-dark-700/70 pb-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">Historial de abonos</p>
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">
+                    {t('pages.financialGoals.historySectionLabel')}
+                  </p>
                   <h2 id="financial-goals-history-title" className="mt-1 text-lg font-semibold leading-snug text-white sm:text-xl">
                     <span className="line-clamp-3 break-words">{historyGoalResolved.name}</span>
                   </h2>
                   {!historyLoading && historyMovements.length > 0 && (
                     <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-dark-400">
-                      <span className="tabular-nums font-semibold text-primary-300">
-                        {historyMovements
-                          .reduce((acc, row) => acc + row.amount, 0)
-                          .toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        {historyGoalResolved.currency}
-                      </span>
-                      <span className="text-dark-600" aria-hidden>
-                        ·
-                      </span>
-                      <span>
-                        {historyMovements.length} abono{historyMovements.length !== 1 ? 's' : ''}
-                      </span>
+                      {t('pages.financialGoals.contributionsLine', {
+                        amount: fc(
+                          historyMovements.reduce((acc, row) => acc + row.amount, 0),
+                          historyGoalResolved.currency
+                        ),
+                        contributions: t('pages.financialGoals.contributionsNoun', {
+                          count: historyMovements.length,
+                        }),
+                      })}
                     </p>
                   )}
                 </div>
@@ -995,7 +1046,7 @@ const FinancialGoals: React.FC = () => {
                   type="button"
                   onClick={() => setShowHistoryModal(false)}
                   className="shrink-0 rounded-lg p-2 text-dark-400 transition-colors hover:bg-dark-700/60 hover:text-white"
-                  aria-label="Cerrar"
+                  aria-label={t('pages.financialGoals.closeAria')}
                 >
                   <X size={22} />
                 </button>
@@ -1010,20 +1061,20 @@ const FinancialGoals: React.FC = () => {
                   className="btn-primary inline-flex w-full min-h-[44px] items-center justify-center gap-2 sm:w-auto"
                 >
                   <Banknote className="h-5 w-5 shrink-0" aria-hidden />
-                  Agregar abono
+                  {t('pages.financialGoals.addContributionTitle')}
                 </button>
               </div>
             )}
 
             <div className="mt-4">
               {historyLoading ? (
-                <p className="py-12 text-center text-dark-400">Cargando…</p>
+                <p className="py-12 text-center text-dark-400">{t('common.actions.loading')}</p>
               ) : historyMovements.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-dark-600/60 bg-dark-900/25 px-6 py-12 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-dark-800/90 text-dark-500 ring-1 ring-white/5">
                     <Banknote className="h-6 w-6" aria-hidden />
                   </div>
-                  <p className="max-w-[20rem] text-sm text-dark-400">No hay abonos registrados para esta meta.</p>
+                  <p className="max-w-[20rem] text-sm text-dark-400">{t('pages.financialGoals.noContributions')}</p>
                 </div>
               ) : (
                 <ul className="space-y-3">
@@ -1041,19 +1092,23 @@ const FinancialGoals: React.FC = () => {
                             <Calendar className="h-[1.1rem] w-[1.1rem]" />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">Fecha del abono</p>
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">
+                              {t('pages.financialGoals.movementDate')}
+                            </p>
                             <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                               {formatDateDdMmYyyy(movement.movementDate || movement.createdAt)}
                             </p>
                             {movement.note && (
-                              <p className="mt-1 text-xs leading-snug text-dark-400">Nota: {movement.note}</p>
+                              <p className="mt-1 text-xs leading-snug text-dark-400">
+                                {t('pages.financialGoals.notePrefix')} {movement.note}
+                              </p>
                             )}
                             {(movement.bankAccountName || movement.bankAccountId != null) && (
                               <p className="mt-1 inline-flex items-center gap-1 text-xs text-dark-500">
                                 <Wallet className="h-3 w-3 shrink-0" aria-hidden />
-                                Destino:{' '}
+                                {t('pages.financialGoals.destination')}{' '}
                                 {formatBankAccountOptionLabel({
-                                  bankName: movement.bankAccountName || 'Cuenta',
+                                  bankName: movement.bankAccountName || t('pages.financialGoals.accountFallback'),
                                   accountNumber: movement.bankAccountNumber || '',
                                 })}
                               </p>
@@ -1061,9 +1116,9 @@ const FinancialGoals: React.FC = () => {
                             {(movement.sourceBankAccountName || movement.sourceBankAccountId != null) && (
                               <p className="mt-1 inline-flex items-center gap-1 text-xs text-dark-500">
                                 <Wallet className="h-3 w-3 shrink-0" aria-hidden />
-                                Origen:{' '}
+                                {t('pages.financialGoals.origin')}{' '}
                                 {formatBankAccountOptionLabel({
-                                  bankName: movement.sourceBankAccountName || 'Cuenta',
+                                  bankName: movement.sourceBankAccountName || t('pages.financialGoals.accountFallback'),
                                   accountNumber: movement.sourceBankAccountNumber || '',
                                 })}
                               </p>
@@ -1072,10 +1127,11 @@ const FinancialGoals: React.FC = () => {
                         </div>
                         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dark-700/50 pt-3 sm:border-t-0 sm:pt-0 sm:pl-2">
                           <p className="text-left sm:text-right">
-                            <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500 sm:hidden">Monto</span>
+                            <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500 sm:hidden">
+                              {t('pages.financialGoals.amountMobile')}
+                            </span>
                             <span className="block text-lg font-bold tabular-nums leading-tight text-white sm:text-xl">
-                              {movement.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                              <span className="text-sm font-normal text-dark-400">{historyGoalResolved.currency}</span>
+                              {fc(movement.amount, historyGoalResolved.currency)}
                             </span>
                           </p>
                           <div className="flex shrink-0 items-center justify-end gap-0.5">
@@ -1083,8 +1139,8 @@ const FinancialGoals: React.FC = () => {
                               <button
                                 type="button"
                                 className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl p-1.5 ${listCardBtnEdit}`}
-                                title="Editar abono"
-                                aria-label="Editar abono"
+                                title={t('pages.financialGoals.editContributionAria')}
+                                aria-label={t('pages.financialGoals.editContributionAria')}
                                 onClick={() => openEditMovementModal(movement)}
                               >
                                 <Edit className="h-[18px] w-[18px]" />
@@ -1093,8 +1149,8 @@ const FinancialGoals: React.FC = () => {
                             <button
                               type="button"
                               className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl p-1.5 ${listCardBtnDanger}`}
-                              title="Eliminar abono"
-                              aria-label="Eliminar abono"
+                              title={t('pages.financialGoals.deleteContributionAria')}
+                              aria-label={t('pages.financialGoals.deleteContributionAria')}
                               onClick={() => handleDeleteMovement(movement)}
                             >
                               <Trash2 className="h-[18px] w-[18px]" />
@@ -1124,11 +1180,11 @@ const FinancialGoals: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="fg-edit-movement-title" className="text-xl font-semibold text-white mb-4">
-              Editar abono
+              {t('pages.financialGoals.editContributionTitle')}
             </h2>
             <form onSubmit={submitEditMovement} className="space-y-4">
               <div>
-                <label className="label">Monto *</label>
+                <label className="label">{t('pages.financialGoals.amount')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -1140,7 +1196,7 @@ const FinancialGoals: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Fecha del abono *</label>
+                <label className="label">{t('pages.financialGoals.contributionDate')}</label>
                 <input
                   type="date"
                   className="input w-full"
@@ -1150,13 +1206,13 @@ const FinancialGoals: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.financialGoals.sourceAccountOptional')}</label>
                 <select
                   className="input w-full"
                   value={editMovSourceBankAccountId}
                   onChange={(e) => setEditMovSourceBankAccountId(e.target.value)}
                 >
-                  <option value="">Sin origen</option>
+                  <option value="">{t('pages.financialGoals.noOrigin')}</option>
                   {accountsForEditMovementSource.map((a) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -1167,10 +1223,10 @@ const FinancialGoals: React.FC = () => {
               </div>
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Guardar
+                  {t('common.actions.save')}
                 </button>
                 <button type="button" className="btn-secondary flex-1" onClick={() => setMovementBeingEdited(null)}>
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>

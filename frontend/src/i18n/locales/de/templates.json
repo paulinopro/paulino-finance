@@ -1,0 +1,61 @@
+{
+  "types": {
+    "cardPayment": {
+      "name": "Kartenzahlungen",
+      "conditionalHelp": "{{#if variable}}…{{/if}} wird nur angezeigt, wenn die Variable nicht leer und nicht 0 ist. Beispiel: {{#if creditLimitDop}}<b>Limit (DOP):</b> {creditLimitDop}{{/if}} — Bei nur-USD-Karten sind DOP-Variablen leer."
+    },
+    "loanPayment": { "name": "Kreditzahlungen" },
+    "recurringExpense": { "name": "Wiederkehrende Ausgaben" }
+  },
+  "vars": {
+    "bankName": "Bank",
+    "cardName": "Kartenname",
+    "currencyType": "Währungsmodus im System (DOP, USD, DUAL)",
+    "currencyTypeLabel": "Lesbare Währungsbezeichnung",
+    "creditLimitDop": "Kreditlimit in DOP (leer bei nur-USD-Karte)",
+    "creditLimitUsd": "Kreditlimit in USD (leer bei nur-DOP-Karte)",
+    "currentDebtDop": "Aktuelle Schulden in DOP",
+    "currentDebtUsd": "Aktuelle Schulden in USD",
+    "minimumPaymentDop": "Mindestzahlung in DOP",
+    "minimumPaymentUsd": "Mindestzahlung in USD",
+    "cutOffDay": "Abrechnungstag",
+    "dueDay": "Zahlungsfrist",
+    "debtText": "Schuldenübersicht (je nach Kartenwährung)",
+    "days": "Tage bis zur Erinnerung",
+    "loanName": "Kreditname",
+    "installmentAmount": "Ratenzahlung",
+    "currency": "Währung",
+    "paidInstallments": "Gezahlte Raten",
+    "totalInstallments": "Raten gesamt",
+    "nextPaymentDate": "Nächstes Zahlungsdatum",
+    "expenseScheduleLabel": "Ausgabenkalender-Text (z. B. monatlich wiederkehrend)",
+    "expenseTypeLabel": "Alias für expenseScheduleLabel (ältere Vorlagen)",
+    "category": "Ausgabenkategorie (leer wenn keine)",
+    "description": "Ausgabenbeschreibung",
+    "amount": "Betrag",
+    "paymentDay": "Zahlungstag"
+  },
+  "page": {
+    "title": "Benachrichtigungsvorlagen",
+    "subtitle": "Passen Sie Telegram-Nachrichten pro Benachrichtigungstyp an. Variablen in geschweiften Klammern {variable} für dynamische Inhalte.",
+    "loading": "Vorlagen werden geladen…",
+    "fieldLabel": "Feld",
+    "placeholderPaypalOptional": "Optional bei PayPal-Synchronisation",
+    "saving": "Speichern…",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "edit": "Bearbeiten",
+    "testSending": "Senden…",
+    "test": "Testen",
+    "restore": "Wiederherstellen",
+    "variablesHeading": "Verfügbare Variablen",
+    "conditionalsLabel": "Bedingungen:",
+    "notificationTitle": "Benachrichtigungstitel",
+    "notificationMessage": "Nachricht",
+    "placeholderTitle": "z. B. Kartenzahlungserinnerung",
+    "placeholderMessage": "Nachricht hier eingeben. {variable} für dynamische Werte.",
+    "emptyTitle": "Kein Titel",
+    "emptyMessage": "Keine Nachricht",
+    "htmlHint": "Einfaches HTML wie <b>Text</b> für Fett und Zeilenumbrüche. Für Bedingungen unterstützt die Engine Handlebars-ähnliche «if»-Blöcke bei nicht leeren Variablen ungleich null."
+  }
+}

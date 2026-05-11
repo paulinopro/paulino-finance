@@ -1,0 +1,3 @@
+/*! For license information please see 28672.9324fbb6.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[28672],{28672(e,a,n){n.r(a),n.d(a,{default:()=>t});const t=(0,n(21639).A)("DraftingCompass",[["circle",{cx:"12",cy:"5",r:"2",key:"f1ur92"}],["path",{d:"m3 21 8.02-14.26",key:"1ssaw4"}],["path",{d:"m12.99 6.74 1.93 3.44",key:"iwagvd"}],["path",{d:"M19 12c-3.87 4-10.13 4-14 0",key:"1tsu18"}],["path",{d:"m21 21-2.16-3.84",key:"vylbct"}]])}}]);
+//# sourceMappingURL=28672.9324fbb6.chunk.js.map

@@ -7,7 +7,7 @@ import { deleteCalendarEventsForRelated } from './calendarService';
 /** Elimina un gasto y revierte saldo de cuenta; usado por DELETE /expenses y por gastos de vehículo vinculados. */
 export async function removeExpenseForUser(userId: number, expenseId: number): Promise<boolean> {
   const pre = await query(
-    `SELECT recurrence_type, frequency, bank_account_id, amount, currency FROM expenses WHERE id = $1 AND user_id = $2`,
+    `SELECT recurrence_type, frequency, bank_account_id, amount, currency, description FROM expenses WHERE id = $1 AND user_id = $2`,
     [expenseId, userId]
   );
   if (pre.rows.length === 0) {
@@ -23,7 +23,9 @@ export async function removeExpenseForUser(userId: number, expenseId: number): P
         userId,
         row.bank_account_id,
         row.currency,
-        parseFloat(row.amount)
+        parseFloat(row.amount),
+        undefined,
+        { description: `Reversión por eliminación: «${row.description}»` }
       );
     } catch (e) {
       console.error('Reverse balance on expense delete:', e);

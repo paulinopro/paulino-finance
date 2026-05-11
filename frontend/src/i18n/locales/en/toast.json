@@ -1,0 +1,292 @@
+{
+  "generic": {
+    "fallbackError": "Error",
+    "loadFailed": "Could not load data",
+    "saveFailed": "Could not save",
+    "deleteFailed": "Could not delete",
+    "exportFailed": "Could not export",
+    "invalidAmount": "Enter a valid amount",
+    "selectAccount": "Select an account",
+    "selectCategory": "Select a category",
+    "statusUpdated": "Status updated",
+    "statusUpdateFailed": "Could not update status",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Could not copy to clipboard"
+  },
+  "adminAudit": {
+    "loadError": "Could not load audit log",
+    "exportSuccess": "Download ready",
+    "exportError": "Could not export"
+  },
+  "amortization": {
+    "loadError": "Could not load amortization schedule",
+    "paymentRegistered": "Payment recorded successfully",
+    "paymentRegisterError": "Could not record payment",
+    "paymentUpdated": "Payment updated successfully",
+    "paymentUpdateError": "Could not update payment",
+    "paymentDeleted": "Payment deleted successfully",
+    "paymentDeleteError": "Could not delete payment"
+  },
+  "calendar": {
+    "loadEventsError": "Could not load calendar events",
+    "statusUpdated": "Status updated successfully",
+    "statusUpdateError": "Could not update status",
+    "eventsUpdated": "Events updated",
+    "eventsUpdatedWithHidden": "Events updated. {{count}} orphan event(s) are hidden from the calendar (still in History).",
+    "refreshError": "Could not refresh events"
+  },
+  "adminDashboard": {
+    "statsLoadError": "Could not load statistics"
+  },
+  "adminUserDetail": {
+    "invalidId": "Invalid ID",
+    "choosePlan": "Choose a plan",
+    "invalidPlan": "Invalid plan",
+    "planUpdated": "Plan updated",
+    "planAssignError": "Could not assign plan",
+    "loadError": "Could not load data",
+    "noChangesToApply": "No changes to apply"
+  },
+  "adminUsers": {
+    "plansLoadError": "Could not load plans",
+    "usersLoadError": "Could not load users",
+    "csvStarted": "CSV download started",
+    "userDisabled": "User disabled",
+    "userEnabled": "User enabled",
+    "usersUpdateError": "Could not update users",
+    "planUpdated": "Plan updated",
+    "planAssignError": "Could not assign plan",
+    "impersonateSuccess": "Session as {{email}}",
+    "impersonateError": "Could not impersonate"
+  },
+  "subscription": {
+    "plansLoadError": "Could not load plans",
+    "paypalStartError": "Could not start PayPal",
+    "paypalReturnHint": "If you completed payment in PayPal, your plan will update shortly.",
+    "paypalCancelled": "Payment cancelled"
+  },
+  "notificationHistory": {
+    "notFound": "Notification not found.",
+    "loadError": "Could not load notifications",
+    "markReadError": "Could not mark as read",
+    "allMarkedRead": "All notifications marked as read",
+    "markAllReadError": "Could not mark all as read",
+    "deleted": "Notification deleted",
+    "deleteError": "Could not delete notification"
+  },
+  "vehicles": {
+    "loadError": "Could not load vehicles",
+    "expensesLoadError": "Could not load vehicle expenses",
+    "updated": "Vehicle updated",
+    "created": "Vehicle created",
+    "saveError": "Could not save vehicle",
+    "expenseUpdated": "Expense updated",
+    "expenseAdded": "Expense added",
+    "expenseSaveError": "Could not save expense",
+    "deleted": "Vehicle deleted",
+    "deleteError": "Could not delete vehicle",
+    "expenseDeleted": "Expense deleted",
+    "expenseDeleteError": "Could not delete expense"
+  },
+  "projections": {
+    "loadError": "Could not load projections"
+  },
+  "cashFlow": {
+    "loadError": "Could not load cash flow"
+  },
+  "dashboard": {
+    "loadError": "Could not load dashboard data",
+    "healthLoadError": "Could not load financial health data"
+  },
+  "reports": {
+    "needDateRange": "Enter both start and end dates.",
+    "dateRangeInvalid": "Start date cannot be after end date.",
+    "pdfDownloaded": "PDF report downloaded successfully",
+    "generated": "Report generated successfully",
+    "generateError": "Could not generate report"
+  },
+  "loans": {
+    "loadError": "Could not load loans",
+    "updated": "Loan updated",
+    "created": "Loan created",
+    "saveError": "Could not save loan",
+    "paymentRegistered": "Payment recorded",
+    "paymentRegisterError": "Could not record payment",
+    "paymentDeleted": "Payment deleted",
+    "paymentDeleteError": "Could not delete payment",
+    "deleted": "Loan deleted",
+    "deleteError": "Could not delete loan",
+    "detailLoadError": "Could not load details",
+    "paymentsHistoryLoadError": "Could not load payment history",
+    "editLoadError": "Could not load loan for editing"
+  },
+  "accounts": {
+    "loadError": "Could not load accounts",
+    "updated": "Account updated",
+    "created": "Account created",
+    "saveError": "Could not save account",
+    "transferDone": "Transfer completed",
+    "transferError": "Transfer failed",
+    "adjustmentRegistered": "Adjustment recorded",
+    "adjustmentError": "Could not record adjustment",
+    "deleted": "Account deleted",
+    "deleteError": "Could not delete account",
+    "movementsLoadError": "Could not load movements"
+  },
+  "cards": {
+    "loadError": "Could not load cards",
+    "paymentRegistered": "Payment recorded",
+    "paymentRegisterError": "Could not record payment",
+    "paymentDeleted": "Payment deleted",
+    "paymentDeleteError": "Could not delete",
+    "updated": "Card updated",
+    "created": "Card created",
+    "saveError": "Could not save card",
+    "deleted": "Card deleted",
+    "deleteError": "Could not delete card"
+  },
+  "accountsReceivable": {
+    "loadError": "Could not load accounts receivable",
+    "dueDateRequired": "Select a due date",
+    "updated": "Receivable updated",
+    "created": "Receivable created",
+    "saveError": "Could not save receivable",
+    "incomeDateRequired": "Select income date",
+    "markedReceived": "Marked as received; income recorded on the selected date",
+    "markReceivedError": "Could not mark as received",
+    "paymentDateRequired": "Select payment date",
+    "paymentRegistered": "Payment recorded as income",
+    "paymentRegisterError": "Could not record payment",
+    "paymentsLoadError": "Could not load payments",
+    "paymentUpdatedSync": "Payment updated; income synchronized",
+    "paymentUpdateError": "Could not update payment",
+    "paymentDeleted": "Payment deleted",
+    "paymentDeleteError": "Could not delete payment",
+    "deleted": "Receivable deleted",
+    "deleteError": "Could not delete receivable"
+  },
+  "accountsPayable": {
+    "loadError": "Could not load accounts payable",
+    "dueDateRequired": "Select a due date",
+    "updated": "Payable updated",
+    "created": "Payable created",
+    "saveError": "Could not save payable",
+    "expenseDateRequired": "Select expense date",
+    "markedPaid": "Marked as paid; expense recorded on the selected date",
+    "markPaidError": "Could not mark as paid",
+    "paymentDateRequired": "Select payment date",
+    "paymentRegistered": "Payment recorded as expense",
+    "paymentRegisterError": "Could not record payment",
+    "paymentsLoadError": "Could not load payments",
+    "paymentUpdatedSync": "Payment updated; expense synchronized",
+    "paymentUpdateError": "Could not update payment",
+    "paymentDeleted": "Payment deleted",
+    "paymentDeleteError": "Could not delete payment",
+    "deleted": "Payable deleted",
+    "deleteError": "Could not delete payable"
+  },
+  "budgets": {
+    "loadError": "Could not load budgets",
+    "updated": "Budget updated",
+    "created": "Budget created",
+    "saveError": "Could not save budget",
+    "deleted": "Budget deleted",
+    "deleteError": "Could not delete budget"
+  },
+  "financialGoals": {
+    "loadError": "Could not load financial goals",
+    "updated": "Goal updated",
+    "created": "Goal created",
+    "saveError": "Could not save goal",
+    "noPendingBalance": "No pending balance to contribute for this goal.",
+    "paymentDateRequired": "Select payment date",
+    "paymentRegistered": "Contribution recorded",
+    "paymentRegisterError": "Could not record contribution",
+    "historyUpdateError": "Could not update history",
+    "historyLoadError": "Could not load contribution history",
+    "paymentUpdated": "Contribution updated",
+    "paymentUpdateError": "Could not update contribution",
+    "paymentDeleted": "Contribution deleted",
+    "paymentDeleteError": "Could not delete contribution",
+    "deleted": "Goal deleted",
+    "deleteError": "Could not delete goal",
+    "statusUpdated": "Status updated",
+    "statusUpdateError": "Could not update status"
+  },
+  "expenses": {
+    "loadError": "Could not load expenses",
+    "updated": "Expense updated",
+    "created": "Expense created",
+    "saveError": "Could not save expense",
+    "deleted": "Expense deleted",
+    "deleteError": "Could not delete expense"
+  },
+  "income": {
+    "loadError": "Could not load income",
+    "updated": "Income updated",
+    "created": "Income created",
+    "saveError": "Could not save income",
+    "deleted": "Income deleted",
+    "deleteError": "Could not delete income"
+  },
+  "adminStatus": {
+    "healthError": "Could not query system health",
+    "countsError": "Could not load period counts",
+    "schedulerError": "Could not query notification scheduler"
+  },
+  "categories": {
+    "loadError": "Could not load categories",
+    "suggestionsApplied": "Suggested icon and color applied",
+    "nameRequired": "Category name is required",
+    "created": "Category created",
+    "createError": "Could not create category",
+    "nameEmpty": "Name cannot be empty",
+    "updated": "Category updated",
+    "updateError": "Could not update category",
+    "deleted": "Category deleted",
+    "deleteError": "Could not delete category"
+  },
+  "adminPlans": {
+    "loadError": "Could not load plans",
+    "modulesRequired": "Select at least one module for the plan",
+    "saved": "Plan saved",
+    "saveError": "Could not save",
+    "nameRequired": "Enter a plan name",
+    "slugInvalid": "Invalid slug: use lowercase, numbers and hyphens (e.g. premium-plus)",
+    "createdHint": "Plan created. You can edit prices, modules and PayPal next.",
+    "createError": "Could not create plan",
+    "paypalCreated": "PayPal: created {{parts}}",
+    "paypalSyncedNoop": "Already in sync (no PayPal changes)",
+    "paypalSyncError": "Could not sync with PayPal",
+    "deleted": "Deleted",
+    "deleteError": "Cannot delete",
+    "paypalProduct": "product",
+    "paypalMonthly": "monthly plan",
+    "paypalYearly": "yearly plan"
+  },
+  "adminSettings": {
+    "loadError": "Could not load settings",
+    "registrationEnabled": "User registration enabled",
+    "registrationDisabled": "User registration disabled",
+    "maintenanceOn": "Maintenance on: other users are read-only",
+    "maintenanceOff": "Maintenance off",
+    "saveError": "Could not save"
+  },
+  "notificationTemplates": {
+    "loadError": "Could not load templates",
+    "updated": "Template updated successfully",
+    "saveError": "Could not save template",
+    "restored": "Template restored to defaults",
+    "restoreError": "Could not restore template",
+    "testSent": "Test message sent. Check your Telegram.",
+    "testError": "Could not send test message"
+  },
+  "profile": {
+    "accountUpdated": "Account details updated",
+    "saveError": "Could not save",
+    "passwordMismatch": "New passwords do not match",
+    "passwordTooShort": "New password must be at least 6 characters",
+    "passwordUpdated": "Password updated",
+    "passwordChangeError": "Could not change password"
+  }
+}

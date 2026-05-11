@@ -1,0 +1,3 @@
+/*! For license information please see 45067.87e5b1ce.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[45067],{45067(e,n,y){y.r(n),y.d(n,{default:()=>i});const i=(0,y(21639).A)("BatteryMedium",[["rect",{width:"16",height:"10",x:"2",y:"7",rx:"2",ry:"2",key:"1w10f2"}],["line",{x1:"22",x2:"22",y1:"11",y2:"13",key:"4dh1rd"}],["line",{x1:"6",x2:"6",y1:"11",y2:"13",key:"1wd6dw"}],["line",{x1:"10",x2:"10",y1:"11",y2:"13",key:"haxvl5"}]])}}]);
+//# sourceMappingURL=45067.87e5b1ce.chunk.js.map

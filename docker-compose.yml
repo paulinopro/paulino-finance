@@ -95,8 +95,9 @@ services:
       - paulino-network
     stdin_open: true
     tty: true
-    # Volumen /app/node_modules puede arrancar vacío; si falta @craco, instalar una vez.
-    command: sh -c "test -d node_modules/@craco/craco || npm install; exec npm start"
+    # npm install en cada arranque: el volumen anónimo /app/node_modules no refleja nuevas deps del host
+    # (p. ej. react-i18next) si solo se instaló cuando existía @craco/craco de una imagen antigua.
+    command: sh -c "npm install && exec npm start"
 
 volumes:
   postgres_data:

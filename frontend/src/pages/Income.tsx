@@ -4,28 +4,45 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import api from '../services/api';
 import { BankAccount, Income, IncomeFrequency, IncomeNature, IncomeRecurrenceType } from '../types';
-import { Plus, Edit, Trash2, TrendingUp, Search, X, ArrowUp, ArrowDown, ArrowUpDown, CheckCircle, Circle } from 'lucide-react';
+import { Plus, Edit, Trash2, History, TrendingUp, Search, X, ArrowUp, ArrowDown, ArrowUpDown, CheckCircle, Circle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
 import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
-import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
+import FinancialHistoryModal from '../components/FinancialHistoryModal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
-const INCOME_FREQUENCY_LABELS: Record<IncomeFrequency, string> = {
-  daily: 'Diario',
-  weekly: 'Semanal',
-  biweekly: 'Cada 2 semanas',
-  semi_monthly: 'Quincenal',
-  monthly: 'Mensual',
-  quarterly: 'Trimestral',
-  semi_annual: 'Semestral',
-  annual: 'Anual',
-};
+const INCOME_FREQUENCY_KEYS: IncomeFrequency[] = [
+  'daily',
+  'weekly',
+  'biweekly',
+  'semi_monthly',
+  'monthly',
+  'quarterly',
+  'semi_annual',
+  'annual',
+];
+
+function incomeFreqToCashFlowKey(k: IncomeFrequency): string {
+  const m: Record<IncomeFrequency, string> = {
+    daily: 'daily',
+    weekly: 'weekly',
+    biweekly: 'biweekly',
+    semi_monthly: 'semiMonthly',
+    monthly: 'monthly',
+    quarterly: 'quarterly',
+    semi_annual: 'semiAnnual',
+    annual: 'annual',
+  };
+  return m[k];
+}
 
 const NEEDS_START_DATE_INCOME: IncomeFrequency[] = [
   'daily',
@@ -72,56 +89,63 @@ function incomeFrequencyFromApi(f?: string | null): IncomeFrequency | '' {
   return legacy[f] ?? legacy[String(f).toUpperCase()] ?? 'monthly';
 }
 
-function formatIncomeFrequencyCell(f?: string | null): string {
-  if (!f) return '-';
-  const key = incomeFrequencyFromApi(f);
-  return key ? INCOME_FREQUENCY_LABELS[key] ?? String(f) : '-';
+function isVariableRecurrentMonthlyIncome(item: Income): boolean {
+  return (
+    deriveIncomeNature(item) === 'variable' &&
+    deriveIncomeRecurrence(item) === 'recurrent' &&
+    incomeFrequencyFromApi(item.frequency) === 'monthly'
+  );
 }
 
-function labelIncomeTipo(item: Income): string {
-  return deriveIncomeNature(item) === 'fixed' ? 'Fijo' : 'Variable';
-}
+type IncomeListSummary = {
+  totalDop: number;
+  totalUsd: number;
+  totalIncome: number;
+  totalPrimary: number;
+  totalSecondary: number;
+  primaryCurrency?: string;
+  secondaryCurrency?: string;
+};
 
-function labelIncomeNaturaleza(item: Income): string {
-  return deriveIncomeRecurrence(item) === 'recurrent' ? 'Recurrente' : 'Único';
-}
-
-function formatIncomeScheduleCell(item: Income): string {
-  if (deriveIncomeRecurrence(item) === 'non_recurrent') {
-    return item.date ? formatDateDdMmYyyy(item.date) : '-';
-  }
-  const fq = incomeFrequencyFromApi(item.frequency);
-  if (fq === 'monthly') {
-    return item.receiptDay != null ? `Día ${item.receiptDay}` : '-';
-  }
-  if (fq === 'semi_monthly') {
-    return 'Días 15 y 30 (o último del mes)';
-  }
-  if (fq === 'annual') {
-    return item.date ? `Anual: ${formatDateDdMmYyyy(item.date)}` : '-';
-  }
-  if (item.date) {
-    return `Inicio: ${formatDateDdMmYyyy(item.date)}`;
-  }
-  return '-';
-}
+const EMPTY_INCOME_SUMMARY: IncomeListSummary = {
+  totalDop: 0,
+  totalUsd: 0,
+  totalIncome: 0,
+  totalPrimary: 0,
+  totalSecondary: 0,
+  primaryCurrency: undefined,
+  secondaryCurrency: undefined,
+};
 
 const IncomePage: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    currencySelectLabel,
+    defaultTransactionCurrency,
+    transactionCurrencyOptions,
+    primaryCurrency,
+    secondaryCurrency,
+  } = useIntlFormatting();
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
     user?.id,
     'income'
   );
   const modalPanelRef = useRef<HTMLDivElement>(null);
+  const periodReceiveModalRef = useRef<HTMLDivElement>(null);
   const [income, setIncome] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [historyIncome, setHistoryIncome] = useState<{ id: number; title: string } | null>(null);
+  const [periodReceiveIncome, setPeriodReceiveIncome] = useState<Income | null>(null);
+  const [periodReceiveAmount, setPeriodReceiveAmount] = useState('');
   const [editingIncome, setEditingIncome] = useState<Income | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterNature, setFilterNature] = useState('');
   const [filterRecurrence, setFilterRecurrence] = useState('');
   const [filterFrequency, setFilterFrequency] = useState('');
-  const [summary, setSummary] = useState({ totalDop: 0, totalUsd: 0, totalIncome: 0 });
+  const [summary, setSummary] = useState<IncomeListSummary>(EMPTY_INCOME_SUMMARY);
   const [sortBy, setSortBy] = useState<string>('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -176,15 +200,26 @@ const IncomePage: React.FC = () => {
           isReceived: row.isReceived ?? false,
         }))
       );
-      setSummary(response.data.summary || { totalDop: 0, totalUsd: 0, totalIncome: 0 });
+      {
+        const raw = response.data.summary as Partial<IncomeListSummary> | undefined;
+        setSummary({
+          ...EMPTY_INCOME_SUMMARY,
+          ...raw,
+          totalDop: raw?.totalDop ?? 0,
+          totalUsd: raw?.totalUsd ?? 0,
+          totalIncome: raw?.totalIncome ?? 0,
+          totalPrimary: raw?.totalPrimary ?? 0,
+          totalSecondary: raw?.totalSecondary ?? 0,
+        });
+      }
       setTotalPages(response.data.pagination?.totalPages || 1);
       setTotal(response.data.pagination?.total || 0);
     } catch (error: any) {
-      toast.error('Error al cargar ingresos');
+      toast.error(t('toast.income.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, filterNature, filterRecurrence, filterFrequency, currentPage, itemsPerPage]);
+  }, [searchTerm, filterNature, filterRecurrence, filterFrequency, currentPage, itemsPerPage, t]);
 
   useEffect(() => {
     fetchIncome();
@@ -245,46 +280,60 @@ const IncomePage: React.FC = () => {
 
       if (editingIncome) {
         await api.put(`/income/${editingIncome.id}`, payload);
-        toast.success('Ingreso actualizado');
+        toast.success(t('toast.income.updated'));
       } else {
         await api.post('/income', payload);
-        toast.success('Ingreso creado');
+        toast.success(t('toast.income.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchIncome();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar ingreso');
+      toast.error(error.response?.data?.message || t('toast.income.saveError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de eliminar este ingreso?')) return;
+    if (!window.confirm(t('confirm.deleteIncome'))) return;
     try {
       await api.delete(`/income/${id}`);
-      toast.success('Ingreso eliminado');
+      toast.success(t('toast.income.deleted'));
       fetchIncome();
     } catch (error: any) {
-      toast.error('Error al eliminar ingreso');
+      toast.error(t('toast.income.deleteError'));
     }
   };
 
-  const handleToggleReceived = async (id: number, isReceived: boolean) => {
+  const submitIncomeReceiptStatus = async (id: number, nextReceived: boolean, actualAmount?: number) => {
     try {
-      await api.patch(`/income/${id}/receipt-status`, { isReceived: !isReceived });
-      toast.success('Estado actualizado');
+      const body: { isReceived: boolean; actualAmount?: number } = { isReceived: nextReceived };
+      if (nextReceived && actualAmount != null) {
+        body.actualAmount = actualAmount;
+      }
+      await api.patch(`/income/${id}/receipt-status`, body);
+      toast.success(t('toast.generic.statusUpdated'));
       fetchIncome();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al actualizar estado');
+      toast.error(error.response?.data?.message || t('toast.generic.statusUpdateFailed'));
     }
+  };
+
+  const handleToggleReceived = async (item: Income) => {
+    const nextReceived = !item.isReceived;
+    if (nextReceived && isVariableRecurrentMonthlyIncome(item)) {
+      setPeriodReceiveIncome(item);
+      setPeriodReceiveAmount(String(item.amount));
+      return;
+    }
+    await submitIncomeReceiptStatus(item.id, nextReceived);
   };
 
   const resetForm = () => {
     setFormData({
       description: '',
       amount: '',
-      currency: 'DOP',
+      currency: defaultTransactionCurrency,
       nature: 'fixed',
       recurrenceType: 'recurrent',
       frequency: 'monthly',
@@ -302,14 +351,64 @@ const IncomePage: React.FC = () => {
     setShowModal(false);
     resetForm();
   });
+  useEscapeKey(!!periodReceiveIncome, () => setPeriodReceiveIncome(null));
   useModalFocusTrap(modalPanelRef, showModal);
+  useModalFocusTrap(periodReceiveModalRef, !!periodReceiveIncome);
 
   const accountsForIncome = useMemo(() => {
     const c = formData.currency;
-    return bankAccounts.filter(
-      (a) => a.currencyType === 'DUAL' || a.currencyType === c
+    return bankAccounts.filter((a) =>
+      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
     );
-  }, [bankAccounts, formData.currency]);
+  }, [bankAccounts, formData.currency, primaryCurrency, secondaryCurrency]);
+
+  const formatIncomeFrequencyCell = useCallback(
+    (f?: string | null) => {
+      if (!f) return t('common.emptyDash');
+      const key = incomeFrequencyFromApi(f);
+      if (!key) return t('common.emptyDash');
+      return t(`pages.cashFlow.freq.${incomeFreqToCashFlowKey(key as IncomeFrequency)}`);
+    },
+    [t]
+  );
+
+  const labelIncomeTipo = useCallback(
+    (item: Income) => t(`pages.income.${deriveIncomeNature(item) === 'fixed' ? 'fixed' : 'variable'}`),
+    [t]
+  );
+
+  const labelIncomeNaturaleza = useCallback(
+    (item: Income) =>
+      deriveIncomeRecurrence(item) === 'recurrent' ? t('pages.income.recurrent') : t('pages.income.oneOff'),
+    [t]
+  );
+
+  const formatIncomeScheduleCell = useCallback(
+    (item: Income) => {
+      if (deriveIncomeRecurrence(item) === 'non_recurrent') {
+        return item.date ? formatDateDdMmYyyy(item.date) : t('common.emptyDash');
+      }
+      const fq = incomeFrequencyFromApi(item.frequency);
+      if (fq === 'monthly') {
+        return item.receiptDay != null
+          ? t('pages.income.scheduleDay', { day: item.receiptDay })
+          : t('common.emptyDash');
+      }
+      if (fq === 'semi_monthly') {
+        return t('pages.income.scheduleSemiMonthly');
+      }
+      if (fq === 'annual') {
+        return item.date
+          ? t('pages.income.scheduleAnnualOnDate', { date: formatDateDdMmYyyy(item.date) })
+          : t('common.emptyDash');
+      }
+      if (item.date) {
+        return t('pages.income.scheduleStartOnDate', { date: formatDateDdMmYyyy(item.date) });
+      }
+      return t('common.emptyDash');
+    },
+    [t]
+  );
 
   if (loading) {
     return <div className="flex items-center justify-center h-64">
@@ -320,8 +419,8 @@ const IncomePage: React.FC = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Ingresos"
-        subtitle="Gestiona tus ingresos"
+        title={t('pages.income.title')}
+        subtitle={t('pages.income.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -334,7 +433,7 @@ const IncomePage: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
             >
               <Plus size={20} />
-              <span>Agregar Ingreso</span>
+              <span>{t('pages.income.addIncome')}</span>
             </button>
           </div>
         }
@@ -345,15 +444,29 @@ const IncomePage: React.FC = () => {
         <div className="card">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Ingresos Totales (DOP)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalDop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.income.incomeInCurrency', { currency: summary.primaryCurrency ?? primaryCurrency })}
+              </p>
+              <p className="text-2xl font-bold text-white">
+                {fc(
+                  summary.totalPrimary ?? 0,
+                  (summary.primaryCurrency ?? primaryCurrency) as string
+                )}
+              </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Ingresos Totales (USD)</p>
-              <p className="text-2xl font-bold text-white">{summary.totalUsd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.income.incomeInCurrency', { currency: summary.secondaryCurrency ?? secondaryCurrency })}
+              </p>
+              <p className="text-2xl font-bold text-white">
+                {fc(
+                  summary.totalSecondary ?? 0,
+                  (summary.secondaryCurrency ?? secondaryCurrency) as string
+                )}
+              </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Ingresos</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.income.totalIncomeCount')}</p>
               <p className="text-2xl font-bold text-white">{summary.totalIncome}</p>
             </div>
           </div>
@@ -364,12 +477,12 @@ const IncomePage: React.FC = () => {
       <div className="card">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="relative sm:col-span-2 lg:col-span-1">
-            <label className="text-xs text-dark-400 block mb-1">Buscar</label>
+            <label className="text-xs text-dark-400 block mb-1">{t('common.actions.search')}</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
               <input
                 type="text"
-                placeholder="Descripción..."
+                placeholder={t('pages.income.descriptionPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input w-full pl-10"
@@ -386,42 +499,42 @@ const IncomePage: React.FC = () => {
             </div>
           </div>
           <div>
-            <label className="text-xs text-dark-400 block mb-1">Tipo</label>
+            <label className="text-xs text-dark-400 block mb-1">{t('pages.income.type')}</label>
             <select
               value={filterNature}
               onChange={(e) => setFilterNature(e.target.value)}
               className="input w-full"
             >
-              <option value="">Todos</option>
-              <option value="fixed">Fijo</option>
-              <option value="variable">Variable</option>
+              <option value="">{t('pages.income.all')}</option>
+              <option value="fixed">{t('pages.income.fixed')}</option>
+              <option value="variable">{t('pages.income.variable')}</option>
             </select>
           </div>
           <div>
-            <label className="text-xs text-dark-400 block mb-1">Naturaleza</label>
+            <label className="text-xs text-dark-400 block mb-1">{t('pages.income.nature')}</label>
             <select
               value={filterRecurrence}
               onChange={(e) => setFilterRecurrence(e.target.value)}
               className="input w-full"
             >
-              <option value="">Todas</option>
-              <option value="recurrent">Recurrente</option>
-              <option value="non_recurrent">Único</option>
+              <option value="">{t('pages.income.all')}</option>
+              <option value="recurrent">{t('pages.income.recurrent')}</option>
+              <option value="non_recurrent">{t('pages.income.oneOff')}</option>
             </select>
           </div>
           <div>
-            <label className="text-xs text-dark-400 block mb-1">Frecuencia</label>
+            <label className="text-xs text-dark-400 block mb-1">{t('pages.income.frequency')}</label>
             <select
               value={filterFrequency}
               onChange={(e) => setFilterFrequency(e.target.value)}
               disabled={filterRecurrence === 'non_recurrent'}
               className="input w-full disabled:opacity-50"
-              title={filterRecurrence === 'non_recurrent' ? 'No aplica a ingresos únicos' : undefined}
+              title={filterRecurrence === 'non_recurrent' ? t('pages.income.filterUniqueTooltip') : undefined}
             >
-              <option value="">Todas</option>
-              {(Object.keys(INCOME_FREQUENCY_LABELS) as IncomeFrequency[]).map((k) => (
+              <option value="">{t('pages.income.all')}</option>
+              {INCOME_FREQUENCY_KEYS.map((k) => (
                 <option key={k} value={k}>
-                  {INCOME_FREQUENCY_LABELS[k]}
+                  {t(`pages.cashFlow.freq.${incomeFreqToCashFlowKey(k)}`)}
                 </option>
               ))}
             </select>
@@ -439,7 +552,7 @@ const IncomePage: React.FC = () => {
               }}
               className="text-sm text-accent-400 hover:text-accent-300"
             >
-              Limpiar filtros
+              {t('pages.income.clearFilters')}
             </button>
           </div>
         )}
@@ -448,8 +561,17 @@ const IncomePage: React.FC = () => {
       {income.length === 0 ? (
         <div className="card text-center py-12">
           <TrendingUp className="w-16 h-16 text-dark-600 mx-auto mb-4" />
-          <p className="text-dark-400 mb-4">No tienes ingresos registrados</p>
-          <button onClick={() => setShowModal(true)} className="btn-primary">Agregar Primer Ingreso</button>
+          <p className="text-dark-400 mb-4">{t('pages.income.emptyState')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="btn-primary"
+          >
+            {t('pages.income.addFirstIncome')}
+          </button>
         </div>
       ) : (
         <>
@@ -470,7 +592,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Descripción</span>
+                        <span>{t('pages.income.description')}</span>
                         {sortBy === 'description' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -486,7 +608,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Monto</span>
+                        <span>{t('pages.income.amount')}</span>
                         {sortBy === 'amount' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -502,7 +624,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Tipo</span>
+                        <span>{t('pages.income.type')}</span>
                         {sortBy === 'type' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -518,7 +640,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Frecuencia</span>
+                        <span>{t('pages.income.frequency')}</span>
                         {sortBy === 'frequency' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -534,7 +656,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Naturaleza</span>
+                        <span>{t('pages.income.nature')}</span>
                         {sortBy === 'naturaleza' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -550,7 +672,7 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Fecha/Día</span>
+                        <span>{t('pages.income.colDateDay')}</span>
                         {sortBy === 'date' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
@@ -566,11 +688,11 @@ const IncomePage: React.FC = () => {
                       }}
                     >
                       <div className="flex items-center space-x-2">
-                        <span>Estado</span>
+                        <span>{t('pages.income.statusLabel')}</span>
                         {sortBy === 'status' ? (sortOrder === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />) : <ArrowUpDown size={16} className="opacity-50" />}
                       </div>
                     </th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Acciones</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('common.actions.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -588,16 +710,16 @@ const IncomePage: React.FC = () => {
                         bValue = b.amount;
                         break;
                       case 'type':
-                        aValue = labelIncomeTipo(a);
-                        bValue = labelIncomeTipo(b);
+                        aValue = deriveIncomeNature(a);
+                        bValue = deriveIncomeNature(b);
                         break;
                       case 'frequency':
                         aValue = incomeFrequencyFromApi(a.frequency) || '';
                         bValue = incomeFrequencyFromApi(b.frequency) || '';
                         break;
                       case 'naturaleza':
-                        aValue = labelIncomeNaturaleza(a);
-                        bValue = labelIncomeNaturaleza(b);
+                        aValue = deriveIncomeRecurrence(a);
+                        bValue = deriveIncomeRecurrence(b);
                         break;
                       case 'date':
                         aValue = a.date ? calendarDateToSortableMs(a.date) : (a.receiptDay || 0);
@@ -616,35 +738,35 @@ const IncomePage: React.FC = () => {
                     return 0;
                   }).map((item) => (
                     <tr key={item.id} className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0">
-                      <td data-label="Descripción" data-stack="hero" className="py-3 px-4 text-white">
+                      <td data-label={t('pages.income.description')} data-stack="hero" className="py-3 px-4 text-white">
                         {item.description}
                       </td>
-                      <td data-label="Monto" className="py-3 px-4">
+                      <td data-label={t('pages.income.amount')} className="py-3 px-4">
                         <span className="table-stack-value">
-                          {item.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {item.currency}
+                          {fc(item.amount, item.currency)}
                         </span>
                       </td>
-                      <td data-label="Tipo" className="py-3 px-4">
+                      <td data-label={t('pages.income.type')} className="py-3 px-4">
                         <span className="table-stack-value text-dark-300">{labelIncomeTipo(item)}</span>
                       </td>
-                      <td data-label="Frecuencia" className="py-3 px-4">
+                      <td data-label={t('pages.income.frequency')} className="py-3 px-4">
                         <span className="table-stack-value text-dark-300">
                           {deriveIncomeRecurrence(item) === 'recurrent'
                             ? formatIncomeFrequencyCell(item.frequency)
-                            : '—'}
+                            : t('common.emptyDash')}
                         </span>
                       </td>
-                      <td data-label="Naturaleza" className="py-3 px-4">
+                      <td data-label={t('pages.income.nature')} className="py-3 px-4">
                         <span className="table-stack-value text-dark-300">{labelIncomeNaturaleza(item)}</span>
                       </td>
-                      <td data-label="Fecha / día" className="py-3 px-4">
+                      <td data-label={t('pages.income.colDateDay')} className="py-3 px-4">
                         <span className="table-stack-value text-dark-300">{formatIncomeScheduleCell(item)}</span>
                       </td>
-                      <td data-label="Estado" className="py-3 px-4">
+                      <td data-label={t('pages.income.statusLabel')} className="py-3 px-4">
                         <span className="table-stack-value">
                           <button
                             type="button"
-                            onClick={() => handleToggleReceived(item.id, item.isReceived)}
+                            onClick={() => handleToggleReceived(item)}
                             className="flex items-center gap-2"
                           >
                             {item.isReceived ? (
@@ -653,12 +775,12 @@ const IncomePage: React.FC = () => {
                               <Circle className="text-dark-400" size={20} />
                             )}
                             <span className={item.isReceived ? 'text-green-400' : 'text-dark-300'}>
-                              {item.isReceived ? 'Recibido' : 'Pendiente'}
+                              {item.isReceived ? t('pages.calendarStatuses.RECEIVED') : t('pages.calendarStatuses.PENDING')}
                             </span>
                           </button>
                         </span>
                       </td>
-                      <td data-label="Acciones" className="py-3 px-4">
+                      <td data-label={t('common.actions.actions')} className="py-3 px-4">
                         <span className="table-stack-value">
                           <div className="flex items-center justify-end gap-2">
                             <button
@@ -688,6 +810,15 @@ const IncomePage: React.FC = () => {
                             >
                               <Edit size={18} />
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setHistoryIncome({ id: item.id, title: item.description })}
+                              className="p-2 text-dark-300 hover:text-amber-300"
+                              title={t('common.actions.history')}
+                              aria-label={t('pages.financialItemHistory.historyAria')}
+                            >
+                              <History size={18} />
+                            </button>
                             <button type="button" onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:text-red-300"><Trash2 size={18} /></button>
                           </div>
                         </span>
@@ -705,7 +836,7 @@ const IncomePage: React.FC = () => {
             totalItems={total}
             itemsPerPage={itemsPerPage}
             onPageChange={setCurrentPage}
-            itemLabel="ingresos"
+            itemLabel={t('pages.income.itemsLabel')}
             disabled={loading}
             variant="card"
             pageSizeOptions={pageSizeOptions}
@@ -734,34 +865,45 @@ const IncomePage: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="income-modal-title" className="text-2xl font-bold text-white mb-6">
-              {editingIncome ? 'Editar Ingreso' : 'Nuevo Ingreso'}
+              {editingIncome ? t('pages.income.editIncome') : t('pages.income.newIncome')}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div><label className="label">Descripción</label><input type="text" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="input w-full" required /></div>
+              <div><label className="label">{t('pages.income.description')}</label><input type="text" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="input w-full" required /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="label">Monto</label><input type="number" step="0.01" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} className="input w-full" required /></div>
-                <div><label className="label">Moneda</label><select value={formData.currency} onChange={(e) => setFormData({ ...formData, currency: e.target.value, bankAccountId: '' })} className="input w-full"><option value="DOP">DOP</option><option value="USD">USD</option></select></div>
+                <div><label className="label">{t('pages.income.amount')}</label><input type="number" step="0.01" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} className="input w-full" required /></div>
+                <div>
+                  <label className="label">{t('pages.income.currency')}</label>
+                  <select
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value, bankAccountId: '' })}
+                    className="input w-full"
+                  >
+                    {transactionCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {currencySelectLabel(code)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
-                <label className="label">Cuenta destino (opcional)</label>
+                <label className="label">{t('pages.income.destinationAccountOptional')}</label>
                 <select
                   value={formData.bankAccountId}
                   onChange={(e) => setFormData({ ...formData, bankAccountId: e.target.value })}
                   className="input w-full"
                 >
-                  <option value="">Sin vincular — no actualiza saldos</option>
+                  <option value="">{t('pages.income.unlinkedNoBalance')}</option>
                   {accountsForIncome.map((a) => (
                     <option key={a.id} value={a.id}>
                       {formatBankAccountOptionLabel(a)}
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-dark-500 mt-1">
-                  Si hay cuenta vinculada, el saldo aumenta al marcar el ingreso como «Recibido» (en la tabla o aquí).
-                </p>
+                <p className="text-xs text-dark-500 mt-1">{t('pages.income.destinationAccountHint')}</p>
               </div>
               <div>
-                <label className="label">Estado</label>
+                <label className="label">{t('pages.income.statusLabel')}</label>
                 <select
                   value={formData.isReceived ? 'received' : 'pending'}
                   onChange={(e) =>
@@ -769,16 +911,14 @@ const IncomePage: React.FC = () => {
                   }
                   className="input w-full"
                 >
-                  <option value="pending">Pendiente</option>
-                  <option value="received">Recibido</option>
+                  <option value="pending">{t('pages.calendarStatuses.PENDING')}</option>
+                  <option value="received">{t('pages.calendarStatuses.RECEIVED')}</option>
                 </select>
-                <p className="text-xs text-dark-500 mt-1">
-                  «Recibido» con cuenta destino actualiza el saldo al guardar (ingreso nuevo) o al editar.
-                </p>
+                <p className="text-xs text-dark-500 mt-1">{t('pages.income.statusSelectHint')}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="label">Tipo</label>
+                  <label className="label">{t('pages.income.type')}</label>
                   <select
                     value={formData.nature}
                     onChange={(e) => {
@@ -787,12 +927,12 @@ const IncomePage: React.FC = () => {
                     }}
                     className="input w-full"
                   >
-                    <option value="fixed">Fijo</option>
-                    <option value="variable">Variable</option>
+                    <option value="fixed">{t('pages.income.fixed')}</option>
+                    <option value="variable">{t('pages.income.variable')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Frecuencia</label>
+                  <label className="label">{t('pages.income.frequency')}</label>
                   <select
                     value={formData.recurrenceType === 'non_recurrent' ? '' : formData.frequency}
                     onChange={(e) => {
@@ -808,23 +948,20 @@ const IncomePage: React.FC = () => {
                     disabled={formData.recurrenceType === 'non_recurrent'}
                   >
                     {formData.recurrenceType === 'non_recurrent' ? (
-                      <option value="">—</option>
+                      <option value="">{t('common.emptyDash')}</option>
                     ) : (
                       <>
-                        <option value="daily">Diario</option>
-                        <option value="weekly">Semanal</option>
-                        <option value="biweekly">Cada 2 semanas</option>
-                        <option value="semi_monthly">Quincenal</option>
-                        <option value="monthly">Mensual</option>
-                        <option value="quarterly">Trimestral</option>
-                        <option value="semi_annual">Semestral</option>
-                        <option value="annual">Anual</option>
+                        {INCOME_FREQUENCY_KEYS.map((fk) => (
+                          <option key={fk} value={fk}>
+                            {t(`pages.cashFlow.freq.${incomeFreqToCashFlowKey(fk)}`)}
+                          </option>
+                        ))}
                       </>
                     )}
                   </select>
                 </div>
                 <div>
-                  <label className="label">Naturaleza</label>
+                  <label className="label">{t('pages.income.nature')}</label>
                   <select
                     value={formData.recurrenceType}
                     onChange={(e) => {
@@ -840,8 +977,8 @@ const IncomePage: React.FC = () => {
                     }}
                     className="input w-full"
                   >
-                    <option value="recurrent">Recurrente</option>
-                    <option value="non_recurrent">Único</option>
+                    <option value="recurrent">{t('pages.income.recurrent')}</option>
+                    <option value="non_recurrent">{t('pages.income.oneOff')}</option>
                   </select>
                 </div>
               </div>
@@ -849,7 +986,7 @@ const IncomePage: React.FC = () => {
                 <>
                   {formData.frequency === 'monthly' && (
                     <div>
-                      <label className="label">Día de recepción</label>
+                      <label className="label">{t('pages.income.receiptDay')}</label>
                       <input
                         type="number"
                         min="1"
@@ -864,7 +1001,7 @@ const IncomePage: React.FC = () => {
                   {formData.frequency &&
                     NEEDS_START_DATE_INCOME.includes(formData.frequency as IncomeFrequency) && (
                       <div>
-                        <label className="label">Fecha de inicio / referencia</label>
+                        <label className="label">{t('pages.income.referenceStartDate')}</label>
                         <input
                           type="date"
                           value={formData.date}
@@ -873,57 +1010,48 @@ const IncomePage: React.FC = () => {
                           required
                         />
                         <p className="text-xs text-dark-400 mt-1">
-                          {formData.frequency === 'daily' && 'Cada día a partir de esta fecha.'}
-                          {formData.frequency === 'weekly' && 'Cada 7 días a partir de esta fecha.'}
-                          {formData.frequency === 'biweekly' && 'Cada 14 días a partir de esta fecha.'}
-                          {formData.frequency === 'quarterly' && 'Cada 3 meses a partir de esta fecha.'}
-                          {formData.frequency === 'semi_annual' && 'Cada 6 meses a partir de esta fecha.'}
-                          {formData.frequency === 'annual' && 'Se repetirá cada año en la misma fecha calendario.'}
+                          {formData.frequency === 'daily' && t('pages.income.refHintDaily')}
+                          {formData.frequency === 'weekly' && t('pages.income.refHintWeekly')}
+                          {formData.frequency === 'biweekly' && t('pages.income.refHintBiweekly')}
+                          {formData.frequency === 'quarterly' && t('pages.income.refHintQuarterly')}
+                          {formData.frequency === 'semi_annual' && t('pages.income.refHintSemiAnnual')}
+                          {formData.frequency === 'annual' && t('pages.income.refHintAnnual')}
                         </p>
                       </div>
                     )}
                   {formData.frequency === 'semi_monthly' && (
                     <div className="rounded-lg border border-dark-600/80 bg-dark-800/40 px-3 py-2 text-sm text-dark-300">
-                      <p>
-                        Se consideran dos pagos por mes: día <strong className="text-white">15</strong> y día{' '}
-                        <strong className="text-white">30</strong> (o el último día del mes si es menor).
-                      </p>
-                      <p className="mt-2 text-xs text-dark-500">
-                        Puede acotar la vigencia de la serie con los campos siguientes (opcional).
-                      </p>
+                      <p>{t('pages.income.semiMonthlyBlurb')}</p>
+                      <p className="mt-2 text-xs text-dark-500">{t('pages.income.semiMonthlyNarrow')}</p>
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-dark-600/50 mt-2">
                     <div>
-                      <label className="label">Inicio de vigencia (opcional)</label>
+                      <label className="label">{t('pages.income.recurrenceStartOptional')}</label>
                       <input
                         type="date"
                         value={formData.recurrenceStartDate}
                         onChange={(e) => setFormData({ ...formData, recurrenceStartDate: e.target.value })}
                         className="input w-full"
                       />
-                      <p className="text-xs text-dark-500 mt-1">
-                        Primera fecha en que el calendario y las proyecciones incluyen la serie (inclusive).
-                      </p>
+                      <p className="text-xs text-dark-500 mt-1">{t('pages.income.recurrenceStartHint')}</p>
                     </div>
                     <div>
-                      <label className="label">Fin de vigencia (opcional)</label>
+                      <label className="label">{t('pages.income.recurrenceEndOptional')}</label>
                       <input
                         type="date"
                         value={formData.recurrenceEndDate}
                         onChange={(e) => setFormData({ ...formData, recurrenceEndDate: e.target.value })}
                         className="input w-full"
                       />
-                      <p className="text-xs text-dark-500 mt-1">
-                        Última fecha en que aplica (inclusive). Vacío si la serie no tiene fin definido.
-                      </p>
+                      <p className="text-xs text-dark-500 mt-1">{t('pages.income.recurrenceEndHint')}</p>
                     </div>
                   </div>
                 </>
               )}
               {formData.recurrenceType === 'non_recurrent' && (
                 <div>
-                  <label className="label">Fecha</label>
+                  <label className="label">{t('pages.income.oneOffDate')}</label>
                   <input
                     type="date"
                     value={formData.date}
@@ -934,13 +1062,84 @@ const IncomePage: React.FC = () => {
                 </div>
               )}
               <div className="flex space-x-4 pt-4">
-                <button type="submit" className="btn-primary flex-1">{editingIncome ? 'Actualizar' : 'Crear'}</button>
-                <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="btn-secondary flex-1">Cancelar</button>
+                <button type="submit" className="btn-primary flex-1">
+                  {editingIncome ? t('pages.income.update') : t('pages.income.create')}
+                </button>
+                <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="btn-secondary flex-1">{t('common.actions.cancel')}</button>
               </div>
             </form>
           </motion.div>
         </div>
       )}
+
+      {periodReceiveIncome && (
+        <div
+          className="modal-overlay"
+          onClick={() => setPeriodReceiveIncome(null)}
+          role="presentation"
+        >
+          <motion.div
+            ref={periodReceiveModalRef}
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="card modal-sheet max-w-md w-full"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="income-period-receive-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="income-period-receive-title" className="text-xl font-bold text-white mb-2">
+              {t('pages.income.variablePeriodPay.title')}
+            </h2>
+            <p className="text-sm text-dark-400 mb-1">
+              <span className="text-white/90">{periodReceiveIncome.description}</span>
+            </p>
+            <p className="text-xs text-dark-500 mb-4">{t('pages.income.variablePeriodPay.hint')}</p>
+            <label className="label" htmlFor="income-period-amount">
+              {t('pages.income.variablePeriodPay.amountLabel')}
+            </label>
+            <input
+              id="income-period-amount"
+              type="number"
+              step="0.01"
+              min="0"
+              value={periodReceiveAmount}
+              onChange={(e) => setPeriodReceiveAmount(e.target.value)}
+              className="input w-full mb-4"
+              autoComplete="off"
+            />
+            <div className="flex gap-2 justify-end pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setPeriodReceiveIncome(null)}>
+                {t('common.actions.cancel')}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  const n = parseFloat(periodReceiveAmount.trim().replace(',', '.'));
+                  if (Number.isNaN(n) || n <= 0) {
+                    toast.error(t('toast.generic.invalidAmount'));
+                    return;
+                  }
+                  await submitIncomeReceiptStatus(periodReceiveIncome.id, true, n);
+                  setPeriodReceiveIncome(null);
+                }}
+              >
+                {t('pages.income.variablePeriodPay.confirm')}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      <FinancialHistoryModal
+        key={historyIncome ? `income-history-${historyIncome.id}` : 'income-history-closed'}
+        kind="income"
+        open={historyIncome != null}
+        itemId={historyIncome?.id ?? null}
+        itemTitle={historyIncome?.title ?? ''}
+        onClose={() => setHistoryIncome(null)}
+      />
     </div>
   );
 };

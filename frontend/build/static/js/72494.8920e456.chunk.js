@@ -1,0 +1,3 @@
+/*! For license information please see 72494.8920e456.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[72494],{72494(e,n,a){a.r(n),a.d(n,{default:()=>l});const l=(0,a(21639).A)("Paperclip",[["path",{d:"m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48",key:"1u3ebp"}]])}}]);
+//# sourceMappingURL=72494.8920e456.chunk.js.map

@@ -1,0 +1,292 @@
+{
+  "generic": {
+    "fallbackError": "Fehler",
+    "loadFailed": "Daten konnten nicht geladen werden",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "deleteFailed": "Löschen fehlgeschlagen",
+    "exportFailed": "Export fehlgeschlagen",
+    "invalidAmount": "Bitte einen gültigen Betrag eingeben",
+    "selectAccount": "Konto auswählen",
+    "selectCategory": "Kategorie auswählen",
+    "statusUpdated": "Status aktualisiert",
+    "statusUpdateFailed": "Status konnte nicht aktualisiert werden",
+    "copied": "In die Zwischenablage kopiert",
+    "copyFailed": "Kopieren fehlgeschlagen"
+  },
+  "adminAudit": {
+    "loadError": "Audit-Protokoll konnte nicht geladen werden",
+    "exportSuccess": "Download bereit",
+    "exportError": "Export fehlgeschlagen"
+  },
+  "amortization": {
+    "loadError": "Tilgungsplan konnte nicht geladen werden",
+    "paymentRegistered": "Zahlung erfolgreich erfasst",
+    "paymentRegisterError": "Zahlung konnte nicht erfasst werden",
+    "paymentUpdated": "Zahlung erfolgreich aktualisiert",
+    "paymentUpdateError": "Zahlung konnte nicht aktualisiert werden",
+    "paymentDeleted": "Zahlung erfolgreich gelöscht",
+    "paymentDeleteError": "Zahlung konnte nicht gelöscht werden"
+  },
+  "calendar": {
+    "loadEventsError": "Kalenderereignisse konnten nicht geladen werden",
+    "statusUpdated": "Status erfolgreich aktualisiert",
+    "statusUpdateError": "Status konnte nicht aktualisiert werden",
+    "eventsUpdated": "Ereignisse aktualisiert",
+    "eventsUpdatedWithHidden": "Ereignisse aktualisiert. {{count}} verwaiste Ereignis(se) werden im Kalender ausgeblendet (weiterhin unter Verlauf).",
+    "refreshError": "Ereignisse konnten nicht aktualisiert werden"
+  },
+  "adminDashboard": {
+    "statsLoadError": "Statistiken konnten nicht geladen werden"
+  },
+  "adminUserDetail": {
+    "invalidId": "Ungültige ID",
+    "choosePlan": "Plan wählen",
+    "invalidPlan": "Ungültiger Plan",
+    "planUpdated": "Plan aktualisiert",
+    "planAssignError": "Plan konnte nicht zugewiesen werden",
+    "loadError": "Daten konnten nicht geladen werden",
+    "noChangesToApply": "Keine Änderungen anzuwenden"
+  },
+  "adminUsers": {
+    "plansLoadError": "Pläne konnten nicht geladen werden",
+    "usersLoadError": "Benutzer konnten nicht geladen werden",
+    "csvStarted": "CSV-Download gestartet",
+    "userDisabled": "Benutzer deaktiviert",
+    "userEnabled": "Benutzer aktiviert",
+    "usersUpdateError": "Benutzer konnten nicht aktualisiert werden",
+    "planUpdated": "Plan aktualisiert",
+    "planAssignError": "Plan konnte nicht zugewiesen werden",
+    "impersonateSuccess": "Sitzung als {{email}}",
+    "impersonateError": "Identitätswechsel fehlgeschlagen"
+  },
+  "subscription": {
+    "plansLoadError": "Pläne konnten nicht geladen werden",
+    "paypalStartError": "PayPal konnte nicht gestartet werden",
+    "paypalReturnHint": "Wenn Sie die Zahlung bei PayPal abgeschlossen haben, wird Ihr Plan in Kürze aktualisiert.",
+    "paypalCancelled": "Zahlung abgebrochen"
+  },
+  "notificationHistory": {
+    "notFound": "Benachrichtigung nicht gefunden.",
+    "loadError": "Benachrichtigungen konnten nicht geladen werden",
+    "markReadError": "Konnte nicht als gelesen markieren",
+    "allMarkedRead": "Alle Benachrichtigungen als gelesen markiert",
+    "markAllReadError": "Alle konnten nicht als gelesen markiert werden",
+    "deleted": "Benachrichtigung gelöscht",
+    "deleteError": "Benachrichtigung konnte nicht gelöscht werden"
+  },
+  "vehicles": {
+    "loadError": "Fahrzeuge konnten nicht geladen werden",
+    "expensesLoadError": "Fahrzeugausgaben konnten nicht geladen werden",
+    "updated": "Fahrzeug aktualisiert",
+    "created": "Fahrzeug angelegt",
+    "saveError": "Fahrzeug konnte nicht gespeichert werden",
+    "expenseUpdated": "Ausgabe aktualisiert",
+    "expenseAdded": "Ausgabe hinzugefügt",
+    "expenseSaveError": "Ausgabe konnte nicht gespeichert werden",
+    "deleted": "Fahrzeug gelöscht",
+    "deleteError": "Fahrzeug konnte nicht gelöscht werden",
+    "expenseDeleted": "Ausgabe gelöscht",
+    "expenseDeleteError": "Ausgabe konnte nicht gelöscht werden"
+  },
+  "projections": {
+    "loadError": "Projektionen konnten nicht geladen werden"
+  },
+  "cashFlow": {
+    "loadError": "Cashflow konnte nicht geladen werden"
+  },
+  "dashboard": {
+    "loadError": "Dashboard-Daten konnten nicht geladen werden",
+    "healthLoadError": "Finanzgesundheitsdaten konnten nicht geladen werden"
+  },
+  "reports": {
+    "needDateRange": "Bitte Start- und Enddatum angeben.",
+    "dateRangeInvalid": "Das Startdatum darf nicht nach dem Enddatum liegen.",
+    "pdfDownloaded": "PDF-Bericht erfolgreich heruntergeladen",
+    "generated": "Bericht erfolgreich erstellt",
+    "generateError": "Bericht konnte nicht erstellt werden"
+  },
+  "loans": {
+    "loadError": "Darlehen konnten nicht geladen werden",
+    "updated": "Darlehen aktualisiert",
+    "created": "Darlehen angelegt",
+    "saveError": "Darlehen konnte nicht gespeichert werden",
+    "paymentRegistered": "Zahlung erfasst",
+    "paymentRegisterError": "Zahlung konnte nicht erfasst werden",
+    "paymentDeleted": "Zahlung gelöscht",
+    "paymentDeleteError": "Zahlung konnte nicht gelöscht werden",
+    "deleted": "Darlehen gelöscht",
+    "deleteError": "Darlehen konnte nicht gelöscht werden",
+    "detailLoadError": "Details konnten nicht geladen werden",
+    "paymentsHistoryLoadError": "Zahlungsverlauf konnte nicht geladen werden",
+    "editLoadError": "Darlehen konnte nicht zum Bearbeiten geladen werden"
+  },
+  "accounts": {
+    "loadError": "Konten konnten nicht geladen werden",
+    "updated": "Konto aktualisiert",
+    "created": "Konto angelegt",
+    "saveError": "Konto konnte nicht gespeichert werden",
+    "transferDone": "Überweisung ausgeführt",
+    "transferError": "Überweisung fehlgeschlagen",
+    "adjustmentRegistered": "Anpassung erfasst",
+    "adjustmentError": "Anpassung konnte nicht erfasst werden",
+    "deleted": "Konto gelöscht",
+    "deleteError": "Konto konnte nicht gelöscht werden",
+    "movementsLoadError": "Bewegungen konnten nicht geladen werden"
+  },
+  "cards": {
+    "loadError": "Karten konnten nicht geladen werden",
+    "paymentRegistered": "Zahlung erfasst",
+    "paymentRegisterError": "Zahlung konnte nicht erfasst werden",
+    "paymentDeleted": "Zahlung gelöscht",
+    "paymentDeleteError": "Zahlung konnte nicht gelöscht werden",
+    "updated": "Karte aktualisiert",
+    "created": "Karte angelegt",
+    "saveError": "Karte konnte nicht gespeichert werden",
+    "deleted": "Karte gelöscht",
+    "deleteError": "Karte konnte nicht gelöscht werden"
+  },
+  "accountsReceivable": {
+    "loadError": "Forderungen konnten nicht geladen werden",
+    "dueDateRequired": "Fälligkeitsdatum auswählen",
+    "updated": "Forderung aktualisiert",
+    "created": "Forderung angelegt",
+    "saveError": "Forderung konnte nicht gespeichert werden",
+    "incomeDateRequired": "Eingangsdatum auswählen",
+    "markedReceived": "Als erhalten markiert; Eingang am gewählten Datum erfasst",
+    "markReceivedError": "Konnte nicht als erhalten markieren",
+    "paymentDateRequired": "Zahlungsdatum auswählen",
+    "paymentRegistered": "Zahlung als Eingang erfasst",
+    "paymentRegisterError": "Zahlung konnte nicht erfasst werden",
+    "paymentsLoadError": "Zahlungen konnten nicht geladen werden",
+    "paymentUpdatedSync": "Zahlung aktualisiert; Eingang synchronisiert",
+    "paymentUpdateError": "Zahlung konnte nicht aktualisiert werden",
+    "paymentDeleted": "Zahlung gelöscht",
+    "paymentDeleteError": "Zahlung konnte nicht gelöscht werden",
+    "deleted": "Forderung gelöscht",
+    "deleteError": "Forderung konnte nicht gelöscht werden"
+  },
+  "accountsPayable": {
+    "loadError": "Verbindlichkeiten konnten nicht geladen werden",
+    "dueDateRequired": "Fälligkeitsdatum auswählen",
+    "updated": "Verbindlichkeit aktualisiert",
+    "created": "Verbindlichkeit angelegt",
+    "saveError": "Verbindlichkeit konnte nicht gespeichert werden",
+    "expenseDateRequired": "Ausgabendatum auswählen",
+    "markedPaid": "Als bezahlt markiert; Ausgabe am gewählten Datum erfasst",
+    "markPaidError": "Konnte nicht als bezahlt markieren",
+    "paymentDateRequired": "Zahlungsdatum auswählen",
+    "paymentRegistered": "Zahlung als Ausgabe erfasst",
+    "paymentRegisterError": "Zahlung konnte nicht erfasst werden",
+    "paymentsLoadError": "Zahlungen konnten nicht geladen werden",
+    "paymentUpdatedSync": "Zahlung aktualisiert; Ausgabe synchronisiert",
+    "paymentUpdateError": "Zahlung konnte nicht aktualisiert werden",
+    "paymentDeleted": "Zahlung gelöscht",
+    "paymentDeleteError": "Zahlung konnte nicht gelöscht werden",
+    "deleted": "Verbindlichkeit gelöscht",
+    "deleteError": "Verbindlichkeit konnte nicht gelöscht werden"
+  },
+  "budgets": {
+    "loadError": "Budgets konnten nicht geladen werden",
+    "updated": "Budget aktualisiert",
+    "created": "Budget angelegt",
+    "saveError": "Budget konnte nicht gespeichert werden",
+    "deleted": "Budget gelöscht",
+    "deleteError": "Budget konnte nicht gelöscht werden"
+  },
+  "financialGoals": {
+    "loadError": "Finanzziele konnten nicht geladen werden",
+    "updated": "Ziel aktualisiert",
+    "created": "Ziel angelegt",
+    "saveError": "Ziel konnte nicht gespeichert werden",
+    "noPendingBalance": "Kein ausstehender Betrag für dieses Ziel.",
+    "paymentDateRequired": "Zahlungsdatum auswählen",
+    "paymentRegistered": "Einzahlung erfasst",
+    "paymentRegisterError": "Einzahlung konnte nicht erfasst werden",
+    "historyUpdateError": "Verlauf konnte nicht aktualisiert werden",
+    "historyLoadError": "Einzahlungsverlauf konnte nicht geladen werden",
+    "paymentUpdated": "Einzahlung aktualisiert",
+    "paymentUpdateError": "Einzahlung konnte nicht aktualisiert werden",
+    "paymentDeleted": "Einzahlung gelöscht",
+    "paymentDeleteError": "Einzahlung konnte nicht gelöscht werden",
+    "deleted": "Ziel gelöscht",
+    "deleteError": "Ziel konnte nicht gelöscht werden",
+    "statusUpdated": "Status aktualisiert",
+    "statusUpdateError": "Status konnte nicht aktualisiert werden"
+  },
+  "expenses": {
+    "loadError": "Ausgaben konnten nicht geladen werden",
+    "updated": "Ausgabe aktualisiert",
+    "created": "Ausgabe angelegt",
+    "saveError": "Ausgabe konnte nicht gespeichert werden",
+    "deleted": "Ausgabe gelöscht",
+    "deleteError": "Ausgabe konnte nicht gelöscht werden"
+  },
+  "income": {
+    "loadError": "Eingänge konnten nicht geladen werden",
+    "updated": "Eingang aktualisiert",
+    "created": "Eingang angelegt",
+    "saveError": "Eingang konnte nicht gespeichert werden",
+    "deleted": "Eingang gelöscht",
+    "deleteError": "Eingang konnte nicht gelöscht werden"
+  },
+  "adminStatus": {
+    "healthError": "Systemstatus konnte nicht abgefragt werden",
+    "countsError": "Periodenzähler konnten nicht geladen werden",
+    "schedulerError": "Benachrichtigungsplaner konnte nicht abgefragt werden"
+  },
+  "categories": {
+    "loadError": "Kategorien konnten nicht geladen werden",
+    "suggestionsApplied": "Vorschlag für Symbol und Farbe übernommen",
+    "nameRequired": "Kategoriename ist erforderlich",
+    "created": "Kategorie angelegt",
+    "createError": "Kategorie konnte nicht angelegt werden",
+    "nameEmpty": "Name darf nicht leer sein",
+    "updated": "Kategorie aktualisiert",
+    "updateError": "Kategorie konnte nicht aktualisiert werden",
+    "deleted": "Kategorie gelöscht",
+    "deleteError": "Kategorie konnte nicht gelöscht werden"
+  },
+  "adminPlans": {
+    "loadError": "Pläne konnten nicht geladen werden",
+    "modulesRequired": "Mindestens ein Modul für den Plan auswählen",
+    "saved": "Plan gespeichert",
+    "saveError": "Speichern fehlgeschlagen",
+    "nameRequired": "Plannamen eingeben",
+    "slugInvalid": "Ungültiger Slug: nur Kleinbuchstaben, Zahlen und Bindestriche (z. B. premium-plus)",
+    "createdHint": "Plan angelegt. Sie können Preise, Module und PayPal als Nächstes bearbeiten.",
+    "createError": "Plan konnte nicht angelegt werden",
+    "paypalCreated": "PayPal: erstellt {{parts}}",
+    "paypalSyncedNoop": "Bereits synchronisiert (keine PayPal-Änderungen)",
+    "paypalSyncError": "Synchronisation mit PayPal fehlgeschlagen",
+    "deleted": "Gelöscht",
+    "deleteError": "Kann nicht gelöscht werden",
+    "paypalProduct": "Produkt",
+    "paypalMonthly": "Monatsplan",
+    "paypalYearly": "Jahresplan"
+  },
+  "adminSettings": {
+    "loadError": "Einstellungen konnten nicht geladen werden",
+    "registrationEnabled": "Benutzerregistrierung aktiviert",
+    "registrationDisabled": "Benutzerregistrierung deaktiviert",
+    "maintenanceOn": "Wartungsmodus: andere Benutzer nur lesend",
+    "maintenanceOff": "Wartungsmodus aus",
+    "saveError": "Speichern fehlgeschlagen"
+  },
+  "notificationTemplates": {
+    "loadError": "Vorlagen konnten nicht geladen werden",
+    "updated": "Vorlage erfolgreich aktualisiert",
+    "saveError": "Vorlage konnte nicht gespeichert werden",
+    "restored": "Vorlage auf Standard zurückgesetzt",
+    "restoreError": "Vorlage konnte nicht wiederhergestellt werden",
+    "testSent": "Testnachricht gesendet. Prüfen Sie Telegram.",
+    "testError": "Testnachricht konnte nicht gesendet werden"
+  },
+  "profile": {
+    "accountUpdated": "Kontodaten aktualisiert",
+    "saveError": "Speichern fehlgeschlagen",
+    "passwordMismatch": "Neue Passwörter stimmen nicht überein",
+    "passwordTooShort": "Neues Passwort mindestens 6 Zeichen",
+    "passwordUpdated": "Passwort aktualisiert",
+    "passwordChangeError": "Passwort konnte nicht geändert werden"
+  }
+}

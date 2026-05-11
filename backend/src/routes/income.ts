@@ -7,6 +7,7 @@ import {
   deleteIncome,
   updateIncomeReceiptStatus,
 } from '../controllers/incomeController';
+import { getIncomeTimeline } from '../controllers/financialTimelineController';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -16,6 +17,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('income'));
 
 router.get('/', getIncome);
+router.get('/:id/timeline', getIncomeTimeline);
 router.get('/:id', getIncomeItem);
 router.post('/', createIncome);
 router.patch('/:id/receipt-status', updateIncomeReceiptStatus);

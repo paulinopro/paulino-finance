@@ -2,6 +2,11 @@ import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta, getAccountRow, isCurrencyAllowedForAccount } from '../services/accountBalance';
+import {
+  getUserCurrencyPair,
+  isCurrencyInUserPair,
+  validateLedgerCurrencyForUser,
+} from '../utils/userCurrencyPair';
 
 function parseBankAccountIdBody(
   body: Record<string, unknown>,
@@ -25,7 +30,8 @@ async function validateGoalBankAccount(
   if (!accountId) return null;
   const row = await getAccountRow(userId, accountId);
   if (!row) return 'Cuenta no encontrada';
-  if (!isCurrencyAllowedForAccount(row.currency_type, currency)) {
+  const pair = await getUserCurrencyPair(userId);
+  if (!isCurrencyAllowedForAccount(row.currency_type, currency, pair)) {
     return 'La moneda de la meta debe coincidir con la cuenta (o usar cuenta DUAL)';
   }
   return null;
@@ -90,7 +96,22 @@ export const createFinancialGoal = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Name, target amount, and currency are required' });
     }
 
+    const pair = await getUserCurrencyPair(userId);
+    const cur = String(currency).trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, cur)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
+
     const bankAccountId = parseBankAccountIdBody(body, 'create', null);
+    if (bankAccountId) {
+      const ledErr = validateLedgerCurrencyForUser(pair, cur);
+      if (ledErr) {
+        return res.status(400).json({ message: ledErr });
+      }
+    }
+
     const errAcc = await validateGoalBankAccount(userId, bankAccountId, String(currency));
     if (errAcc) {
       return res.status(400).json({ message: errAcc });
@@ -146,7 +167,20 @@ export const updateFinancialGoal = async (req: AuthRequest, res: Response) => {
     }
     const prevBank = prevRow.rows[0].bank_account_id as number | null;
     const effCurrency = currency !== undefined && currency !== null ? String(currency) : String(prevRow.rows[0].currency);
+    const pair = await getUserCurrencyPair(userId);
+    const effNorm = effCurrency.trim().toUpperCase();
+    if (!isCurrencyInUserPair(pair, effNorm)) {
+      return res.status(400).json({
+        message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+      });
+    }
     const newBankId = parseBankAccountIdBody(body, 'update', prevBank);
+    if (newBankId) {
+      const ledErr = validateLedgerCurrencyForUser(pair, effNorm);
+      if (ledErr) {
+        return res.status(400).json({ message: ledErr });
+      }
+    }
     const errAcc = await validateGoalBankAccount(userId, newBankId, effCurrency);
     if (errAcc) {
       return res.status(400).json({ message: errAcc });
@@ -225,7 +259,7 @@ export const deleteFinancialGoal = async (req: AuthRequest, res: Response) => {
     await client.query('BEGIN');
 
     const gRes = await client.query(
-      `SELECT id, currency FROM financial_goals WHERE id = $1 AND user_id = $2`,
+      `SELECT id, currency, name FROM financial_goals WHERE id = $1 AND user_id = $2`,
       [id, userId]
     );
     if (gRes.rows.length === 0) {
@@ -233,6 +267,7 @@ export const deleteFinancialGoal = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Financial goal not found' });
     }
     const cur = String(gRes.rows[0].currency);
+    const goalNameDel = String(gRes.rows[0].name ?? '').trim() || `Meta #${id}`;
 
     const movs = await client.query(
       `SELECT bank_account_id, source_bank_account_id, amount FROM financial_goal_movements WHERE goal_id = $1 AND user_id = $2`,
@@ -245,10 +280,14 @@ export const deleteFinancialGoal = async (req: AuthRequest, res: Response) => {
       const amt = parseFloat(row.amount);
       try {
         if (srcId) {
-          await applyBalanceDelta(userId, srcId, cur, amt, client);
+          await applyBalanceDelta(userId, srcId, cur, amt, client, {
+            description: `[Meta financiera «${goalNameDel}»] Eliminación de meta · devolución a cuenta origen`,
+          });
         }
         if (destId) {
-          await applyBalanceDelta(userId, destId, cur, -amt, client);
+          await applyBalanceDelta(userId, destId, cur, -amt, client, {
+            description: `[Meta financiera «${goalNameDel}»] Eliminación de meta · retiro de cuenta vinculada`,
+          });
         }
       } catch (e: any) {
         await client.query('ROLLBACK');

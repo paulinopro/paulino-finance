@@ -18,6 +18,7 @@ router.get('/cash-adjustments', cashAdjustmentController_1.listCashAdjustments);
 router.get('/', accountController_1.getAccounts);
 router.post('/', accountController_1.createAccount);
 router.post('/:id/cash-adjustments', cashAdjustmentController_1.createCashAdjustment);
+router.get('/:id/movements', accountController_1.listBankAccountMovements);
 router.get('/:id', accountController_1.getAccount);
 router.put('/:id', accountController_1.updateAccount);
 router.delete('/:id', accountController_1.deleteAccount);

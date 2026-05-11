@@ -4,6 +4,8 @@ exports.deleteSubscriptionPlan = exports.syncSubscriptionPlanPaypal = exports.up
 const database_1 = require("../config/database");
 const adminAuditService_1 = require("../services/adminAuditService");
 const paypalPlanProvisioningService_1 = require("../services/paypalPlanProvisioningService");
+const subscriptionModules_1 = require("../constants/subscriptionModules");
+const adminStatsCacheStore_1 = require("./adminStatsCacheStore");
 const listSubscriptionPlans = async (_req, res) => {
     try {
         const r = await (0, database_1.query)(`SELECT id, name, slug, description, price_monthly, price_yearly, currency,
@@ -40,8 +42,12 @@ exports.listSubscriptionPlans = listSubscriptionPlans;
 const createSubscriptionPlan = async (req, res) => {
     try {
         const { name, slug, description, priceMonthly, priceYearly, currency, paypalProductId, paypalPlanIdMonthly, paypalPlanIdYearly, enabledModules, isActive, sortOrder, } = req.body;
-        if (!name || !slug || !enabledModules || typeof enabledModules !== 'object') {
-            return res.status(400).json({ message: 'name, slug y enabledModules son requeridos' });
+        if (!name || !slug) {
+            return res.status(400).json({ message: 'name y slug son requeridos' });
+        }
+        const modulesNorm = (0, subscriptionModules_1.normalizeEnabledModulesObject)(enabledModules);
+        if (!(0, subscriptionModules_1.enabledModulesHasAtLeastOne)(modulesNorm)) {
+            return res.status(400).json({ message: 'Seleccione al menos un módulo para el plan' });
         }
         const result = await (0, database_1.query)(`INSERT INTO subscription_plans (
          name, slug, description, price_monthly, price_yearly, currency,
@@ -57,12 +63,17 @@ const createSubscriptionPlan = async (req, res) => {
             paypalProductId || null,
             paypalPlanIdMonthly || null,
             paypalPlanIdYearly || null,
-            JSON.stringify(enabledModules),
+            JSON.stringify(modulesNorm),
             isActive !== false,
             sortOrder ?? 0,
         ]);
         const newId = result.rows[0].id;
-        void (0, adminAuditService_1.logAdminAction)(req.userId, 'plan.create', 'subscription_plan', newId, { name, slug });
+        void (0, adminAuditService_1.logAdminAction)(req.userId, 'plan.create', 'subscription_plan', newId, {
+            name,
+            slug,
+            enabledModulesKeysOn: subscriptionModules_1.SUBSCRIPTION_MODULE_KEYS.filter((k) => modulesNorm[k]),
+        });
+        (0, adminStatsCacheStore_1.invalidateAdminStatsCache)();
         res.status(201).json({ id: newId });
     }
     catch (e) {
@@ -83,49 +94,83 @@ const updateSubscriptionPlan = async (req, res) => {
         const { name, slug, description, priceMonthly, priceYearly, currency, paypalProductId, paypalPlanIdMonthly, paypalPlanIdYearly, enabledModules, isActive, sortOrder, } = req.body;
         const updates = [];
         const values = [];
+        const changedFields = [];
+        const auditPatch = {};
         if (name !== undefined) {
+            changedFields.push('name');
             updates.push(`name = $${values.length + 1}`);
             values.push(String(name).slice(0, 255));
+            auditPatch.name = String(name).slice(0, 255);
         }
         if (slug !== undefined) {
+            changedFields.push('slug');
             updates.push(`slug = $${values.length + 1}`);
             values.push(String(slug).toLowerCase().replace(/\s+/g, '-').slice(0, 80));
+            auditPatch.slug = String(slug).toLowerCase().replace(/\s+/g, '-').slice(0, 80);
         }
         if (description !== undefined) {
+            changedFields.push('description');
             updates.push(`description = $${values.length + 1}`);
             values.push(description);
+            auditPatch.description = description;
         }
         if (priceMonthly !== undefined) {
+            changedFields.push('price_monthly');
             updates.push(`price_monthly = $${values.length + 1}`);
             values.push(priceMonthly);
+            auditPatch.priceMonthly = priceMonthly;
         }
         if (priceYearly !== undefined) {
+            changedFields.push('price_yearly');
             updates.push(`price_yearly = $${values.length + 1}`);
             values.push(priceYearly);
+            auditPatch.priceYearly = priceYearly;
         }
         if (currency !== undefined) {
+            changedFields.push('currency');
             updates.push(`currency = $${values.length + 1}`);
             values.push(String(currency).slice(0, 3));
+            auditPatch.currency = String(currency).slice(0, 3);
+        }
+        if (paypalProductId !== undefined) {
+            changedFields.push('paypal_product_id');
+            updates.push(`paypal_product_id = $${values.length + 1}`);
+            values.push(paypalProductId || null);
+            auditPatch.paypalProductId = paypalProductId || null;
         }
         if (paypalPlanIdMonthly !== undefined) {
+            changedFields.push('paypal_plan_id_monthly');
             updates.push(`paypal_plan_id_monthly = $${values.length + 1}`);
             values.push(paypalPlanIdMonthly || null);
+            auditPatch.paypalPlanIdMonthly = paypalPlanIdMonthly || null;
         }
         if (paypalPlanIdYearly !== undefined) {
+            changedFields.push('paypal_plan_id_yearly');
             updates.push(`paypal_plan_id_yearly = $${values.length + 1}`);
             values.push(paypalPlanIdYearly || null);
+            auditPatch.paypalPlanIdYearly = paypalPlanIdYearly || null;
         }
         if (enabledModules !== undefined) {
+            const modulesNorm = (0, subscriptionModules_1.normalizeEnabledModulesObject)(enabledModules);
+            if (!(0, subscriptionModules_1.enabledModulesHasAtLeastOne)(modulesNorm)) {
+                return res.status(400).json({ message: 'Seleccione al menos un módulo para el plan' });
+            }
+            changedFields.push('enabled_modules');
             updates.push(`enabled_modules = $${values.length + 1}::jsonb`);
-            values.push(JSON.stringify(enabledModules));
+            values.push(JSON.stringify(modulesNorm));
+            auditPatch.enabledModulesKeysOn = subscriptionModules_1.SUBSCRIPTION_MODULE_KEYS.filter((k) => modulesNorm[k]);
         }
         if (isActive !== undefined) {
+            changedFields.push('is_active');
             updates.push(`is_active = $${values.length + 1}`);
             values.push(!!isActive);
+            auditPatch.isActive = !!isActive;
         }
         if (sortOrder !== undefined) {
+            changedFields.push('sort_order');
             updates.push(`sort_order = $${values.length + 1}`);
             values.push(sortOrder);
+            auditPatch.sortOrder = sortOrder;
         }
         if (updates.length === 0) {
             return res.status(400).json({ message: 'Nada que actualizar' });
@@ -133,7 +178,11 @@ const updateSubscriptionPlan = async (req, res) => {
         updates.push('updated_at = CURRENT_TIMESTAMP');
         values.push(id);
         await (0, database_1.query)(`UPDATE subscription_plans SET ${updates.join(', ')} WHERE id = $${values.length}`, values);
-        void (0, adminAuditService_1.logAdminAction)(req.userId, 'plan.update', 'subscription_plan', id, { body: req.body });
+        void (0, adminAuditService_1.logAdminAction)(req.userId, 'plan.update', 'subscription_plan', id, {
+            changedFields,
+            patch: auditPatch,
+        });
+        (0, adminStatsCacheStore_1.invalidateAdminStatsCache)();
         res.json({ success: true });
     }
     catch (e) {
@@ -184,6 +233,7 @@ const deleteSubscriptionPlan = async (req, res) => {
         }
         await (0, database_1.query)(`DELETE FROM subscription_plans WHERE id = $1`, [id]);
         void (0, adminAuditService_1.logAdminAction)(req.userId, 'plan.delete', 'subscription_plan', id, {});
+        (0, adminStatsCacheStore_1.invalidateAdminStatsCache)();
         res.json({ success: true });
     }
     catch (e) {

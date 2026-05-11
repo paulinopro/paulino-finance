@@ -13,6 +13,7 @@ router.post('/stop-impersonation', auth_1.authenticate, adminController_1.stopIm
 router.use(auth_1.authenticate, requireSuperAdmin_1.requireSuperAdmin);
 router.get('/stats', adminController_1.getAdminStats);
 router.get('/health', adminController_1.getAdminHealth);
+router.get('/notification-scheduler', adminController_1.getAdminNotificationScheduler);
 router.get('/data-quality/subscription-payments', adminController_1.getAdminSubscriptionDataQuality);
 router.get('/audit-log', adminController_1.listAdminAuditLog);
 router.get('/users', adminController_1.listUsers);

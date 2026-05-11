@@ -7,6 +7,7 @@ import {
   deleteExpense,
   updateExpensePaymentStatus,
 } from '../controllers/expenseController';
+import { getExpenseTimeline } from '../controllers/financialTimelineController';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -16,6 +17,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('expenses'));
 
 router.get('/', getExpenses);
+router.get('/:id/timeline', getExpenseTimeline);
 router.get('/:id', getExpense);
 router.post('/', createExpense);
 router.put('/:id', updateExpense);

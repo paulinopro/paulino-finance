@@ -4,6 +4,7 @@ import {
   defaultEnabledModulesAll,
   defaultEnabledModulesFree,
 } from '../constants/subscriptionModules';
+import { EXPENSE_CATEGORY_DEFAULT_PRESETS } from '../constants/expenseCategoryPresets';
 import { seedDefaultTemplatesForAllUsers } from '../services/notificationTemplateSeed';
 
 dotenv.config();
@@ -121,6 +122,7 @@ const createTables = async () => {
       currency_preference VARCHAR(3) DEFAULT 'DOP',
       exchange_rate_dop_usd DECIMAL(10, 2) DEFAULT 55.00,
       timezone VARCHAR(50) DEFAULT 'America/Santo_Domingo',
+      locale_preference VARCHAR(16) DEFAULT 'es',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -168,7 +170,55 @@ const createTables = async () => {
                      WHERE table_schema = 'public' AND table_name='users' AND column_name='cedula') THEN
         ALTER TABLE users ADD COLUMN cedula VARCHAR(50);
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                     WHERE table_schema = 'public' AND table_name='users' AND column_name='locale_preference') THEN
+        ALTER TABLE users ADD COLUMN locale_preference VARCHAR(16) DEFAULT 'es';
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'secondary_currency_preference') THEN
+        ALTER TABLE users ADD COLUMN secondary_currency_preference VARCHAR(3) DEFAULT 'USD';
+        UPDATE users SET secondary_currency_preference = CASE
+          WHEN UPPER(TRIM(COALESCE(currency_preference, ''))) = 'USD' THEN 'DOP'
+          ELSE 'USD'
+        END;
+      END IF;
     END $$;
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS exchange_rate_snapshots (
+      base_code VARCHAR(3) PRIMARY KEY,
+      rates_json JSONB NOT NULL,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'exchange_rate_manual'
+      ) THEN
+        ALTER TABLE users ADD COLUMN exchange_rate_manual DECIMAL(20, 8) NULL;
+      END IF;
+    END $$;
+  `);
+
+  /* Tasa manual en formato secundaria por 1 principal; migra legado DOP/USD con exchange_rate_dop_usd = DOP por 1 USD */
+  await query(`
+    UPDATE users SET exchange_rate_manual = exchange_rate_dop_usd
+    WHERE exchange_rate_manual IS NULL
+      AND exchange_rate_dop_usd IS NOT NULL AND exchange_rate_dop_usd > 0
+      AND UPPER(TRIM(COALESCE(currency_preference, ''))) = 'USD'
+      AND UPPER(TRIM(COALESCE(secondary_currency_preference, ''))) = 'DOP'
+  `);
+  await query(`
+    UPDATE users SET exchange_rate_manual = (1.0 / NULLIF(exchange_rate_dop_usd, 0))::decimal
+    WHERE exchange_rate_manual IS NULL
+      AND exchange_rate_dop_usd IS NOT NULL AND exchange_rate_dop_usd > 0
+      AND UPPER(TRIM(COALESCE(currency_preference, ''))) = 'DOP'
+      AND UPPER(TRIM(COALESCE(secondary_currency_preference, ''))) = 'USD'
   `);
 
   await query(`
@@ -341,13 +391,40 @@ const createTables = async () => {
     )
   `);
 
-  // Insert default categories for existing users
   await query(`
-    INSERT INTO expense_categories (user_id, name)
-    SELECT id, unnest(ARRAY['Alimentación', 'Transporte', 'Servicios', 'Entretenimiento', 'Salud', 'Educación', 'Ropa', 'Otros'])
-    FROM users
-    ON CONFLICT (user_id, name) DO NOTHING
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expense_categories' AND column_name = 'icon'
+      ) THEN
+        ALTER TABLE expense_categories ADD COLUMN icon VARCHAR(64);
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expense_categories' AND column_name = 'color'
+      ) THEN
+        ALTER TABLE expense_categories ADD COLUMN color VARCHAR(16);
+      END IF;
+    END $$;
   `);
+
+  const ecPresets = EXPENSE_CATEGORY_DEFAULT_PRESETS;
+  await query(
+    `INSERT INTO expense_categories (user_id, name, icon, color)
+     SELECT u.id, c.name, c.icon, c.color
+     FROM users u
+     CROSS JOIN (
+       SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+         AS preset(name, icon, color)
+     ) c
+     ON CONFLICT (user_id, name) DO NOTHING`,
+    [
+      ecPresets.map((p) => p.name),
+      ecPresets.map((p) => p.icon),
+      ecPresets.map((p) => p.color),
+    ]
+  );
 
   // Loans table
   await query(`
@@ -688,6 +765,26 @@ const createTables = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS bank_account_movements (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 4) NOT NULL CHECK (amount >= 0),
+      currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
+      direction VARCHAR(3) NOT NULL CHECK (direction IN ('IN', 'OUT')),
+      description TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'cancelled')),
+      occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_bank_account_movements_account_occurred ON bank_account_movements(bank_account_id, occurred_at DESC)`
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_bank_account_movements_user_occurred ON bank_account_movements(user_id, occurred_at DESC)`
+  );
 
   await query(`CREATE INDEX IF NOT EXISTS idx_account_transfers_user_id ON account_transfers(user_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_cash_adjustments_user_id ON cash_adjustments(user_id)`);
@@ -1173,6 +1270,58 @@ const createTables = async () => {
     END $$;
   `);
 
+  /* Montos por período (mes) para ingresos/gastos recurrentes variables al marcar pagado/cobrado */
+  await query(`
+    CREATE TABLE IF NOT EXISTS expense_period_amounts (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      amount DECIMAL(15, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT expense_period_amounts_month_chk CHECK (month >= 1 AND month <= 12),
+      CONSTRAINT expense_period_amounts_year_chk CHECK (year >= 1900 AND year <= 2100),
+      UNIQUE (expense_id, year, month)
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_expense_period_amounts_user ON expense_period_amounts(user_id)
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS income_period_amounts (
+      id SERIAL PRIMARY KEY,
+      income_id INTEGER NOT NULL REFERENCES income(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      amount DECIMAL(15, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT income_period_amounts_month_chk CHECK (month >= 1 AND month <= 12),
+      CONSTRAINT income_period_amounts_year_chk CHECK (year >= 1900 AND year <= 2100),
+      UNIQUE (income_id, year, month)
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_income_period_amounts_user ON income_period_amounts(user_id)
+  `);
+
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'last_received_month'
+      ) THEN
+        ALTER TABLE income ADD COLUMN last_received_month INTEGER;
+        ALTER TABLE income ADD COLUMN last_received_year INTEGER;
+      END IF;
+    END $$;
+  `);
+
   await query(`
     DO $$
     BEGIN
@@ -1222,6 +1371,29 @@ const createTables = async () => {
         OR title_template LIKE '%' || '{expenseTypeLabel}' || '%'
         OR message_template LIKE '%<b>Tipo:</b> {expenseScheduleLabel}%'
       );
+  `);
+
+  /* Permite códigos ISO distintos de DOP/USD en movimientos, transferencias y tablas de dominio. */
+  await query(`
+    DO $$
+    DECLARE t text;
+    BEGIN
+      FOREACH t IN ARRAY ARRAY[
+        'account_transfers',
+        'cash_adjustments',
+        'bank_account_movements',
+        'credit_card_payments',
+        'accounts_payable',
+        'accounts_receivable',
+        'budgets',
+        'financial_goals',
+        'vehicles',
+        'vehicle_expenses'
+      ]
+      LOOP
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I', t, t || '_currency_check');
+      END LOOP;
+    END $$;
   `);
 };
 

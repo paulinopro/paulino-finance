@@ -1,0 +1,3 @@
+/*! For license information please see 91940.12968b31.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[91940],{91940(e,n,c){c.r(n),c.d(n,{default:()=>a});const a=(0,c(21639).A)("CheckCircle2",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"m9 12 2 2 4-4",key:"dzmm74"}]])}}]);
+//# sourceMappingURL=91940.12968b31.chunk.js.map

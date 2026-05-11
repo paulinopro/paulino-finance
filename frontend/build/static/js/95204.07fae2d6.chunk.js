@@ -1,0 +1,3 @@
+/*! For license information please see 95204.07fae2d6.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[95204],{95204(n,e,a){a.r(e),a.d(e,{default:()=>c});const c=(0,a(21639).A)("Droplet",[["path",{d:"M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z",key:"c7niix"}]])}}]);
+//# sourceMappingURL=95204.07fae2d6.chunk.js.map

@@ -139,14 +139,20 @@ const getCashFlow = async (req, res) => {
             }
             cashFlowByDate[date].income += amountDop;
         });
-        const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, nature
+        const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, nature, recurrence_start_date, recurrence_end_date
        FROM income
        WHERE user_id = $1 AND (${recurrenceSql_1.INCOME_RECURRENT_ROWS})`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
             const frequency = row.frequency;
-            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({ frequency, receipt_day: row.receipt_day, date: row.date }, start, end);
+            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({
+                frequency,
+                receipt_day: row.receipt_day,
+                date: row.date,
+                recurrence_start_date: row.recurrence_start_date,
+                recurrence_end_date: row.recurrence_end_date,
+            }, start, end);
             // Add income to each calculated date
             dates.forEach((dateStr) => {
                 if (!cashFlowByDate[dateStr]) {
@@ -165,7 +171,7 @@ const getCashFlow = async (req, res) => {
             }
             cashFlowByDate[date].expenses += amountDop;
         });
-        const recurringExpensesExpandedResult = await (0, database_1.query)(`SELECT amount, currency, frequency, payment_day, payment_month, date
+        const recurringExpensesExpandedResult = await (0, database_1.query)(`SELECT amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
        WHERE user_id = $1
          AND (
@@ -181,6 +187,8 @@ const getCashFlow = async (req, res) => {
                 payment_day: row.payment_day,
                 payment_month: row.payment_month,
                 date: row.date,
+                recurrence_start_date: row.recurrence_start_date,
+                recurrence_end_date: row.recurrence_end_date,
             }, start, end);
             dates.forEach((dateStr) => {
                 if (!cashFlowByDate[dateStr]) {
@@ -252,7 +260,13 @@ const getCashFlow = async (req, res) => {
             const amount = parseFloat(row.amount);
             const amountDop = toDop(amount, row.currency, exchangeRate);
             const frequency = row.frequency;
-            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({ frequency, receipt_day: row.receipt_day, date: row.date }, start, end);
+            const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({
+                frequency,
+                receipt_day: row.receipt_day,
+                date: row.date,
+                recurrence_start_date: row.recurrence_start_date,
+                recurrence_end_date: row.recurrence_end_date,
+            }, start, end);
             const add = amountDop * dates.length;
             const fk = frequencyKeyForIncome(row.frequency);
             addToFrequencyBucket(recurrentIncomeByFrequency, fk, add);
@@ -288,6 +302,8 @@ const getCashFlow = async (req, res) => {
                 payment_day: row.payment_day,
                 payment_month: row.payment_month,
                 date: row.date,
+                recurrence_start_date: row.recurrence_start_date,
+                recurrence_end_date: row.recurrence_end_date,
             }, start, end);
             const mult = amountDop * dates.length;
             const isAnnual = expenseRowIsAnnual(row);

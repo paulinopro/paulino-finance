@@ -1,0 +1,3 @@
+/*! For license information please see 57806.054d17a5.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[57806],{57806(e,n,l){l.r(n),l.d(n,{default:()=>t});const t=(0,l(21639).A)("BluetoothConnected",[["path",{d:"m7 7 10 10-5 5V2l5 5L7 17",key:"1q5490"}],["line",{x1:"18",x2:"21",y1:"12",y2:"12",key:"1rsjjs"}],["line",{x1:"3",x2:"6",y1:"12",y2:"12",key:"11yl8c"}]])}}]);
+//# sourceMappingURL=57806.054d17a5.chunk.js.map

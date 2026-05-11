@@ -12,6 +12,8 @@ router.use(auth_1.authenticate);
 router.use((0, requireSubscriptionModule_1.requireSubscriptionModule)('calendar'));
 router.get('/events', calendarController_1.getEvents);
 router.get('/summary', calendarController_1.getSummary);
+router.get('/history', calendarController_1.getHistory);
+router.get('/orphan-events', calendarController_1.listOrphanEvents);
 router.put('/events/:id/status', calendarController_1.updateStatus);
 router.post('/refresh', calendarController_1.refreshEvents);
 exports.default = router;

@@ -1,0 +1,3 @@
+/*! For license information please see 2029.9b2fb883.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[2029],{2029(e,n,a){a.r(n),a.d(n,{default:()=>c});const c=(0,a(21639).A)("SpellCheck",[["path",{d:"m6 16 6-12 6 12",key:"1b4byz"}],["path",{d:"M8 12h8",key:"1wcyev"}],["path",{d:"m16 20 2 2 4-4",key:"13tcca"}]])}}]);
+//# sourceMappingURL=2029.9b2fb883.chunk.js.map

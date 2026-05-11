@@ -1,0 +1,3 @@
+/*! For license information please see 1343.eff31e01.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[1343],{1343(e,n,i){i.r(n),i.d(n,{default:()=>c});const c=(0,i(21639).A)("GitCommitHorizontal",[["circle",{cx:"12",cy:"12",r:"3",key:"1v7zrd"}],["line",{x1:"3",x2:"9",y1:"12",y2:"12",key:"1dyftd"}],["line",{x1:"15",x2:"21",y1:"12",y2:"12",key:"oup4p8"}]])}}]);
+//# sourceMappingURL=1343.eff31e01.chunk.js.map

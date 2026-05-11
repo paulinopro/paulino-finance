@@ -25,58 +25,14 @@ export const SUBSCRIPTION_MODULE_KEYS = [
   'subscription',
 ] as const;
 
-/** Nombres visibles en español (planes, admin, UI). */
-export const SUBSCRIPTION_MODULE_LABELS_ES: Record<(typeof SUBSCRIPTION_MODULE_KEYS)[number], string> = {
-  dashboard: 'Resumen',
-  cards: 'Tarjetas',
-  loans: 'Préstamos',
-  income: 'Ingresos',
-  expenses: 'Gastos',
-  accounts: 'Cuentas',
-  reports: 'Reportes',
-  calendar: 'Calendario',
-  accounts_payable: 'Cuentas por pagar',
-  accounts_receivable: 'Cuentas por cobrar',
-  budgets: 'Presupuestos',
-  financial_goals: 'Metas financieras',
-  cash_flow: 'Flujo de caja',
-  projections: 'Proyecciones',
-  vehicles: 'Vehículos',
-  notifications: 'Notificaciones',
-  categories: 'Categorías',
-  templates: 'Plantillas',
-  settings: 'Configuración',
-  profile: 'Mi perfil',
-  subscription: 'Planes y suscripción',
-};
-
-export function subscriptionModuleLabelEs(key: string): string {
-  if (key in SUBSCRIPTION_MODULE_LABELS_ES) {
-    return SUBSCRIPTION_MODULE_LABELS_ES[key as keyof typeof SUBSCRIPTION_MODULE_LABELS_ES];
-  }
-  return key;
-}
-
-/** Valores de `user_subscriptions.status` en API; etiquetas para filtros y UI en español. */
-export const SUBSCRIPTION_STATUS_FILTER_OPTIONS = [
-  { value: 'active', label: 'Activa' },
-  { value: 'trialing', label: 'Periodo de prueba' },
-  { value: 'cancelled', label: 'Cancelada' },
-  { value: 'expired', label: 'Expirada' },
-  { value: 'past_due', label: 'Pago atrasado' },
+/** Valores de `user_subscriptions.status` en el filtro admin. Etiquetas: `pages.adminUsers.subscriptionStatus.*`. */
+export const SUBSCRIPTION_STATUS_FILTER_VALUES = [
+  'active',
+  'trialing',
+  'cancelled',
+  'expired',
+  'past_due',
 ] as const;
-
-/** Etiqueta en español para estado de suscripción; si no es un valor API conocido, devuelve el texto original. */
-export function subscriptionStatusLabelEs(status: string | null | undefined): string {
-  if (!status) return '—';
-  const raw = String(status).trim();
-  const low = raw.toLowerCase();
-  const row = SUBSCRIPTION_STATUS_FILTER_OPTIONS.find((o) => o.value === low);
-  if (row) return row.label;
-  if (low === 'n/a') return 'No aplica';
-  if (low === 'sin suscripción') return 'Sin suscripción';
-  return raw;
-}
 
 /** Al menos un módulo en `true` (misma regla que el API). */
 export function enabledModulesHasAtLeastOne(

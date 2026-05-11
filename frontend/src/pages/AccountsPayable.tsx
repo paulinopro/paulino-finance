@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import api from '../services/api';
 import type { BankAccount, ExpenseCategory } from '../types';
-import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { Plus, Edit, Trash2, CheckCircle, Search, X, Calendar, Banknote, History } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { LIST_CARD_SHELL, listCardAccentPayable, listCardBtnEdit, listCardBtnDanger } from '../utils/listCard';
@@ -18,6 +20,7 @@ import { NotesHtmlPreview } from '../components/NotesHtmlPreview';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
@@ -55,7 +58,16 @@ function todayYmd(): string {
 }
 
 const AccountsPayable: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    currencySelectLabel,
+    defaultTransactionCurrency,
+    transactionCurrencyOptions,
+    primaryCurrency,
+    secondaryCurrency,
+  } = useIntlFormatting();
   const { pageSize: apPageSize, setPageSize: setApPageSize, pageSizeOptions: apPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:accountsPayable', TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
@@ -77,7 +89,7 @@ const AccountsPayable: React.FC = () => {
   const [formData, setFormData] = useState({
     description: '',
     amount: '',
-    currency: 'DOP',
+    currency: defaultTransactionCurrency,
     dueDate: '',
     category: '',
     notes: '',
@@ -129,17 +141,19 @@ const AccountsPayable: React.FC = () => {
 
   const accountsForApAbono = useMemo(() => {
     if (!abonoTarget) return [];
-    return bankAccounts.filter(
-      (a: BankAccount) => a.currencyType === 'DUAL' || a.currencyType === abonoTarget.currency
+    const cur = abonoTarget.currency;
+    return bankAccounts.filter((a: BankAccount) =>
+      bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
     );
-  }, [bankAccounts, abonoTarget]);
+  }, [bankAccounts, abonoTarget, primaryCurrency, secondaryCurrency]);
 
   const accountsForApEditPayment = useMemo(() => {
     if (!historyTarget) return [];
-    return bankAccounts.filter(
-      (a: BankAccount) => a.currencyType === 'DUAL' || a.currencyType === historyTarget.currency
+    const cur = historyTarget.currency;
+    return bankAccounts.filter((a: BankAccount) =>
+      bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
     );
-  }, [bankAccounts, historyTarget]);
+  }, [bankAccounts, historyTarget, primaryCurrency, secondaryCurrency]);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -149,11 +163,11 @@ const AccountsPayable: React.FC = () => {
       const response = await api.get('/accounts-payable', { params });
       setAccounts(response.data.accountsPayable);
     } catch {
-      toast.error('Error al cargar cuentas por pagar');
+      toast.error(t('toast.accountsPayable.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, t]);
 
   useEffect(() => {
     fetchAccounts();
@@ -162,7 +176,7 @@ const AccountsPayable: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.dueDate) {
-      toast.error('Seleccione la fecha de vencimiento');
+      toast.error(t('toast.accountsPayable.dueDateRequired'));
       return;
     }
     try {
@@ -174,17 +188,17 @@ const AccountsPayable: React.FC = () => {
 
       if (editingAccount) {
         await api.put(`/accounts-payable/${editingAccount.id}`, data);
-        toast.success('Cuenta por pagar actualizada');
+        toast.success(t('toast.accountsPayable.updated'));
       } else {
         await api.post('/accounts-payable', data);
-        toast.success('Cuenta por pagar creada');
+        toast.success(t('toast.accountsPayable.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchAccounts();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar cuenta por pagar');
+      toast.error(error.response?.data?.message || t('toast.accountsPayable.saveError'));
     }
   };
 
@@ -197,17 +211,17 @@ const AccountsPayable: React.FC = () => {
   const submitPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payTarget || !payDate) {
-      toast.error('Seleccione la fecha del gasto');
+      toast.error(t('toast.accountsPayable.expenseDateRequired'));
       return;
     }
     try {
       await api.put(`/accounts-payable/${payTarget.id}/pay`, { paymentDate: payDate });
-      toast.success('Cuenta marcada como pagada; gasto registrado en la fecha indicada');
+      toast.success(t('toast.accountsPayable.markedPaid'));
       setShowPayModal(false);
       setPayTarget(null);
       fetchAccounts();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al marcar como pagada');
+      toast.error(error.response?.data?.message || t('toast.accountsPayable.markPaidError'));
     }
   };
 
@@ -224,11 +238,11 @@ const AccountsPayable: React.FC = () => {
     if (!abonoTarget) return;
     const amt = parseFloat(abonoAmount);
     if (isNaN(amt) || amt <= 0) {
-      toast.error('Indique un monto válido');
+      toast.error(t('toast.generic.invalidAmount'));
       return;
     }
     if (!abonoDate) {
-      toast.error('Seleccione la fecha del abono');
+      toast.error(t('toast.accountsPayable.paymentDateRequired'));
       return;
     }
     try {
@@ -237,12 +251,12 @@ const AccountsPayable: React.FC = () => {
         body.bankAccountId = parseInt(abonoBankAccountId, 10);
       }
       await api.post(`/accounts-payable/${abonoTarget.id}/payments`, body);
-      toast.success('Abono registrado como gasto');
+      toast.success(t('toast.accountsPayable.paymentRegistered'));
       setShowAbonoModal(false);
       setAbonoTarget(null);
       fetchAccounts();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al registrar abono');
+      toast.error(error.response?.data?.message || t('toast.accountsPayable.paymentRegisterError'));
     }
   };
 
@@ -255,7 +269,7 @@ const AccountsPayable: React.FC = () => {
       const res = await api.get(`/accounts-payable/${account.id}/payments`);
       setHistoryPayments(res.data.payments || []);
     } catch {
-      toast.error('Error al cargar abonos');
+      toast.error(t('toast.accountsPayable.paymentsLoadError'));
     } finally {
       setHistoryLoading(false);
     }
@@ -287,11 +301,11 @@ const AccountsPayable: React.FC = () => {
     if (!historyTarget || !paymentBeingEdited) return;
     const amt = parseFloat(editPayAmount);
     if (isNaN(amt) || amt <= 0) {
-      toast.error('Indique un monto válido');
+      toast.error(t('toast.generic.invalidAmount'));
       return;
     }
     if (!editPayDate) {
-      toast.error('Seleccione la fecha del gasto');
+      toast.error(t('toast.accountsPayable.expenseDateRequired'));
       return;
     }
     try {
@@ -300,43 +314,41 @@ const AccountsPayable: React.FC = () => {
         paymentDate: editPayDate,
         bankAccountId: editPayBankAccountId ? parseInt(editPayBankAccountId, 10) : null,
       });
-      toast.success('Abono actualizado; el gasto fue sincronizado');
+      toast.success(t('toast.accountsPayable.paymentUpdatedSync'));
       setPaymentBeingEdited(null);
       await reloadHistoryAndAccounts();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al actualizar abono');
+      toast.error(error.response?.data?.message || t('toast.accountsPayable.paymentUpdateError'));
     }
   };
 
   const handleDeletePayment = async (p: AccountPaymentRow) => {
     if (!historyTarget) return;
     if (
-      !window.confirm(
-        '¿Eliminar este abono? Se eliminará el gasto vinculado en el módulo de Gastos y se actualizará el saldo de la cuenta.'
-      )
+      !window.confirm(t('confirm.deletePayablePayment'))
     ) {
       return;
     }
     try {
       await api.delete(`/accounts-payable/${historyTarget.id}/payments/${p.id}`);
-      toast.success('Abono eliminado');
+      toast.success(t('toast.accountsPayable.paymentDeleted'));
       await reloadHistoryAndAccounts();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al eliminar abono');
+      toast.error(error.response?.data?.message || t('toast.accountsPayable.paymentDeleteError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar esta cuenta por pagar?')) {
+    if (!window.confirm(t('confirm.deletePayableAccount'))) {
       return;
     }
 
     try {
       await api.delete(`/accounts-payable/${id}`);
-      toast.success('Cuenta por pagar eliminada');
+      toast.success(t('toast.accountsPayable.deleted'));
       fetchAccounts();
     } catch {
-      toast.error('Error al eliminar cuenta por pagar');
+      toast.error(t('toast.accountsPayable.deleteError'));
     }
   };
 
@@ -344,7 +356,7 @@ const AccountsPayable: React.FC = () => {
     setFormData({
       description: '',
       amount: '',
-      currency: 'DOP',
+      currency: defaultTransactionCurrency,
       dueDate: '',
       category: '',
       notes: '',
@@ -417,20 +429,27 @@ const AccountsPayable: React.FC = () => {
     return orderedFiltered.slice(start, start + apPageSize);
   }, [orderedFiltered, apPageSafe, apPageSize]);
   const apListStart = (apPageSafe - 1) * apPageSize;
-  const listDnd = useListOrderPageDnd(pagedAccountsPayable, apListStart, orderedFiltered, commitApOrder);
+  const listDnd = useListOrderPageDnd(pagedAccountsPayable, apListStart, orderedFiltered, commitApOrder, {
+    ghostLabel: (a) => a.description,
+  });
 
   const payableSummaryKpis = useMemo(() => {
-    let dop = 0;
-    let usd = 0;
+    const p = primaryCurrency;
+    const s = secondaryCurrency;
+    let primaryTotal = 0;
+    let secondaryTotal = 0;
     for (const a of orderedFiltered) {
       const rem = Math.max(0, a.amount - (a.totalPaid ?? 0));
       if (a.status === 'PAID' || rem <= 0.0001) continue;
-      const c = String(a.currency || 'DOP').toUpperCase();
-      if (c === 'USD') usd += rem;
-      else dop += rem;
+      const c = String(a.currency || p).toUpperCase();
+      if (c === p) primaryTotal += rem;
+      else if (c === s) secondaryTotal += rem;
+      else if (c === 'DOP') primaryTotal += rem;
+      else if (c === 'USD') secondaryTotal += rem;
+      else primaryTotal += rem;
     }
-    return { count: orderedFiltered.length, dop, usd };
-  }, [orderedFiltered]);
+    return { count: orderedFiltered.length, primaryTotal, secondaryTotal };
+  }, [orderedFiltered, primaryCurrency, secondaryCurrency]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -446,11 +465,11 @@ const AccountsPayable: React.FC = () => {
   const getStatusText = (status: string) => {
     switch (status) {
       case 'PAID':
-        return 'Pagada';
+        return t('pages.accountsPayable.statusPaid');
       case 'OVERDUE':
-        return 'Vencida';
+        return t('pages.accountsPayable.statusOverdue');
       default:
-        return 'Pendiente';
+        return t('pages.accountsPayable.statusPending');
     }
   };
 
@@ -465,8 +484,8 @@ const AccountsPayable: React.FC = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Cuentas por Pagar"
-        subtitle="Gestiona tus cuentas por pagar"
+        title={t('pages.accountsPayable.title')}
+        subtitle={t('pages.accountsPayable.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -479,7 +498,7 @@ const AccountsPayable: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial text-sm sm:text-base"
             >
               <Plus size={20} />
-              Nueva Cuenta por Pagar
+              {t('pages.accountsPayable.newAccountButton')}
             </button>
           </div>
         }
@@ -489,19 +508,23 @@ const AccountsPayable: React.FC = () => {
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pendiente por pagar (DOP)</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.accountsPayable.summaryOutstandingToPay', { currency: primaryCurrency })}
+              </p>
               <p className="text-2xl font-bold text-white">
-                {payableSummaryKpis.dop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                {fc(payableSummaryKpis.primaryTotal, primaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Pendiente por pagar (USD)</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.accountsPayable.summaryOutstandingToPay', { currency: secondaryCurrency })}
+              </p>
               <p className="text-2xl font-bold text-white">
-                {payableSummaryKpis.usd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD
+                {fc(payableSummaryKpis.secondaryTotal, secondaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Cuentas</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.accountsPayable.summaryAccountCount')}</p>
               <p className="text-2xl font-bold text-white">{payableSummaryKpis.count}</p>
             </div>
           </div>
@@ -515,7 +538,7 @@ const AccountsPayable: React.FC = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar..."
+              placeholder={t('common.actions.search') + '...'}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -526,10 +549,10 @@ const AccountsPayable: React.FC = () => {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
-            <option value="">Todos los estados</option>
-            <option value="PENDING">Pendiente</option>
-            <option value="PAID">Pagada</option>
-            <option value="OVERDUE">Vencida</option>
+            <option value="">{t('pages.accountsPayable.filterAllStatuses')}</option>
+            <option value="PENDING">{t('pages.accountsPayable.statusPending')}</option>
+            <option value="PAID">{t('pages.accountsPayable.statusPaid')}</option>
+            <option value="OVERDUE">{t('pages.accountsPayable.statusOverdue')}</option>
           </select>
         </div>
       </div>
@@ -537,7 +560,7 @@ const AccountsPayable: React.FC = () => {
       {/* Accounts List */}
       {orderedFiltered.length === 0 ? (
         <div className="card-view text-center py-12 sm:py-16">
-          <p className="text-dark-400">No hay cuentas por pagar</p>
+          <p className="text-dark-400">{t('pages.accountsPayable.emptyState')}</p>
         </div>
       ) : (
         <>
@@ -553,12 +576,16 @@ const AccountsPayable: React.FC = () => {
                   key={account.id}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  onDragOver={listDnd.onDragOver}
-                  onDrop={listDnd.onDrop(account.id)}
+                  {...listDnd.droppableAttr(account.id)}
                   className={[
                     LIST_CARD_SHELL,
                     listCardAccentPayable(account.status),
-                    listDnd.dragId === account.id ? 'opacity-60' : '',
+                    listDnd.dragId === account.id ? 'opacity-[0.22]' : '',
+                    listDnd.dragId !== null &&
+                    listDnd.pointerOverItemId === account.id &&
+                    listDnd.dragId !== account.id
+                      ? 'ring-2 ring-primary-400/75 z-[1]'
+                      : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
@@ -568,7 +595,7 @@ const AccountsPayable: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Calendar className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                          Por pagar
+                          {t('pages.accountsPayable.badgeToPay')}
                         </span>
                         <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${getStatusColor(account.status)}`}>
                           {getStatusText(account.status)}
@@ -584,8 +611,7 @@ const AccountsPayable: React.FC = () => {
                     <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={account.id}
-                        onDragStart={listDnd.onDragStart}
-                        onDragEnd={listDnd.onDragEnd}
+                        gripBinder={listDnd.gripBinder}
                         disabled={pagedAccountsPayable.length < 2}
                       />
                       {canAct && (
@@ -594,8 +620,8 @@ const AccountsPayable: React.FC = () => {
                             type="button"
                             onClick={() => openPayModal(account)}
                             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-emerald-400 transition-colors hover:bg-emerald-500/15"
-                            title="Marcar como pagada (fecha del gasto)"
-                            aria-label="Marcar como pagada"
+                            title={t('pages.accountsPayable.markPaidTitle')}
+                            aria-label={t('pages.accountsPayable.markPaidAria')}
                           >
                             <CheckCircle className="h-5 w-5" />
                           </button>
@@ -603,8 +629,8 @@ const AccountsPayable: React.FC = () => {
                             type="button"
                             onClick={() => openAbonoModal(account)}
                             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-sky-400 transition-colors hover:bg-sky-500/15"
-                            title="Agregar abono"
-                            aria-label="Agregar abono"
+                            title={t('pages.accountsPayable.addPayment')}
+                            aria-label={t('pages.accountsPayable.addPayment')}
                           >
                             <Banknote className="h-5 w-5" />
                           </button>
@@ -614,17 +640,17 @@ const AccountsPayable: React.FC = () => {
                         type="button"
                         onClick={() => openHistoryModal(account)}
                         className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-amber-400 transition-colors hover:bg-amber-500/15"
-                        title="Historial de abonos"
-                        aria-label="Historial de abonos"
+                        title={t('pages.accountsPayable.historyTitle')}
+                        aria-label={t('pages.accountsPayable.historyAria')}
                       >
                         <History className="h-5 w-5" />
                       </button>
                       {account.status !== 'PAID' && (
-                        <button type="button" onClick={() => openEditModal(account)} className={listCardBtnEdit} title="Editar" aria-label="Editar">
+                        <button type="button" onClick={() => openEditModal(account)} className={listCardBtnEdit} title={t('common.actions.edit')} aria-label={t('common.actions.edit')}>
                           <Edit className="h-5 w-5" />
                         </button>
                       )}
-                      <button type="button" onClick={() => handleDelete(account.id)} className={listCardBtnDanger} title="Eliminar" aria-label="Eliminar">
+                      <button type="button" onClick={() => handleDelete(account.id)} className={listCardBtnDanger} title={t('common.actions.delete')} aria-label={t('common.actions.delete')}>
                         <Trash2 className="h-5 w-5" />
                       </button>
                     </div>
@@ -634,9 +660,9 @@ const AccountsPayable: React.FC = () => {
                     {account.status !== 'PAID' && (
                       <div className="space-y-2 rounded-xl border border-dark-600/50 bg-dark-900/25 px-3 py-2.5">
                         <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
-                          <span className="text-dark-400">Abonado</span>
+                          <span className="text-dark-400">{t('pages.accountsPayable.progressPaidLabel')}</span>
                           <span className="tabular-nums font-semibold text-white">
-                            {totalPaid.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {account.currency}
+                            {fc(totalPaid, account.currency)}
                             <span className="ml-1 text-xs font-normal text-dark-500">({pct.toFixed(1)}%)</span>
                           </span>
                         </div>
@@ -647,9 +673,9 @@ const AccountsPayable: React.FC = () => {
                           />
                         </div>
                         <p className="text-xs text-dark-500">
-                          Pendiente:{' '}
+                          {t('pages.accountsPayable.remainingShort')}{' '}
                           <span className="tabular-nums text-dark-300">
-                            {remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })} {account.currency}
+                            {fc(remaining, account.currency)}
                           </span>
                         </p>
                       </div>
@@ -658,19 +684,24 @@ const AccountsPayable: React.FC = () => {
                     <div className="metrics-cq">
                       <div className="metrics-row-2">
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Monto</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.accountsPayable.metricAmount')}
+                        </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
-                          {account.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{account.currency}</span>
+                          {fc(account.amount, account.currency)}
                         </p>
                       </div>
                       <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Vencimiento</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.accountsPayable.metricDueDate')}
+                        </p>
                         <p className="mt-0.5 text-sm font-semibold text-white sm:text-base">{formatDateDdMmYyyy(account.dueDate)}</p>
                       </div>
                       {account.paidDate && (
                         <div className="metrics-cell-span-2 rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
-                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Último pago / cierre</p>
+                          <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                            {t('pages.accountsPayable.metricLastPaymentClose')}
+                          </p>
                           <p className="mt-0.5 text-sm font-semibold text-emerald-400 sm:text-base">{formatDateDdMmYyyy(account.paidDate)}</p>
                         </div>
                       )}
@@ -678,7 +709,7 @@ const AccountsPayable: React.FC = () => {
                   </div>
                     {account.notes && (
                       <div className="rounded-xl border border-dark-600/50 bg-dark-900/20 px-3 py-2 text-sm">
-                        <span className="text-dark-500">Notas:</span>
+                        <span className="text-dark-500">{t('pages.accountsPayable.notesPrefix')}</span>
                         <NotesHtmlPreview html={account.notes} className="mt-1 text-dark-300" />
                       </div>
                     )}
@@ -687,6 +718,7 @@ const AccountsPayable: React.FC = () => {
               );
             })}
           </div>
+          <ListOrderDragGhostPortal ghost={listDnd.dragGhost} />
           <TablePagination
             className="mt-4 sm:mt-5"
             currentPage={apPageSafe}
@@ -694,7 +726,7 @@ const AccountsPayable: React.FC = () => {
             totalItems={orderedFiltered.length}
             itemsPerPage={apPageSize}
             onPageChange={setListPage}
-            itemLabel="cuentas"
+            itemLabel={t('pages.accountsPayable.itemsLabel')}
             variant="card"
             pageSizeOptions={apPageSizeOptions}
             onPageSizeChange={setApPageSize}
@@ -717,7 +749,9 @@ const AccountsPayable: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="accounts-payable-modal-title" className="text-xl font-semibold text-white">
-                {editingAccount ? 'Editar Cuenta por Pagar' : 'Nueva Cuenta por Pagar'}
+                {editingAccount
+                  ? t('pages.accountsPayable.modalEditTitle')
+                  : t('pages.accountsPayable.modalNewTitle')}
               </h2>
               <button onClick={closeAllModals} className="text-dark-400 hover:text-white" type="button">
                 <X size={24} />
@@ -726,7 +760,9 @@ const AccountsPayable: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Descripción *</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.accountsPayable.fieldDescriptionRequired')}
+                </label>
                 <input
                   type="text"
                   value={formData.description}
@@ -738,7 +774,9 @@ const AccountsPayable: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Monto *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    {t('pages.accountsPayable.fieldAmountRequired')}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -749,20 +787,27 @@ const AccountsPayable: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Moneda *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    {t('pages.accountsPayable.fieldCurrencyRequired')}
+                  </label>
                   <select
                     value={formData.currency}
                     onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                     className="input"
                   >
-                    <option value="DOP">DOP</option>
-                    <option value="USD">USD</option>
+                    {transactionCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {currencySelectLabel(code)}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Fecha de Vencimiento *</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.accountsPayable.fieldDueDateRequired')}
+                </label>
                 <input
                   type="date"
                   value={formData.dueDate}
@@ -773,14 +818,18 @@ const AccountsPayable: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Categoría</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.accountsPayable.fieldCategory')}
+                </label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="input"
                 >
                   <option value="">
-                    {categories.length === 0 ? 'Sin categorías (créalas en Categorías)' : 'Sin categoría'}
+                    {categories.length === 0
+                      ? t('pages.accountsPayable.categoryEmptyHint')
+                      : t('pages.accountsPayable.categoryNone')}
                   </option>
                   {formData.category && !categories.some((c) => c.name === formData.category) && (
                     <option value={formData.category}>{formData.category}</option>
@@ -794,7 +843,9 @@ const AccountsPayable: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Notas</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.accountsPayable.fieldNotes')}
+                </label>
                 <textarea
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
@@ -805,10 +856,10 @@ const AccountsPayable: React.FC = () => {
 
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  {editingAccount ? 'Actualizar' : 'Crear'}
+                  {editingAccount ? t('pages.accountsPayable.submitUpdate') : t('pages.accountsPayable.submitCreate')}
                 </button>
                 <button type="button" onClick={closeAllModals} className="btn-secondary flex-1">
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -831,28 +882,28 @@ const AccountsPayable: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="ap-pay-modal-title" className="text-xl font-semibold text-white">
-                Marcar como pagada
+                {t('pages.accountsPayable.markPaidModalTitle')}
               </h2>
               <button type="button" onClick={() => setShowPayModal(false)} className="text-dark-400 hover:text-white">
                 <X size={24} />
               </button>
             </div>
             <p className="text-sm text-dark-400 mb-4">
-              Se registrará un gasto por el saldo pendiente (
-              {(payTarget.amount - (payTarget.totalPaid ?? 0)).toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-              {payTarget.currency}) en la fecha que elijas.
+              {t('pages.accountsPayable.markPaidExplanation', {
+                amount: fc(payTarget.amount - (payTarget.totalPaid ?? 0), payTarget.currency),
+              })}
             </p>
             <form onSubmit={submitPay} className="space-y-4">
               <div>
-                <label className="label">Fecha del gasto *</label>
+                <label className="label">{t('pages.accountsPayable.fieldExpenseDateRequired')}</label>
                 <input type="date" className="input" value={payDate} onChange={(e) => setPayDate(e.target.value)} required />
               </div>
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Confirmar pago
+                  {t('pages.accountsPayable.confirmMarkPaid')}
                 </button>
                 <button type="button" className="btn-secondary flex-1" onClick={() => setShowPayModal(false)}>
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -875,20 +926,20 @@ const AccountsPayable: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="ap-abono-modal-title" className="text-xl font-semibold text-white">
-                Agregar abono
+                {t('pages.accountsPayable.addPayment')}
               </h2>
               <button type="button" onClick={() => setShowAbonoModal(false)} className="text-dark-400 hover:text-white">
                 <X size={24} />
               </button>
             </div>
             <p className="text-sm text-dark-400 mb-4">
-              Máximo:{' '}
-              {(abonoTarget.amount - (abonoTarget.totalPaid ?? 0)).toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-              {abonoTarget.currency}
+              {t('pages.accountsPayable.maxRemaining', {
+                amount: fc(abonoTarget.amount - (abonoTarget.totalPaid ?? 0), abonoTarget.currency),
+              })}
             </p>
             <form onSubmit={submitAbono} className="space-y-4">
               <div>
-                <label className="label">Monto del abono *</label>
+                <label className="label">{t('pages.accountsPayable.fieldInstallmentAmountRequired')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -900,17 +951,17 @@ const AccountsPayable: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Fecha del gasto *</label>
+                <label className="label">{t('pages.accountsPayable.fieldExpenseDateRequired')}</label>
                 <input type="date" className="input" value={abonoDate} onChange={(e) => setAbonoDate(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.accountsPayable.sourceAccountOptional')}</label>
                 <select
                   className="input w-full"
                   value={abonoBankAccountId}
                   onChange={(e) => setAbonoBankAccountId(e.target.value)}
                 >
-                  <option value="">Sin cuenta — no descuenta saldo</option>
+                  <option value="">{t('pages.accountsPayable.sourceAccountNoBalance')}</option>
                   {accountsForApAbono.map((a: BankAccount) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -921,10 +972,10 @@ const AccountsPayable: React.FC = () => {
               </div>
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Registrar abono
+                  {t('pages.accountsPayable.registerInstallment')}
                 </button>
                 <button type="button" className="btn-secondary flex-1" onClick={() => setShowAbonoModal(false)}>
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -948,23 +999,25 @@ const AccountsPayable: React.FC = () => {
             <div className="border-b border-dark-700/70 pb-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">Historial de abonos</p>
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">
+                    {t('pages.accountsPayable.historyTitle')}
+                  </p>
                   <h2 id="ap-history-modal-title" className="mt-1 text-lg font-semibold leading-snug text-white sm:text-xl">
                     <span className="line-clamp-3 break-words">{historyTarget.description}</span>
                   </h2>
                   {!historyLoading && historyPayments.length > 0 && (
                     <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-dark-400">
                       <span className="tabular-nums font-semibold text-primary-300">
-                        {historyPayments
-                          .reduce((acc, row) => acc + row.amount, 0)
-                          .toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                        {historyTarget.currency}
+                        {fc(
+                          historyPayments.reduce((acc, row) => acc + row.amount, 0),
+                          historyTarget.currency
+                        )}
                       </span>
                       <span className="text-dark-600" aria-hidden>
                         ·
                       </span>
                       <span>
-                        {historyPayments.length} abono{historyPayments.length !== 1 ? 's' : ''}
+                        {t('pages.accountsPayable.paymentInstallments', { count: historyPayments.length })}
                       </span>
                     </p>
                   )}
@@ -973,7 +1026,7 @@ const AccountsPayable: React.FC = () => {
                   type="button"
                   onClick={() => setShowHistoryModal(false)}
                   className="shrink-0 rounded-lg p-2 text-dark-400 transition-colors hover:bg-dark-700/60 hover:text-white"
-                  aria-label="Cerrar"
+                  aria-label={t('common.actions.close')}
                 >
                   <X size={22} />
                 </button>
@@ -982,13 +1035,13 @@ const AccountsPayable: React.FC = () => {
 
             <div className="mt-4">
               {historyLoading ? (
-                <p className="py-12 text-center text-dark-400">Cargando…</p>
+                <p className="py-12 text-center text-dark-400">{t('common.actions.loading')}</p>
               ) : historyPayments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-dark-600/60 bg-dark-900/25 px-6 py-12 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-dark-800/90 text-dark-500 ring-1 ring-white/5">
                     <Banknote className="h-6 w-6" aria-hidden />
                   </div>
-                  <p className="max-w-[20rem] text-sm text-dark-400">No hay abonos registrados para esta cuenta.</p>
+                  <p className="max-w-[20rem] text-sm text-dark-400">{t('pages.accountsPayable.noPayments')}</p>
                 </div>
               ) : (
                 <ul className="space-y-3">
@@ -1006,7 +1059,9 @@ const AccountsPayable: React.FC = () => {
                             <Calendar className="h-[1.1rem] w-[1.1rem]" />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">Fecha del gasto</p>
+                            <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500">
+                              {t('pages.accountsPayable.fieldExpenseDateShort')}
+                            </p>
                             <p className="mt-0.5 text-sm font-semibold tabular-nums text-white sm:text-base">
                               {formatDateDdMmYyyy(p.paymentDate)}
                             </p>
@@ -1014,18 +1069,19 @@ const AccountsPayable: React.FC = () => {
                         </div>
                         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dark-700/50 pt-3 sm:border-t-0 sm:pt-0 sm:pl-2">
                           <p className="text-left sm:text-right">
-                            <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500 sm:hidden">Monto</span>
+                            <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-dark-500 sm:hidden">
+                              {t('pages.accountsPayable.metricAmount')}
+                            </span>
                             <span className="block text-lg font-bold tabular-nums leading-tight text-white sm:text-xl">
-                              {p.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                              <span className="text-sm font-normal text-dark-400">{historyTarget.currency}</span>
+                              {fc(p.amount, historyTarget.currency)}
                             </span>
                           </p>
                           <div className="flex shrink-0 items-center justify-end gap-0.5">
                             <button
                               type="button"
                               className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl p-1.5 ${listCardBtnEdit}`}
-                              title="Editar abono"
-                              aria-label="Editar abono"
+                              title={t('pages.accountsPayable.editPayment')}
+                              aria-label={t('pages.accountsPayable.editPayment')}
                               onClick={() => openEditPaymentModal(p)}
                             >
                               <Edit className="h-[18px] w-[18px]" />
@@ -1033,8 +1089,8 @@ const AccountsPayable: React.FC = () => {
                             <button
                               type="button"
                               className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl p-1.5 ${listCardBtnDanger}`}
-                              title="Eliminar abono"
-                              aria-label="Eliminar abono"
+                              title={t('pages.accountsPayable.deletePayment')}
+                              aria-label={t('pages.accountsPayable.deletePayment')}
                               onClick={() => handleDeletePayment(p)}
                             >
                               <Trash2 className="h-[18px] w-[18px]" />
@@ -1064,11 +1120,11 @@ const AccountsPayable: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="ap-edit-payment-title" className="text-xl font-semibold text-white mb-4">
-              Editar abono
+              {t('pages.accountsPayable.editPayment')}
             </h2>
             <form onSubmit={submitEditPayment} className="space-y-4">
               <div>
-                <label className="label">Monto *</label>
+                <label className="label">{t('pages.accountsPayable.fieldAmountRequired')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -1080,7 +1136,7 @@ const AccountsPayable: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Fecha del gasto *</label>
+                <label className="label">{t('pages.accountsPayable.fieldExpenseDateRequired')}</label>
                 <input
                   type="date"
                   className="input w-full"
@@ -1090,13 +1146,13 @@ const AccountsPayable: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.accountsPayable.sourceAccountOptional')}</label>
                 <select
                   className="input w-full"
                   value={editPayBankAccountId}
                   onChange={(e) => setEditPayBankAccountId(e.target.value)}
                 >
-                  <option value="">Sin cuenta</option>
+                  <option value="">{t('pages.accountsPayable.sourceAccountNone')}</option>
                   {accountsForApEditPayment.map((a: BankAccount) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -1107,14 +1163,14 @@ const AccountsPayable: React.FC = () => {
               </div>
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Guardar
+                  {t('common.actions.save')}
                 </button>
                 <button
                   type="button"
                   className="btn-secondary flex-1"
                   onClick={() => setPaymentBeingEdited(null)}
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>

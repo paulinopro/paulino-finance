@@ -1,0 +1,3 @@
+/*! For license information please see 16634.8d121656.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[16634],{16634(e,n,a){a.r(n),a.d(n,{default:()=>t});const t=(0,a(21639).A)("Thermometer",[["path",{d:"M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z",key:"17jzev"}]])}}]);
+//# sourceMappingURL=16634.8d121656.chunk.js.map

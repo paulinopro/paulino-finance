@@ -1,0 +1,77 @@
+{
+  "kmSuffix": "km",
+  "perMonthSuffix": "/Monat",
+  "savingEllipsis": "Wird gespeichert…",
+  "ellipsis": "…",
+  "emptyDash": "—",
+  "invalidDate": "Ungültiges Datum",
+  "actions": {
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "search": "Suchen",
+    "loading": "Wird geladen…",
+    "registerPrincipalPayment": "Tilgungszahlung erfassen",
+    "registerPayment": "Zahlung erfassen",
+    "actions": "Aktionen",
+    "create": "Erstellen",
+    "apply": "Anwenden",
+    "history": "Verlauf"
+  },
+  "pagination": {
+    "compactSummary": "{{start}}–{{end}} von {{total}}",
+    "unreadSummary": "{{total}} ungelesen",
+    "showingSummary": "Zeige {{start}}–{{end}} von {{total}} {{itemLabel}}",
+    "perPage": "Pro Seite",
+    "perPageAria": "Einträge pro Seite",
+    "prevPageAria": "Vorherige Seite",
+    "nextPageAria": "Nächste Seite",
+    "prev": "Zurück",
+    "next": "Weiter",
+    "pagesAria": "Seiten"
+  },
+  "reorder": {
+    "title": "Neu anordnen",
+    "aria": "Neu anordnen: halten und auf eine andere Karte ziehen (Touch oder Maus)"
+  },
+  "adminBreadcrumbs": {
+    "aria": "Brotkrumen",
+    "console": "Konsole",
+    "users": "Benutzer",
+    "audit": "Audit",
+    "status": "Status",
+    "plans": "Pläne (Produkt)",
+    "settings": "Einstellungen",
+    "overview": "Überblick",
+    "userNumber": "Benutzer #{{id}}"
+  },
+  "installPrompt": {
+    "regionAria": "App installieren",
+    "title": "Paulino Finance installieren",
+    "subtitle": "Greife schneller vom Startbildschirm darauf zu, wie bei einer App.",
+    "install": "Installieren",
+    "notNow": "Jetzt nicht",
+    "iosTitle": "Zum Startbildschirm hinzufügen",
+    "iosPrefix": "In Safari tippe auf",
+    "iosShare": "Teilen",
+    "iosAndChoose": "und wähle",
+    "iosAddToHome": "Zum Startbildschirm",
+    "gotIt": "Verstanden",
+    "closeAria": "Installationshinweis schließen"
+  },
+  "pwaUpdate": {
+    "newVersion": "Eine neue Version der App ist verfügbar.",
+    "update": "Aktualisieren"
+  },
+  "offlineBanner": {
+    "message": "Sie sind offline. Daten laden eventuell erst, wenn Sie wieder online sind."
+  },
+  "iconSelect": {
+    "searchPlaceholder": "Symbol suchen (z. B. Wallet, Zap, Home)…",
+    "loading": "Symbole werden geladen…",
+    "optionsCount": "{{count}} Optionen",
+    "colorSwatchAria": "Farbe {{color}}"
+  }
+}

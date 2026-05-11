@@ -1,0 +1,3 @@
+/*! For license information please see 79661.afd12829.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[79661],{79661(n,e,a){a.r(e),a.d(e,{default:()=>t});const t=(0,a(21639).A)("GanttChart",[["path",{d:"M8 6h10",key:"9lnwnk"}],["path",{d:"M6 12h9",key:"1g9pqf"}],["path",{d:"M11 18h7",key:"c8dzvl"}]])}}]);
+//# sourceMappingURL=79661.afd12829.chunk.js.map

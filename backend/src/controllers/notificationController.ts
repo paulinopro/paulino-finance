@@ -3,6 +3,8 @@ import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import {
   getVapidPublicKey as getVapidPublicKeyFromEnv,
+  sendPushForNotification,
+  isWebPushConfigured,
 } from '../services/webPushService';
 
 export const getNotifications = async (req: AuthRequest, res: Response) => {
@@ -19,6 +21,11 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
 
     if (unreadOnly === 'true') {
       whereClause += ' AND is_read = false';
+    }
+
+    const readOnly = req.query.readOnly;
+    if (readOnly === 'true' && unreadOnly !== 'true') {
+      whereClause += ' AND is_read = true';
     }
 
     if (type && type !== 'all') {
@@ -67,6 +74,44 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Get notifications error:', error);
     res.status(500).json({ message: 'Error fetching notifications', error: error.message });
+  }
+};
+
+export const getNotificationById = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const notificationId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(notificationId)) {
+      return res.status(400).json({ message: 'Invalid notification id' });
+    }
+    const result = await query(
+      `SELECT id, type, title, message, related_id, related_type, is_read, created_at
+       FROM notifications
+       WHERE id = $1 AND user_id = $2`,
+      [notificationId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      success: true,
+      notification: {
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        message: row.message,
+        relatedId: row.related_id,
+        relatedType: row.related_type,
+        isRead: row.is_read,
+        createdAt: row.created_at,
+      },
+    });
+  } catch (error: any) {
+    console.error('Get notification by id error:', error);
+    res.status(500).json({ message: 'Error fetching notification', error: error.message });
   }
 };
 
@@ -282,6 +327,71 @@ export const unsubscribePush = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('unsubscribePush error:', error);
     res.status(500).json({ message: 'Error al eliminar suscripción', error: error.message });
+  }
+};
+
+/** Prueba Web Push sin Telegram: requiere VAPID y al menos una fila en push_subscriptions. */
+export const testPushNotification = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    if (!isWebPushConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message:
+          'Web Push no está activo en el servidor. Configura VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY en el entorno del backend.',
+      });
+    }
+
+    const subsResult = await query(
+      `SELECT COUNT(*)::int AS c FROM push_subscriptions WHERE user_id = $1`,
+      [userId]
+    );
+    const subCount = Number(subsResult.rows[0]?.c ?? 0);
+    if (!Number.isFinite(subCount) || subCount < 1) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'No hay suscripción push para tu cuenta. En Configuración → Notificaciones, con permiso ya concedido, pulsa «Registrar o actualizar push en este dispositivo» y luego vuelve a probar.',
+      });
+    }
+
+    const title = 'Prueba push — Paulino Finance';
+    const message =
+      '<p>Si ves esta notificación en el sistema, Web Push y VAPID están bien configurados.</p>';
+
+    const ins = await query(
+      `INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
+       VALUES ($1, 'SYSTEM', $2, $3, NULL, NULL)
+       RETURNING id`,
+      [userId, title, message]
+    );
+    const nid = ins.rows[0]?.id as number | undefined;
+    if (nid == null) {
+      return res.status(500).json({
+        success: false,
+        message: 'No se pudo registrar el aviso de prueba',
+      });
+    }
+
+    await sendPushForNotification(userId, {
+      title,
+      message,
+      notificationId: nid,
+    });
+
+    res.json({
+      success: true,
+      message:
+        'Push de prueba enviado. Revisa el dispositivo; también verás una entrada «Sistema» en el historial de notificaciones.',
+    });
+  } catch (error: any) {
+    console.error('testPushNotification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al enviar push de prueba',
+      error: error.message,
+    });
   }
 };
 

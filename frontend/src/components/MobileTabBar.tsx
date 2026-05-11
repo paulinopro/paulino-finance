@@ -1,11 +1,16 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { LucideIcon } from 'lucide-react';
 import { LayoutDashboard, Wallet, Calendar, FileText, Menu } from 'lucide-react';
 
 type TabDef = {
   to: string;
-  label: string;
+  navKey:
+    | 'summary'
+    | 'accounts'
+    | 'calendar'
+    | 'reports';
   module: string;
   icon: LucideIcon;
   isActive: (pathname: string) => boolean;
@@ -15,40 +20,6 @@ type TabDef = {
 function firstPathSegment(pathname: string): string {
   return pathname.split('/').filter(Boolean)[0] ?? '';
 }
-
-const TABS: TabDef[] = [
-  {
-    to: '/',
-    label: 'Resumen',
-    module: 'dashboard',
-    icon: LayoutDashboard,
-    isActive: (p) => {
-      const s = firstPathSegment(p);
-      return s !== 'accounts' && s !== 'calendar' && s !== 'reports';
-    },
-  },
-  {
-    to: '/accounts',
-    label: 'Cuentas',
-    module: 'accounts',
-    icon: Wallet,
-    isActive: (p) => firstPathSegment(p) === 'accounts',
-  },
-  {
-    to: '/calendar',
-    label: 'Calendario',
-    module: 'calendar',
-    icon: Calendar,
-    isActive: (p) => firstPathSegment(p) === 'calendar',
-  },
-  {
-    to: '/reports',
-    label: 'Reportes',
-    module: 'reports',
-    icon: FileText,
-    isActive: (p) => firstPathSegment(p) === 'reports',
-  },
-];
 
 export interface MobileTabBarProps {
   hasModule: (key: string) => boolean;
@@ -63,13 +34,52 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({
   onTabLinkPress,
 }) => {
   const { pathname } = useLocation();
-  const visible = TABS.filter((t) => hasModule(t.module));
+  const { t } = useTranslation();
+
+  const TABS = useMemo<TabDef[]>(
+    () => [
+      {
+        to: '/',
+        navKey: 'summary',
+        module: 'dashboard',
+        icon: LayoutDashboard,
+        isActive: (p) => {
+          const s = firstPathSegment(p);
+          return s !== 'accounts' && s !== 'calendar' && s !== 'reports';
+        },
+      },
+      {
+        to: '/accounts',
+        navKey: 'accounts',
+        module: 'accounts',
+        icon: Wallet,
+        isActive: (p) => firstPathSegment(p) === 'accounts',
+      },
+      {
+        to: '/calendar',
+        navKey: 'calendar',
+        module: 'calendar',
+        icon: Calendar,
+        isActive: (p) => firstPathSegment(p) === 'calendar',
+      },
+      {
+        to: '/reports',
+        navKey: 'reports',
+        module: 'reports',
+        icon: FileText,
+        isActive: (p) => firstPathSegment(p) === 'reports',
+      },
+    ],
+    []
+  );
+
+  const visible = TABS.filter((tab) => hasModule(tab.module));
 
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex items-stretch justify-around gap-0 border-t border-dark-700 bg-dark-800/95 backdrop-blur-sm pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.25)]"
       role="navigation"
-      aria-label="Navegación principal"
+      aria-label={t('nav.bottomAria')}
     >
       {visible.map((tab) => {
         const active = tab.isActive(pathname);
@@ -85,7 +95,7 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({
             aria-current={active ? 'page' : undefined}
           >
             <Icon size={22} className="shrink-0" aria-hidden />
-            <span className="truncate leading-tight">{tab.label}</span>
+            <span className="truncate leading-tight">{t(`nav.${tab.navKey}`)}</span>
           </Link>
         );
       })}
@@ -93,10 +103,10 @@ const MobileTabBar: React.FC<MobileTabBarProps> = ({
         type="button"
         onClick={onMenuPress}
         className="flex min-h-[48px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[11px] font-medium text-dark-400 hover:text-dark-200"
-        aria-label="Abrir menú lateral"
+        aria-label={t('layout.showSidebarAria')}
       >
         <Menu size={22} className="shrink-0" aria-hidden />
-        <span className="leading-tight">Menú</span>
+        <span className="leading-tight">{t('nav.mobileMenu')}</span>
       </button>
     </nav>
   );

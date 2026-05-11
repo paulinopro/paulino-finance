@@ -10,7 +10,7 @@ type Variant = 'full' | 'compact';
 type Props = {
   title: string;
   message: string;
-  /** Historial (full) vs campana (compact). */
+  /** Historial (`full`) o tarjetas en historial (`compact`). El campanario usa `notificationBellPreview` + `NotificationBellListRow`. */
   variant?: Variant;
   className?: string;
 };

@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
@@ -15,6 +17,7 @@ import PageHeader from '../components/PageHeader';
 import { usePersistedIdOrder } from '../hooks/usePersistedIdOrder';
 import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
+import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
@@ -35,7 +38,16 @@ interface Budget {
 }
 
 const Budgets: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const {
+    formatCurrency: fc,
+    currencySelectLabel,
+    defaultTransactionCurrency,
+    transactionCurrencyOptions,
+    primaryCurrency,
+    secondaryCurrency,
+  } = useIntlFormatting();
   const { pageSize: budgetPageSize, setPageSize: setBudgetPageSize, pageSizeOptions: budgetPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:budgets', TABLE_PAGE_SIZE_BUDGETS);
   const { visible: summaryBarVisible, toggle: toggleSummaryBar } = usePersistedSummaryBarVisible(
@@ -54,7 +66,7 @@ const Budgets: React.FC = () => {
     name: '',
     category: '',
     amount: '',
-    currency: 'DOP',
+    currency: defaultTransactionCurrency,
     periodType: 'MONTHLY' as 'MONTHLY' | 'YEARLY',
     periodMonth: new Date().getMonth() + 1,
     periodYear: new Date().getFullYear(),
@@ -80,11 +92,11 @@ const Budgets: React.FC = () => {
       const response = await api.get('/budgets', { params });
       setBudgets(response.data.budgets);
     } catch {
-      toast.error('Error al cargar presupuestos');
+      toast.error(t('toast.budgets.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [periodFilter]);
+  }, [periodFilter, t]);
 
   useEffect(() => {
     fetchBudgets();
@@ -101,31 +113,31 @@ const Budgets: React.FC = () => {
 
       if (editingBudget) {
         await api.put(`/budgets/${editingBudget.id}`, data);
-        toast.success('Presupuesto actualizado');
+        toast.success(t('toast.budgets.updated'));
       } else {
         await api.post('/budgets', data);
-        toast.success('Presupuesto creado');
+        toast.success(t('toast.budgets.created'));
       }
 
       setShowModal(false);
       resetForm();
       fetchBudgets();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al guardar presupuesto');
+      toast.error(error.response?.data?.message || t('toast.budgets.saveError'));
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('¿Estás seguro de que deseas eliminar este presupuesto?')) {
+    if (!window.confirm(t('confirm.deleteBudget'))) {
       return;
     }
 
     try {
       await api.delete(`/budgets/${id}`);
-      toast.success('Presupuesto eliminado');
+      toast.success(t('toast.budgets.deleted'));
       fetchBudgets();
     } catch (error: any) {
-      toast.error('Error al eliminar presupuesto');
+      toast.error(t('toast.budgets.deleteError'));
     }
   };
 
@@ -134,7 +146,7 @@ const Budgets: React.FC = () => {
       name: '',
       category: '',
       amount: '',
-      currency: 'DOP',
+      currency: defaultTransactionCurrency,
       periodType: 'MONTHLY',
       periodMonth: new Date().getMonth() + 1,
       periodYear: new Date().getFullYear(),
@@ -193,23 +205,28 @@ const Budgets: React.FC = () => {
     return orderedFiltered.slice(start, start + budgetPageSize);
   }, [orderedFiltered, budgetPageSafe, budgetPageSize]);
   const budgetListStart = (budgetPageSafe - 1) * budgetPageSize;
-  const listDnd = useListOrderPageDnd(pagedBudgets, budgetListStart, orderedFiltered, commitBudgetOrder);
+  const listDnd = useListOrderPageDnd(pagedBudgets, budgetListStart, orderedFiltered, commitBudgetOrder, {
+    ghostLabel: (b) => b.name,
+  });
 
   const budgetSummaryKpis = useMemo(() => {
-    let dop = 0;
-    let usd = 0;
+    const p = primaryCurrency;
+    const s = secondaryCurrency;
+    let primaryTotal = 0;
+    let secondaryTotal = 0;
     for (const b of orderedFiltered) {
-      const c = String(b.currency || 'DOP').toUpperCase();
-      if (c === 'USD') usd += b.amount;
-      else dop += b.amount;
+      const c = String(b.currency || p).toUpperCase();
+      if (c === p) primaryTotal += b.amount;
+      else if (c === s) secondaryTotal += b.amount;
+      else if (c === 'DOP') primaryTotal += b.amount;
+      else if (c === 'USD') secondaryTotal += b.amount;
+      else primaryTotal += b.amount;
     }
-    return { count: orderedFiltered.length, dop, usd };
-  }, [orderedFiltered]);
+    return { count: orderedFiltered.length, primaryTotal, secondaryTotal };
+  }, [orderedFiltered, primaryCurrency, secondaryCurrency]);
 
-  const monthNames = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
+  const monthName = (monthNum: number) =>
+    t(`pages.budgets.month${String(monthNum).padStart(2, '0')}`);
 
   if (loading) {
     return (
@@ -222,8 +239,8 @@ const Budgets: React.FC = () => {
   return (
     <div className="space-y-5 sm:space-y-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <PageHeader
-        title="Presupuestos"
-        subtitle="Gestiona tus presupuestos mensuales y anuales"
+        title={t('pages.budgets.title')}
+        subtitle={t('pages.budgets.subtitle')}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
             <SummaryBarToggleButton visible={summaryBarVisible} onToggle={toggleSummaryBar} />
@@ -236,7 +253,7 @@ const Budgets: React.FC = () => {
               className="btn-primary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto sm:flex-initial"
             >
               <Plus size={20} />
-              Nuevo Presupuesto
+              {t('pages.budgets.newBudgetButton')}
             </button>
           </div>
         }
@@ -246,19 +263,23 @@ const Budgets: React.FC = () => {
         <div className="card-view">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <p className="text-dark-400 text-sm mb-1">Tope planificado (DOP)</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.budgets.summaryCapPrimary', { currency: primaryCurrency })}
+              </p>
               <p className="text-2xl font-bold text-white">
-                {budgetSummaryKpis.dop.toLocaleString('es-DO', { minimumFractionDigits: 2 })} DOP
+                {fc(budgetSummaryKpis.primaryTotal, primaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Tope planificado (USD)</p>
+              <p className="text-dark-400 text-sm mb-1">
+                {t('pages.budgets.summaryCapPrimary', { currency: secondaryCurrency })}
+              </p>
               <p className="text-2xl font-bold text-white">
-                {budgetSummaryKpis.usd.toLocaleString('es-DO', { minimumFractionDigits: 2 })} USD
+                {fc(budgetSummaryKpis.secondaryTotal, secondaryCurrency)}
               </p>
             </div>
             <div>
-              <p className="text-dark-400 text-sm mb-1">Cantidad de Presupuestos</p>
+              <p className="text-dark-400 text-sm mb-1">{t('pages.budgets.summaryBudgetCount')}</p>
               <p className="text-2xl font-bold text-white">{budgetSummaryKpis.count}</p>
             </div>
           </div>
@@ -272,7 +293,7 @@ const Budgets: React.FC = () => {
             <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-dark-400" aria-hidden />
             <input
               type="search"
-              placeholder="Buscar por nombre o categoría..."
+              placeholder={t('pages.budgets.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="input w-full pl-11"
@@ -284,9 +305,9 @@ const Budgets: React.FC = () => {
             onChange={(e) => setPeriodFilter(e.target.value)}
             className="input w-full shrink-0 sm:min-w-[11rem] sm:max-w-[14rem]"
           >
-            <option value="">Todos los períodos</option>
-            <option value="MONTHLY">Mensual</option>
-            <option value="YEARLY">Anual</option>
+            <option value="">{t('pages.budgets.filterAllPeriods')}</option>
+            <option value="MONTHLY">{t('pages.budgets.periodMonthly')}</option>
+            <option value="YEARLY">{t('pages.budgets.periodYearly')}</option>
           </select>
         </div>
       </div>
@@ -294,7 +315,7 @@ const Budgets: React.FC = () => {
       {/* Budgets List */}
       {orderedFiltered.length === 0 ? (
         <div className="card-view py-14 sm:py-16 text-center">
-          <p className="text-dark-400 text-sm sm:text-base">No hay presupuestos que coincidan.</p>
+          <p className="text-dark-400 text-sm sm:text-base">{t('pages.budgets.emptyFilter')}</p>
         </div>
       ) : (
         <>
@@ -303,20 +324,24 @@ const Budgets: React.FC = () => {
               const pct = Math.min(100, budget.percentage);
               const periodLabel =
                 budget.periodType === 'MONTHLY'
-                  ? `${monthNames[budget.periodMonth! - 1]} ${budget.periodYear}`
-                  : `Año ${budget.periodYear}`;
+                  ? `${monthName(budget.periodMonth!)} ${budget.periodYear}`
+                  : t('pages.budgets.periodYearOnly', { year: budget.periodYear });
 
               return (
                 <motion.article
                   key={budget.id}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  onDragOver={listDnd.onDragOver}
-                  onDrop={listDnd.onDrop(budget.id)}
+                  {...listDnd.droppableAttr(budget.id)}
                   className={[
                     LIST_CARD_SHELL,
                     listCardAccentFromPercent(budget.percentage),
-                    listDnd.dragId === budget.id ? 'opacity-60' : '',
+                    listDnd.dragId === budget.id ? 'opacity-[0.22]' : '',
+                    listDnd.dragId !== null &&
+                    listDnd.pointerOverItemId === budget.id &&
+                    listDnd.dragId !== budget.id
+                      ? 'ring-2 ring-primary-400/75 z-[1]'
+                      : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
@@ -326,7 +351,9 @@ const Budgets: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-dark-600/80 bg-dark-700/50 px-2.5 py-1 text-[0.7rem] font-medium uppercase tracking-wide text-dark-300 sm:text-xs">
                           <Calendar className="h-3.5 w-3.5 shrink-0 text-primary-400" aria-hidden />
-                          {budget.periodType === 'MONTHLY' ? 'Mensual' : 'Anual'}
+                          {budget.periodType === 'MONTHLY'
+                            ? t('pages.budgets.periodMonthly')
+                            : t('pages.budgets.periodYearly')}
                         </span>
                         <span className="text-xs text-dark-500 sm:text-sm">{periodLabel}</span>
                       </div>
@@ -342,16 +369,15 @@ const Budgets: React.FC = () => {
                     <div className="order-1 flex w-full shrink-0 flex-wrap items-center justify-end gap-0.5 xl:order-2 xl:w-auto">
                       <ListOrderDragHandle
                         itemId={budget.id}
-                        onDragStart={listDnd.onDragStart}
-                        onDragEnd={listDnd.onDragEnd}
+                        gripBinder={listDnd.gripBinder}
                         disabled={pagedBudgets.length < 2}
                       />
                       <button
                         type="button"
                         onClick={() => openEditModal(budget)}
                         className={listCardBtnEdit}
-                        title="Editar"
-                        aria-label="Editar presupuesto"
+                        title={t('common.actions.edit')}
+                        aria-label={t('pages.budgets.editAria')}
                       >
                         <Edit className="h-5 w-5" />
                       </button>
@@ -359,8 +385,8 @@ const Budgets: React.FC = () => {
                         type="button"
                         onClick={() => handleDelete(budget.id)}
                         className={listCardBtnDanger}
-                        title="Eliminar"
-                        aria-label="Eliminar presupuesto"
+                        title={t('common.actions.delete')}
+                        aria-label={t('pages.budgets.deleteAria')}
                       >
                         <Trash2 className="h-5 w-5" />
                       </button>
@@ -370,15 +396,16 @@ const Budgets: React.FC = () => {
                   <div className="mt-4 flex flex-col gap-4 border-t border-dark-700/80 pt-4">
                     <div className="flex flex-col gap-3 xs:flex-row xs:items-end xs:justify-between">
                       <div>
-                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Tope</p>
+                        <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                          {t('pages.budgets.metricCap')}
+                        </p>
                         <p className="text-base font-semibold tabular-nums text-white sm:text-lg">
-                          {budget.amount.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-sm font-medium text-dark-400">{budget.currency}</span>
+                          {fc(budget.amount, budget.currency)}
                         </p>
                       </div>
                       <div className="flex items-baseline gap-2 self-start xs:self-auto">
                         <span className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
-                          Uso
+                          {t('pages.budgets.usage')}
                         </span>
                         <span
                           className="text-2xl font-bold tabular-nums leading-none sm:text-3xl"
@@ -391,7 +418,7 @@ const Budgets: React.FC = () => {
 
                     <div>
                       <div className="mb-2 flex justify-between gap-2 text-xs text-dark-400">
-                        <span>Consumo del presupuesto</span>
+                        <span>{t('pages.budgets.consumptionLabel')}</span>
                         <span className="tabular-nums text-dark-300">
                           {pct.toFixed(0)}% / 100%
                         </span>
@@ -418,23 +445,21 @@ const Budgets: React.FC = () => {
                       <div className="metrics-row-2">
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
-                          Gastado
+                          {t('pages.budgets.spent')}
                         </p>
                         <p className="mt-0.5 text-sm font-semibold tabular-nums text-red-400 sm:text-base">
-                          {budget.spent.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
+                          {fc(budget.spent, budget.currency)}
                         </p>
                       </div>
                         <div className="metrics-cell rounded-xl border border-dark-600/60 bg-dark-900/30 px-3 py-2.5 sm:py-3">
                         <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
-                          Restante
+                          {t('pages.budgets.remaining')}
                         </p>
                         <p
                           className={`mt-0.5 text-sm font-semibold tabular-nums sm:text-base ${budget.remaining >= 0 ? 'text-emerald-400' : 'text-red-400'
                             }`}
                         >
-                          {budget.remaining.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
-                          <span className="text-xs font-normal text-dark-400">{budget.currency}</span>
+                          {fc(budget.remaining, budget.currency)}
                         </p>
                       </div>
                       </div>
@@ -444,6 +469,7 @@ const Budgets: React.FC = () => {
               );
             })}
           </div>
+          <ListOrderDragGhostPortal ghost={listDnd.dragGhost} />
           <TablePagination
             className="mt-4 sm:mt-5"
             currentPage={budgetPageSafe}
@@ -451,7 +477,7 @@ const Budgets: React.FC = () => {
             totalItems={orderedFiltered.length}
             itemsPerPage={budgetPageSize}
             onPageChange={setListPage}
-            itemLabel="presupuestos"
+            itemLabel={t('pages.budgets.itemsLabel')}
             variant="card"
             pageSizeOptions={budgetPageSizeOptions}
             onPageSizeChange={setBudgetPageSize}
@@ -481,7 +507,7 @@ const Budgets: React.FC = () => {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 id="budgets-modal-title" className="text-xl font-semibold text-white">
-                {editingBudget ? 'Editar Presupuesto' : 'Nuevo Presupuesto'}
+                {editingBudget ? t('pages.budgets.modalEditTitle') : t('pages.budgets.modalNewTitle')}
               </h2>
               <button
                 onClick={() => {
@@ -496,7 +522,9 @@ const Budgets: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Nombre *</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.budgets.fieldNameRequired')}
+                </label>
                 <input
                   type="text"
                   value={formData.name}
@@ -507,14 +535,18 @@ const Budgets: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Categoría</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.budgets.fieldCategory')}
+                </label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   <option value="">
-                    {categories.length === 0 ? 'Sin categorías (créalas en Categorías)' : 'Sin categoría'}
+                    {categories.length === 0
+                      ? t('pages.budgets.categoryEmptyHint')
+                      : t('pages.budgets.categoryNone')}
                   </option>
                   {formData.category &&
                     !categories.some((c) => c.name === formData.category) && (
@@ -530,7 +562,9 @@ const Budgets: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Monto *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    {t('pages.budgets.fieldAmountRequired')}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -541,48 +575,59 @@ const Budgets: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Moneda *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    {t('pages.budgets.fieldCurrencyRequired')}
+                  </label>
                   <select
                     value={formData.currency}
                     onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                     className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
-                    <option value="DOP">DOP</option>
-                    <option value="USD">USD</option>
+                    {transactionCurrencyOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {currencySelectLabel(code)}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-dark-300 mb-2">Tipo de Período *</label>
+                <label className="block text-sm font-medium text-dark-300 mb-2">
+                  {t('pages.budgets.fieldPeriodTypeRequired')}
+                </label>
                 <select
                   value={formData.periodType}
                   onChange={(e) => setFormData({ ...formData, periodType: e.target.value as 'MONTHLY' | 'YEARLY' })}
                   className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                  <option value="MONTHLY">Mensual</option>
-                  <option value="YEARLY">Anual</option>
+                  <option value="MONTHLY">{t('pages.budgets.periodMonthly')}</option>
+                  <option value="YEARLY">{t('pages.budgets.periodYearly')}</option>
                 </select>
               </div>
 
               {formData.periodType === 'MONTHLY' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-dark-300 mb-2">Mes *</label>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      {t('pages.budgets.fieldMonthRequired')}
+                    </label>
                     <select
                       value={formData.periodMonth}
                       onChange={(e) => setFormData({ ...formData, periodMonth: parseInt(e.target.value) })}
                       className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                     >
-                      {monthNames.map((month, index) => (
-                        <option key={index + 1} value={index + 1}>
-                          {month}
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map((m) => (
+                        <option key={m} value={m}>
+                          {monthName(m)}
                         </option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-dark-300 mb-2">Año *</label>
+                    <label className="block text-sm font-medium text-dark-300 mb-2">
+                      {t('pages.budgets.fieldYearRequired')}
+                    </label>
                     <input
                       type="number"
                       value={formData.periodYear}
@@ -598,7 +643,9 @@ const Budgets: React.FC = () => {
 
               {formData.periodType === 'YEARLY' && (
                 <div>
-                  <label className="block text-sm font-medium text-dark-300 mb-2">Año *</label>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    {t('pages.budgets.fieldYearRequired')}
+                  </label>
                   <input
                     type="number"
                     value={formData.periodYear}
@@ -613,7 +660,7 @@ const Budgets: React.FC = () => {
 
               <div className="flex gap-4">
                 <button type="submit" className="btn-primary flex-1">
-                  {editingBudget ? 'Actualizar' : 'Crear'}
+                  {editingBudget ? t('pages.budgets.submitUpdate') : t('pages.budgets.submitCreate')}
                 </button>
                 <button
                   type="button"
@@ -623,7 +670,7 @@ const Budgets: React.FC = () => {
                   }}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>

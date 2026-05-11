@@ -1,0 +1,54 @@
+{
+  "DOP": {
+    "label": "Dominikanischer Peso",
+    "hint": "RD$1, RD$5, RD$10, RD$25"
+  },
+  "USD": {
+    "label": "US-Dollar",
+    "hint": "$1, $5, $10, $20"
+  },
+  "EUR": {
+    "label": "Euro",
+    "hint": "€5, €10, €20, €50"
+  },
+  "GBP": {
+    "label": "Pfund sterling",
+    "hint": "£5, £10, £20"
+  },
+  "JPY": {
+    "label": "Japanischer Yen",
+    "hint": "¥100, ¥500, ¥1000"
+  },
+  "CNY": {
+    "label": "Chinesischer Yuan",
+    "hint": "¥1, ¥5, ¥10, ¥100"
+  },
+  "MXN": {
+    "label": "Mexikanischer Peso",
+    "hint": "$20, $50, $100"
+  },
+  "CAD": {
+    "label": "Kanadischer Dollar",
+    "hint": "CA$5, CA$10, CA$20"
+  },
+  "AUD": {
+    "label": "Australischer Dollar",
+    "hint": "A$5, A$10, A$20"
+  },
+  "CHF": {
+    "label": "Schweizer Franken",
+    "hint": "CHF 10, 20, 50"
+  },
+  "BRL": {
+    "label": "Brasilianischer Real",
+    "hint": "R$2, R$5, R$10, R$20"
+  },
+  "ARS": {
+    "label": "Argentinischer Peso",
+    "hint": "$100, $200, $500"
+  },
+  "COP": {
+    "label": "Kolumbianischer Peso",
+    "hint": "$1000, $2000, $5000, $10000"
+  }
+}

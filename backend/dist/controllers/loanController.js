@@ -6,6 +6,7 @@ const amortizationService_1 = require("../services/amortizationService");
 const accountBalance_1 = require("../services/accountBalance");
 const exchangeRate_1 = require("../utils/exchangeRate");
 const dateUtils_1 = require("../utils/dateUtils");
+const calendarService_1 = require("../services/calendarService");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -449,6 +450,7 @@ const deleteLoan = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'Loan not found' });
         }
+        await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, loanId, ['LOAN_PAYMENT']);
         res.json({
             success: true,
             message: 'Loan deleted successfully',
@@ -470,7 +472,8 @@ const recordPayment = async (req, res) => {
             return res.status(400).json({ message: 'Payment date and amount are required' });
         }
         // Verify loan exists and belongs to user
-        const loanResult = await (0, database_1.query)('SELECT id, paid_installments, total_installments, payment_day, currency FROM loans WHERE id = $1 AND user_id = $2', [loanId, userId]);
+        const loanResult = await (0, database_1.query)(`SELECT id, loan_name, paid_installments, total_installments, payment_day, currency
+       FROM loans WHERE id = $1 AND user_id = $2`, [loanId, userId]);
         if (loanResult.rows.length === 0) {
             return res.status(404).json({ message: 'Loan not found' });
         }
@@ -530,7 +533,13 @@ const recordPayment = async (req, res) => {
         await (0, amortizationService_1.saveAmortizationSchedule)(loanId, updatedSchedule);
         if (bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, loanCurrency, -payAmt);
+                const loanLabel = String(loan.loan_name ?? '').trim() || `#${loanId}`;
+                const instHint = paymentDistribution.installmentNumber != null
+                    ? ` · Cuota ${paymentDistribution.installmentNumber}`
+                    : '';
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, loanCurrency, -payAmt, undefined, {
+                    description: `[Préstamo «${loanLabel}»] Pago desde cuenta${instHint}`,
+                });
             }
             catch (e) {
                 await removeLoanPaymentById(newPaymentId, userId);
@@ -591,7 +600,7 @@ const deletePayment = async (req, res) => {
     try {
         const userId = req.userId;
         const paymentId = parseInt(req.params.paymentId);
-        const meta = await (0, database_1.query)(`SELECT lp.amount, lp.bank_account_id, l.currency
+        const meta = await (0, database_1.query)(`SELECT lp.amount, lp.bank_account_id, lp.installment_number, l.currency, l.loan_name, lp.loan_id
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
        WHERE lp.id = $1 AND l.user_id = $2`, [paymentId, userId]);
@@ -601,7 +610,11 @@ const deletePayment = async (req, res) => {
         const row = meta.rows[0];
         if (row.bank_account_id) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, parseFloat(row.amount));
+                const loanNm = String(row.loan_name ?? '').trim() || `#${row.loan_id}`;
+                const instHint = row.installment_number != null ? ` · Cuota ${row.installment_number}` : '';
+                await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, parseFloat(row.amount), undefined, {
+                    description: `[Préstamo «${loanNm}»] Eliminación de pago (reversión)${instHint}`,
+                });
             }
             catch (e) {
                 console.error('Revert balance on loan payment delete:', e);
@@ -681,7 +694,8 @@ const updatePayment = async (req, res) => {
         const userId = req.userId;
         const paymentId = parseInt(req.params.paymentId);
         const { paymentDate, amount, paymentType, notes } = req.body;
-        const oldQ = await (0, database_1.query)(`SELECT lp.id, lp.loan_id, lp.installment_number, lp.amount, lp.bank_account_id, lp.payment_date, l.currency
+        const oldQ = await (0, database_1.query)(`SELECT lp.id, lp.loan_id, lp.installment_number, lp.amount, lp.bank_account_id, lp.payment_date,
+              l.currency, l.loan_name
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
        WHERE lp.id = $1 AND l.user_id = $2`, [paymentId, userId]);
@@ -691,6 +705,7 @@ const updatePayment = async (req, res) => {
         const old = oldQ.rows[0];
         const loanId = old.loan_id;
         const loanCurrency = String(old.currency || 'DOP');
+        const loanNmEdit = String(old.loan_name ?? '').trim() || `#${loanId}`;
         const newBankId = resolveBankAccountIdUpdate(req.body, old.bank_account_id);
         const effDate = paymentDate !== undefined && paymentDate !== null ? paymentDate : old.payment_date;
         const effAmt = amount !== undefined && amount !== null && amount !== ''
@@ -698,7 +713,10 @@ const updatePayment = async (req, res) => {
             : parseFloat(old.amount);
         if (old.bank_account_id) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, loanCurrency, parseFloat(old.amount));
+                const instHintOld = old.installment_number != null ? ` · Cuota ${old.installment_number}` : '';
+                await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, loanCurrency, parseFloat(old.amount), undefined, {
+                    description: `[Préstamo «${loanNmEdit}»] Edición de pago — reversión del cargo anterior${instHintOld}`,
+                });
             }
             catch (e) {
                 console.error('Revert balance on loan payment update:', e);
@@ -737,7 +755,12 @@ const updatePayment = async (req, res) => {
         await (0, amortizationService_1.saveAmortizationSchedule)(loanId, updatedSchedule);
         if (newBankId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, loanCurrency, -effAmt);
+                const instHintAfter = paymentDistribution.installmentNumber != null
+                    ? ` · Cuota ${paymentDistribution.installmentNumber}`
+                    : '';
+                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, loanCurrency, -effAmt, undefined, {
+                    description: `[Préstamo «${loanNmEdit}»] Edición de pago — nuevo cargo${instHintAfter}`,
+                });
             }
             catch (e) {
                 if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {

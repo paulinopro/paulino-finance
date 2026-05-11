@@ -1,0 +1,7 @@
+{
+  "description": "Beschreibung",
+  "amount": "Betrag",
+  "paymentDate": "Zahlungsdatum",
+  "daysLeft_one": "Noch {{count}} Tag bis zur Zahlung.",
+  "daysLeft_other": "Noch {{count}} Tage bis zur Zahlung."
+}

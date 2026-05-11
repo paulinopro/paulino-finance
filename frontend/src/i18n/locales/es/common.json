@@ -1,0 +1,77 @@
+{
+  "kmSuffix": "km",
+  "perMonthSuffix": "/mes",
+  "savingEllipsis": "Guardando…",
+  "ellipsis": "…",
+  "emptyDash": "—",
+  "invalidDate": "Fecha inválida",
+  "actions": {
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "search": "Buscar",
+    "loading": "Cargando…",
+    "registerPrincipalPayment": "Registrar Pago al Capital",
+    "registerPayment": "Registrar Pago",
+    "actions": "Acciones",
+    "create": "Crear",
+    "apply": "Aplicar",
+    "history": "Historial"
+  },
+  "pagination": {
+    "compactSummary": "{{start}}–{{end}} de {{total}}",
+    "unreadSummary": "{{total}} sin leer",
+    "showingSummary": "Mostrando {{start}}–{{end}} de {{total}} {{itemLabel}}",
+    "perPage": "Por página",
+    "perPageAria": "Registros por página",
+    "prevPageAria": "Página anterior",
+    "nextPageAria": "Página siguiente",
+    "prev": "Anterior",
+    "next": "Siguiente",
+    "pagesAria": "Páginas"
+  },
+  "reorder": {
+    "title": "Reordenar",
+    "aria": "Reordenar: mantén y arrastra a otra tarjeta (teléfono o ratón)"
+  },
+  "adminBreadcrumbs": {
+    "aria": "Migas de pan",
+    "console": "Consola",
+    "users": "Usuarios",
+    "audit": "Auditoría",
+    "status": "Estado",
+    "plans": "Planes (producto)",
+    "settings": "Configuración",
+    "overview": "Resumen",
+    "userNumber": "Usuario #{{id}}"
+  },
+  "installPrompt": {
+    "regionAria": "Instalar aplicación",
+    "title": "Instalar Paulino Finance",
+    "subtitle": "Accede más rápido desde tu pantalla de inicio, como una app.",
+    "install": "Instalar",
+    "notNow": "Ahora no",
+    "iosTitle": "Añadir a pantalla de inicio",
+    "iosPrefix": "En Safari: pulsa el botón",
+    "iosShare": "Compartir",
+    "iosAndChoose": "y elige",
+    "iosAddToHome": "Añadir a pantalla de inicio",
+    "gotIt": "Entendido",
+    "closeAria": "Cerrar aviso de instalación"
+  },
+  "pwaUpdate": {
+    "newVersion": "Hay una nueva versión de la aplicación.",
+    "update": "Actualizar"
+  },
+  "offlineBanner": {
+    "message": "Sin conexión. Los datos pueden no cargarse hasta que vuelvas a estar en línea."
+  },
+  "iconSelect": {
+    "searchPlaceholder": "Buscar ícono (ej. Wallet, Zap, Home)…",
+    "loading": "Cargando íconos…",
+    "optionsCount": "{{count}} opciones",
+    "colorSwatchAria": "Color {{color}}"
+  }
+}

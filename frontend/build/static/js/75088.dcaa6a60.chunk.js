@@ -1,0 +1,3 @@
+/*! For license information please see 75088.dcaa6a60.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[75088],{75088(e,n,c){c.r(n),c.d(n,{default:()=>l});const l=(0,c(21639).A)("Clock",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["polyline",{points:"12 6 12 12 16 14",key:"68esgv"}]])}}]);
+//# sourceMappingURL=75088.dcaa6a60.chunk.js.map

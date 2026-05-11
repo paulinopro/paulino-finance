@@ -17,6 +17,8 @@ import {
 } from 'recharts';
 import { formatChartAxisEsShort, formatChartTooltipEs } from '../utils/dateUtils';
 import PageHeader from '../components/PageHeader';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 
 interface CashFlowData {
   date: string;
@@ -81,17 +83,17 @@ const CASH_FLOW_FREQUENCY_ORDER: readonly string[] = [
 ];
 
 const CASH_FLOW_FREQUENCY_LABELS: Record<string, string> = {
-  daily: 'Diario',
-  weekly: 'Semanal',
-  biweekly: 'Cada 2 semanas',
-  semi_monthly: 'Quincenal',
-  monthly: 'Mensual',
-  quarterly: 'Trimestral',
-  semi_annual: 'Semestral',
-  annual: 'Anual',
+  daily: 'daily',
+  weekly: 'weekly',
+  biweekly: 'biweekly',
+  semi_monthly: 'semiMonthly',
+  monthly: 'monthly',
+  quarterly: 'quarterly',
+  semi_annual: 'semiAnnual',
+  annual: 'annual',
 };
 
-/** Todas las frecuencias del catálogo en orden fijo; importe 0 si no hubo en el mapa (DOP redondeados). */
+/** Todas las frecuencias del catálogo en orden fijo; importe 0 si no hubo en el mapa (enteros, moneda principal). */
 function orderedFrequencyEntries(map: Record<string, number>): [string, number][] {
   const out: [string, number][] = [];
   const seen = new Set<string>();
@@ -113,22 +115,14 @@ function orderedFrequencyEntries(map: Record<string, number>): [string, number][
   return out;
 }
 
-function labelCashFlowFrequency(key: string): string {
-  return CASH_FLOW_FREQUENCY_LABELS[key] ?? key;
-}
-
-/** YYYY-MM-DD → p. ej. "1 ene 2026" (es-DO) */
-function formatYmdToEsShort(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  if (!y || !m || !d) return iso;
-  return new Intl.DateTimeFormat('es-DO', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(y, m - 1, d));
+function labelCashFlowFrequency(key: string, t: (key: string) => string): string {
+  const mapped = CASH_FLOW_FREQUENCY_LABELS[key];
+  return mapped ? t(`pages.cashFlow.freq.${mapped}`) : key;
 }
 
 const CashFlow: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatCurrency: fc, formatYmdShortLocalized: fy, localeTag, primaryCurrency } = useIntlFormatting();
   const [cashFlowData, setCashFlowData] = useState<CashFlowData[]>([]);
   const [summary, setSummary] = useState<CashFlowSummary | null>(null);
   const [incomeBreakdown, setIncomeBreakdown] = useState<IncomeBreakdown | null>(null);
@@ -193,11 +187,11 @@ const CashFlow: React.FC = () => {
       setReportStartDate(payload.startDate ?? null);
       setReportEndDate(payload.endDate ?? null);
     } catch (error: any) {
-      toast.error('Error al cargar flujo de caja');
+      toast.error(t('toast.cashFlow.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [period, startDate, endDate]);
+  }, [period, startDate, endDate, t]);
 
   useEffect(() => {
     fetchCashFlow();
@@ -235,7 +229,11 @@ const CashFlow: React.FC = () => {
   const reportDayCount = cashFlowData.length;
   const periodAnalyzedLine =
     reportStartDate && reportEndDate
-      ? `Período analizado: ${reportDayCount} días (${formatYmdToEsShort(reportStartDate)} – ${formatYmdToEsShort(reportEndDate)})`
+      ? t('pages.cashFlow.periodAnalyzed', {
+          count: reportDayCount,
+          from: fy(reportStartDate),
+          to: fy(reportEndDate),
+        })
       : null;
 
   const saldoDisponibleTone = summary
@@ -245,11 +243,11 @@ const CashFlow: React.FC = () => {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Flujo de Caja"
+        title={t('pages.cashFlow.title')}
         subtitle={
           <>
             <p className="text-dark-400 text-sm sm:text-base leading-snug">
-              Análisis de ingresos, gastos y saldo disponible
+              {t('pages.cashFlow.subtitleLine')}
             </p>
             {periodAnalyzedLine ? (
               <p className="text-dark-500 text-[0.8125rem] sm:text-sm leading-snug">{periodAnalyzedLine}</p>
@@ -263,9 +261,9 @@ const CashFlow: React.FC = () => {
               onChange={(e) => handlePeriodChange(e.target.value)}
               className="input w-full sm:w-auto sm:min-w-[10rem]"
             >
-              <option value="month">Este Mes</option>
-              <option value="year">Este Año</option>
-              <option value="custom">Personalizado</option>
+              <option value="month">{t('pages.cashFlow.periodMonth')}</option>
+              <option value="year">{t('pages.cashFlow.periodYear')}</option>
+              <option value="custom">{t('pages.cashFlow.periodCustom')}</option>
             </select>
             {period === 'custom' && (
               <div className="flex flex-col xs:flex-row xs:items-center gap-2 w-full sm:w-auto">
@@ -275,7 +273,7 @@ const CashFlow: React.FC = () => {
                   onChange={(e) => setStartDate(e.target.value)}
                   className="input flex-1 min-w-0"
                 />
-                <span className="text-dark-400 text-center xs:px-1">a</span>
+                <span className="text-dark-400 text-center xs:px-1">{t('pages.cashFlow.dateRangeSeparator')}</span>
                 <input
                   type="date"
                   value={endDate}
@@ -283,7 +281,7 @@ const CashFlow: React.FC = () => {
                   className="input flex-1 min-w-0"
                 />
                 <button type="button" onClick={fetchCashFlow} className="btn-primary w-full xs:w-auto shrink-0">
-                  Aplicar
+                  {t('common.actions.apply')}
                 </button>
               </div>
             )}
@@ -302,11 +300,10 @@ const CashFlow: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Ingresos</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.cashFlow.income')}</p>
                 <p className="text-2xl font-bold text-green-400">
-                  ${summary.totalIncome.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.totalIncome, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">DOP</p>
               </div>
               <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-white" />
@@ -322,11 +319,10 @@ const CashFlow: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Gastos</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.cashFlow.expenses')}</p>
                 <p className="text-2xl font-bold text-red-400">
-                  ${summary.totalExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.totalExpenses, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">DOP</p>
               </div>
               <div className="w-12 h-12 bg-red-600 rounded-lg flex items-center justify-center">
                 <TrendingDown className="w-6 h-6 text-white" />
@@ -342,12 +338,12 @@ const CashFlow: React.FC = () => {
           >
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-dark-400 text-sm mb-1">Compromisos pendientes</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.cashFlow.pendingCommitments')}</p>
                 <p className="text-2xl font-bold text-amber-400">
-                  ${summary.pendingCommitments.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.pendingCommitments, primaryCurrency)}
                 </p>
                 <p className="text-xs text-dark-400 mt-1 leading-snug">
-                  CxP + Mín. Tarjeta + Cuotas de Préstamo
+                  {t('pages.cashFlow.pendingCommitmentsFormula')}
                 </p>
               </div>
               <div className="w-12 h-12 bg-amber-600 shrink-0 rounded-lg flex items-center justify-center">
@@ -364,7 +360,7 @@ const CashFlow: React.FC = () => {
           >
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-dark-400 text-sm mb-1">Saldo disponible</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.cashFlow.availableBalance')}</p>
                 <p
                   className={`text-2xl font-bold ${saldoDisponibleTone === 'red'
                     ? 'text-red-400'
@@ -373,10 +369,10 @@ const CashFlow: React.FC = () => {
                       : 'text-green-400'
                     }`}
                 >
-                  ${summary.availableBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.availableBalance, primaryCurrency)}
                 </p>
                 <p className="text-xs text-dark-400 mt-1 leading-snug">
-                  Ingresos − Gastos − Compromisos
+                  {t('pages.cashFlow.availableBalanceFormula')}
                 </p>
               </div>
               <div
@@ -404,7 +400,7 @@ const CashFlow: React.FC = () => {
           transition={{ delay: 0.4 }}
           className="card min-w-0"
         >
-          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Ingresos vs Gastos</h2>
+          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.cashFlow.incomeVsExpenses')}</h2>
           <div className="chart-box h-[240px] sm:h-[280px] md:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={cashFlowData}>
@@ -422,12 +418,12 @@ const CashFlow: React.FC = () => {
                 <XAxis
                   dataKey="date"
                   stroke="#94a3b8"
-                  tickFormatter={(value) => formatChartAxisEsShort(String(value))}
+                  tickFormatter={(value) => formatChartAxisEsShort(String(value), localeTag)}
                 />
                 <YAxis stroke="#94a3b8" />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  labelFormatter={(value) => formatChartTooltipEs(String(value))}
+                  labelFormatter={(value) => formatChartTooltipEs(String(value), localeTag)}
                 />
                 <Legend />
                 <Area
@@ -436,7 +432,7 @@ const CashFlow: React.FC = () => {
                   stroke="#10b981"
                   fillOpacity={1}
                   fill="url(#colorIncome)"
-                  name="Ingresos"
+                  name={t('pages.cashFlow.income')}
                 />
                 <Area
                   type="monotone"
@@ -444,7 +440,7 @@ const CashFlow: React.FC = () => {
                   stroke="#ef4444"
                   fillOpacity={1}
                   fill="url(#colorExpenses)"
-                  name="Gastos"
+                  name={t('pages.cashFlow.expenses')}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -458,7 +454,7 @@ const CashFlow: React.FC = () => {
           transition={{ delay: 0.5 }}
           className="card min-w-0"
         >
-          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Flujo Neto Diario</h2>
+          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.cashFlow.dailyNetFlow')}</h2>
           <div className="chart-box h-[240px] sm:h-[280px] md:h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={cashFlowData}>
@@ -466,12 +462,12 @@ const CashFlow: React.FC = () => {
                 <XAxis
                   dataKey="date"
                   stroke="#94a3b8"
-                  tickFormatter={(value) => formatChartAxisEsShort(String(value))}
+                  tickFormatter={(value) => formatChartAxisEsShort(String(value), localeTag)}
                 />
                 <YAxis stroke="#94a3b8" />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  labelFormatter={(value) => formatChartTooltipEs(String(value))}
+                  labelFormatter={(value) => formatChartTooltipEs(String(value), localeTag)}
                 />
                 <Line
                   type="monotone"
@@ -479,7 +475,7 @@ const CashFlow: React.FC = () => {
                   stroke="#0ea5e9"
                   strokeWidth={2}
                   dot={false}
-                  name="Flujo Neto"
+                  name={t('pages.cashFlow.netFlow')}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -494,7 +490,7 @@ const CashFlow: React.FC = () => {
         transition={{ delay: 0.6 }}
         className="card min-w-0"
       >
-        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Saldo Acumulado</h2>
+        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.cashFlow.accumulatedBalance')}</h2>
         <div className="chart-box h-[280px] sm:h-[340px] md:h-[400px]">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={cashFlowData}>
@@ -508,12 +504,12 @@ const CashFlow: React.FC = () => {
               <XAxis
                 dataKey="date"
                 stroke="#94a3b8"
-                tickFormatter={(value) => formatChartAxisEsShort(String(value))}
+                tickFormatter={(value) => formatChartAxisEsShort(String(value), localeTag)}
               />
               <YAxis stroke="#94a3b8" />
               <Tooltip
                 contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                labelFormatter={(value) => formatChartTooltipEs(String(value))}
+                labelFormatter={(value) => formatChartTooltipEs(String(value), localeTag)}
               />
               <Area
                 type="monotone"
@@ -521,7 +517,7 @@ const CashFlow: React.FC = () => {
                 stroke="#0ea5e9"
                 fillOpacity={1}
                 fill="url(#colorBalance)"
-                name="Saldo"
+                name={t('pages.cashFlow.balance')}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -538,35 +534,35 @@ const CashFlow: React.FC = () => {
             transition={{ delay: 0.7 }}
             className="card"
           >
-            <h2 className="text-xl font-semibold text-white mb-2">Desglose de Ingresos Totales</h2>
+            <h2 className="text-xl font-semibold text-white mb-2">{t('pages.cashFlow.incomeBreakdownTitle')}</h2>
             <p className="text-dark-500 text-xs mb-4">
-              Únicos por tipo fijo/variable; recurrentes listan todas las frecuencias (0 si no aplica en el período). DOP unificado.
+              {t('pages.cashFlow.incomeBreakdownHint', { currency: primaryCurrency })}
             </p>
             <div className="space-y-4">
               <div className="rounded-lg border border-dark-600 overflow-hidden">
                 <div className="px-3 py-2 bg-dark-750 border-b border-dark-600">
-                  <p className="text-white text-sm font-medium">Ingresos únicos</p>
-                  <p className="text-dark-500 text-xs">Naturaleza única</p>
+                  <p className="text-white text-sm font-medium">{t('pages.cashFlow.oneOffIncome')}</p>
+                  <p className="text-dark-500 text-xs">{t('pages.cashFlow.oneOffNature')}</p>
                 </div>
                 <div className="divide-y divide-dark-700">
                   <div className="flex items-center justify-between p-3 bg-dark-700/50">
-                    <span className="text-dark-300 text-sm">Tipo fijo</span>
+                    <span className="text-dark-300 text-sm">{t('pages.cashFlow.fixedType')}</span>
                     <span className="text-white font-medium">
-                      ${incomeBreakdown.punctual.fixed.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                      {fc(incomeBreakdown.punctual.fixed, primaryCurrency)}{' '}
                       <span className="text-dark-500 text-xs">({pctOf(incomeBreakdown.punctual.fixed, incomeBreakdown.total)}%)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-dark-700/50">
-                    <span className="text-dark-300 text-sm">Tipo variable</span>
+                    <span className="text-dark-300 text-sm">{t('pages.cashFlow.variableType')}</span>
                     <span className="text-white font-medium">
-                      ${incomeBreakdown.punctual.variable.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                      {fc(incomeBreakdown.punctual.variable, primaryCurrency)}{' '}
                       <span className="text-dark-500 text-xs">({pctOf(incomeBreakdown.punctual.variable, incomeBreakdown.total)}%)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between px-3 py-2 bg-dark-800">
-                    <span className="text-dark-400 text-xs">Subtotal únicos</span>
+                    <span className="text-dark-400 text-xs">{t('pages.cashFlow.oneOffSubtotal')}</span>
                     <span className="text-dark-200 text-sm font-semibold">
-                      ${incomeBreakdown.punctual.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      {fc(incomeBreakdown.punctual.total, primaryCurrency)}
                     </span>
                   </div>
                 </div>
@@ -574,25 +570,25 @@ const CashFlow: React.FC = () => {
 
               <div className="rounded-lg border border-dark-600 overflow-hidden">
                 <div className="px-3 py-2 bg-dark-750 border-b border-dark-600">
-                  <p className="text-white text-sm font-medium">Ingresos recurrentes</p>
+                  <p className="text-white text-sm font-medium">{t('pages.cashFlow.recurrentIncome')}</p>
                   <p className="text-dark-500 text-xs">
-                    Todas las frecuencias
+                    {t('pages.cashFlow.allFrequencies')}
                   </p>
                 </div>
                 <div className="divide-y divide-dark-700">
                   {incomeRecurrentFreqRows.map(([fk, amt]) => (
                     <div key={fk} className="flex items-center justify-between p-3 bg-dark-700/50">
-                      <span className="text-dark-300 text-sm">{labelCashFlowFrequency(fk)}</span>
+                      <span className="text-dark-300 text-sm">{labelCashFlowFrequency(fk, t)}</span>
                       <span className={amt === 0 ? 'text-dark-500 text-sm' : 'text-white font-medium'}>
-                        ${amt.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        {fc(amt, primaryCurrency)}{' '}
                         <span className="text-dark-500 text-xs">({pctOf(amt, incomeBreakdown.total)}%)</span>
                       </span>
                     </div>
                   ))}
                   <div className="flex items-center justify-between px-3 py-2 bg-dark-800">
-                    <span className="text-dark-400 text-xs">Subtotal recurrentes</span>
+                    <span className="text-dark-400 text-xs">{t('pages.cashFlow.recurrentSubtotal')}</span>
                     <span className="text-dark-200 text-sm font-semibold">
-                      ${incomeBreakdown.recurrent.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      {fc(incomeBreakdown.recurrent.total, primaryCurrency)}
                     </span>
                   </div>
                 </div>
@@ -600,9 +596,9 @@ const CashFlow: React.FC = () => {
 
               <div className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
                 <div>
-                  <p className="text-dark-400 text-sm">Cuentas por cobrar recibidas</p>
+                  <p className="text-dark-400 text-sm">{t('pages.cashFlow.accountsReceivableReceived')}</p>
                   <p className="text-lg font-semibold text-white">
-                    ${incomeBreakdown.accountsReceivable.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    {fc(incomeBreakdown.accountsReceivable, primaryCurrency)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -612,9 +608,9 @@ const CashFlow: React.FC = () => {
 
               <div className="flex items-center justify-between p-4 bg-primary-600/20 border border-primary-600 rounded-lg">
                 <div>
-                  <p className="text-primary-400 text-sm font-medium">Total de ingresos</p>
+                  <p className="text-primary-400 text-sm font-medium">{t('pages.cashFlow.totalIncome')}</p>
                   <p className="text-2xl font-bold text-green-400">
-                    ${incomeBreakdown.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    {fc(incomeBreakdown.total, primaryCurrency)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -633,35 +629,35 @@ const CashFlow: React.FC = () => {
             transition={{ delay: 0.8 }}
             className="card"
           >
-            <h2 className="text-xl font-semibold text-white mb-2">Desglose de Gastos Totales</h2>
+            <h2 className="text-xl font-semibold text-white mb-2">{t('pages.cashFlow.expensesBreakdownTitle')}</h2>
             <p className="text-dark-500 text-xs mb-4">
-              Únicos y recurrentes por tipo; en recurrentes se muestran todas las frecuencias (0 si no hubo en el período).
+              {t('pages.cashFlow.expensesBreakdownHint')}
             </p>
             <div className="space-y-4">
               <div className="rounded-lg border border-dark-600 overflow-hidden">
                 <div className="px-3 py-2 bg-dark-750 border-b border-dark-600">
-                  <p className="text-white text-sm font-medium">Gastos únicos</p>
-                  <p className="text-dark-500 text-xs">Naturaleza única</p>
+                  <p className="text-white text-sm font-medium">{t('pages.cashFlow.oneOffExpenses')}</p>
+                  <p className="text-dark-500 text-xs">{t('pages.cashFlow.oneOffNature')}</p>
                 </div>
                 <div className="divide-y divide-dark-700">
                   <div className="flex items-center justify-between p-3 bg-dark-700/50">
-                    <span className="text-dark-300 text-sm">Tipo fijo</span>
+                    <span className="text-dark-300 text-sm">{t('pages.cashFlow.fixedType')}</span>
                     <span className="text-white font-medium">
-                      ${expensesBreakdown.punctual.fixed.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                      {fc(expensesBreakdown.punctual.fixed, primaryCurrency)}{' '}
                       <span className="text-dark-500 text-xs">({pctOf(expensesBreakdown.punctual.fixed, expensesBreakdown.total)}%)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-3 bg-dark-700/50">
-                    <span className="text-dark-300 text-sm">Tipo variable</span>
+                    <span className="text-dark-300 text-sm">{t('pages.cashFlow.variableType')}</span>
                     <span className="text-white font-medium">
-                      ${expensesBreakdown.punctual.variable.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                      {fc(expensesBreakdown.punctual.variable, primaryCurrency)}{' '}
                       <span className="text-dark-500 text-xs">({pctOf(expensesBreakdown.punctual.variable, expensesBreakdown.total)}%)</span>
                     </span>
                   </div>
                   <div className="flex items-center justify-between px-3 py-2 bg-dark-800">
-                    <span className="text-dark-400 text-xs">Subtotal únicos</span>
+                    <span className="text-dark-400 text-xs">{t('pages.cashFlow.oneOffSubtotal')}</span>
                     <span className="text-dark-200 text-sm font-semibold">
-                      ${expensesBreakdown.punctual.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      {fc(expensesBreakdown.punctual.total, primaryCurrency)}
                     </span>
                   </div>
                 </div>
@@ -669,25 +665,25 @@ const CashFlow: React.FC = () => {
 
               <div className="rounded-lg border border-dark-600 overflow-hidden">
                 <div className="px-3 py-2 bg-dark-750 border-b border-dark-600">
-                  <p className="text-white text-sm font-medium">Gastos recurrentes</p>
+                  <p className="text-white text-sm font-medium">{t('pages.cashFlow.recurrentExpenses')}</p>
                   <p className="text-dark-500 text-xs">
-                    Todas las frecuencias
+                    {t('pages.cashFlow.allFrequencies')}
                   </p>
                 </div>
                 <div className="divide-y divide-dark-700">
                   {expensesRecurringFreqRows.map(([fk, amt]) => (
                     <div key={fk} className="flex items-center justify-between p-3 bg-dark-700/50">
-                      <span className="text-dark-300 text-sm">{labelCashFlowFrequency(fk)}</span>
+                      <span className="text-dark-300 text-sm">{labelCashFlowFrequency(fk, t)}</span>
                       <span className={amt === 0 ? 'text-dark-500 text-sm' : 'text-white font-medium'}>
-                        ${amt.toLocaleString('es-DO', { minimumFractionDigits: 2 })}{' '}
+                        {fc(amt, primaryCurrency)}{' '}
                         <span className="text-dark-500 text-xs">({pctOf(amt, expensesBreakdown.total)}%)</span>
                       </span>
                     </div>
                   ))}
                   <div className="flex items-center justify-between px-3 py-2 bg-dark-800">
-                    <span className="text-dark-400 text-xs">Subtotal recurrentes</span>
+                    <span className="text-dark-400 text-xs">{t('pages.cashFlow.recurrentSubtotal')}</span>
                     <span className="text-dark-200 text-sm font-semibold">
-                      ${expensesBreakdown.recurring.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      {fc(expensesBreakdown.recurring.total, primaryCurrency)}
                     </span>
                   </div>
                 </div>
@@ -695,9 +691,9 @@ const CashFlow: React.FC = () => {
 
               <div className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
                 <div>
-                  <p className="text-dark-400 text-sm">Cuentas por pagar pagadas</p>
+                  <p className="text-dark-400 text-sm">{t('pages.cashFlow.accountsPayablePaid')}</p>
                   <p className="text-lg font-semibold text-white">
-                    ${expensesBreakdown.accountsPayable.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    {fc(expensesBreakdown.accountsPayable, primaryCurrency)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -707,9 +703,9 @@ const CashFlow: React.FC = () => {
 
               <div className="flex items-center justify-between p-4 bg-red-600/20 border border-red-600 rounded-lg">
                 <div>
-                  <p className="text-red-400 text-sm font-medium">Total de gastos</p>
+                  <p className="text-red-400 text-sm font-medium">{t('pages.cashFlow.totalExpenses')}</p>
                   <p className="text-2xl font-bold text-red-400">
-                    ${expensesBreakdown.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    {fc(expensesBreakdown.total, primaryCurrency)}
                   </p>
                 </div>
                 <div className="text-right">

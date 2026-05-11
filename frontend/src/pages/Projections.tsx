@@ -7,6 +7,8 @@ import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import toast from 'react-hot-toast';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 import {
   ResponsiveContainer,
   BarChart,
@@ -41,14 +43,14 @@ interface ProjectionSummary {
 }
 
 /** Etiqueta de mes legible: primera letra en mayúscula (p. ej. "septiembre 2026" → "Septiembre 2026"). */
-function formatProjectionMonthLabel(raw: string): string {
+function formatProjectionMonthLabel(raw: string, localeTag: string = 'es-DO'): string {
   return raw
     .trim()
     .split(/\s+/)
     .map((word) => {
       if (/^\d+$/.test(word)) return word;
       if (!word) return word;
-      return word.charAt(0).toLocaleUpperCase('es-DO') + word.slice(1).toLowerCase();
+      return word.charAt(0).toLocaleUpperCase(localeTag) + word.slice(1).toLowerCase();
     })
     .join(' ');
 }
@@ -70,8 +72,8 @@ const MONTH_ABBR_ES: Record<string, string> = {
   diciembre: 'Dic',
 };
 
-function getAxisMonthAbbrevParts(raw: string): { abbrDotted: string; year: string } {
-  const label = formatProjectionMonthLabel(raw);
+function getAxisMonthAbbrevParts(raw: string, localeTag: string = 'es-DO'): { abbrDotted: string; year: string } {
+  const label = formatProjectionMonthLabel(raw, localeTag);
   const parts = label.split(/\s+/).filter(Boolean);
   if (parts.length < 2) return { abbrDotted: label, year: '' };
   const year = parts[parts.length - 1];
@@ -83,31 +85,14 @@ function getAxisMonthAbbrevParts(raw: string): { abbrDotted: string; year: strin
 }
 
 /** Una línea para eje X en escritorio (texto diagonal). */
-function formatAxisMonthOneLine(raw: string): string {
-  const { abbrDotted, year } = getAxisMonthAbbrevParts(raw);
-  if (!year) return formatProjectionMonthLabel(raw);
+function formatAxisMonthOneLine(raw: string, localeTag: string = 'es-DO'): string {
+  const { abbrDotted, year } = getAxisMonthAbbrevParts(raw, localeTag);
+  if (!year) return formatProjectionMonthLabel(raw, localeTag);
   return `${abbrDotted} ${year}`;
 }
 
 /** Valores permitidos y etiquetas del selector (valor = meses). */
-const PROJECTION_HORIZON_OPTIONS: { value: number; label: string }[] = [
-  { value: 3, label: '3 meses' },
-  { value: 6, label: '6 meses' },
-  { value: 12, label: '1 año' },
-  { value: 24, label: '2 años' },
-  { value: 36, label: '3 años' },
-  { value: 48, label: '4 años' },
-  { value: 60, label: '5 años' },
-  { value: 72, label: '6 años' },
-  { value: 84, label: '7 años' },
-  { value: 96, label: '8 años' },
-  { value: 108, label: '9 años' },
-  { value: 120, label: '10 años' },
-  { value: 240, label: '20 años' },
-  { value: 360, label: '30 años' },
-  { value: 480, label: '40 años' },
-  { value: 600, label: '50 años' },
-];
+const PROJECTION_HORIZON_VALUES: number[] = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120, 240, 360, 480, 600];
 
 /** Ancho mínimo por mes proyectado para permitir scroll horizontal en series largas. */
 const PROJECTION_PX_PER_MONTH = 42;
@@ -156,10 +141,12 @@ function ProjectionHtmlMonthLabels({
   projections,
   desktop,
   plotMargin,
+  localeTag = 'es-DO',
 }: {
   projections: MonthlyProjection[];
   desktop: boolean;
   plotMargin: { left: number; right: number };
+  localeTag?: string;
 }) {
   if (projections.length === 0) return null;
   return (
@@ -184,9 +171,9 @@ function ProjectionHtmlMonthLabels({
                   ? 'block max-w-full origin-top -rotate-[34deg] text-center text-[10px] leading-tight text-slate-300'
                   : 'block text-center text-[9px] leading-snug text-slate-300'
               }
-              title={formatProjectionMonthLabel(p.month)}
+              title={formatProjectionMonthLabel(p.month, localeTag)}
             >
-              {formatAxisMonthOneLine(p.month)}
+              {formatAxisMonthOneLine(p.month, localeTag)}
             </span>
           </div>
         ))}
@@ -196,6 +183,8 @@ function ProjectionHtmlMonthLabels({
 }
 
 const Projections: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatCurrency: fc, localeTag, primaryCurrency, secondaryCurrency } = useIntlFormatting();
   const { pageSize: projectionPageSize, setPageSize: setProjectionPageSize, pageSizeOptions: projectionPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:projections', TABLE_PAGE_SIZE);
   const [projections, setProjections] = useState<MonthlyProjection[]>([]);
@@ -247,11 +236,11 @@ const Projections: React.FC = () => {
       setSummary(response.data.data.summary);
       setCurrentBalance(response.data.data.currentBalance);
     } catch (error: any) {
-      toast.error('Error al cargar proyecciones');
+      toast.error(t('toast.projections.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [months]);
+  }, [months, t]);
 
   useEffect(() => {
     fetchProjections();
@@ -283,19 +272,19 @@ const Projections: React.FC = () => {
   return (
     <div className="space-y-6 projections-page">
       <PageHeader
-        title="Proyecciones"
-        subtitle="Estimación de flujo futuro a partir de ingresos/gastos en el sistema y saldo en cuentas bancarias"
+        title={t('pages.projections.title')}
+        subtitle={t('pages.projections.subtitle')}
         actions={
           <div className="flex flex-col xs:flex-row xs:items-center gap-2 w-full sm:w-auto">
-            <label className="text-dark-400 text-sm shrink-0">Meses a proyectar:</label>
+            <label className="text-dark-400 text-sm shrink-0">{t('pages.projections.monthsToProject')}</label>
             <select
               value={months}
               onChange={(e) => setMonths(parseInt(e.target.value, 10))}
               className="input w-full sm:w-auto sm:min-w-[12rem]"
             >
-              {PROJECTION_HORIZON_OPTIONS.map(({ value, label }) => (
+              {PROJECTION_HORIZON_VALUES.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t('pages.projections.horizonOption', { count: value })}
                 </option>
               ))}
             </select>
@@ -304,11 +293,7 @@ const Projections: React.FC = () => {
       />
 
       <p className="text-dark-400 text-sm leading-relaxed max-w-3xl -mt-2">
-        <span className="text-slate-300 font-medium">Cómo se calcula:</span> promedio mensual de ingresos y gastos{' '}
-        <strong className="text-slate-300 font-semibold">no recurrentes</strong> en los últimos 3 meses; más el equivalente
-        mensual de todo lo <strong className="text-slate-300 font-semibold">recurrente</strong> (según su frecuencia: diario,
-        semanal, mensual, anual, etc.). El saldo inicial suma solo <strong className="text-slate-300 font-semibold">cuentas bancarias</strong>{' '}
-        (DOP y USD a tu tasa). No incorpora tarjetas, préstamos, por pagar ni por cobrar — es una vista simplificada alineada con tus movimientos de ingresos/gastos.
+        {t('pages.projections.calculationHelp', { primary: primaryCurrency, secondary: secondaryCurrency })}
       </p>
 
       {/* Summary Cards */}
@@ -322,14 +307,13 @@ const Projections: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Saldo Actual</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.projections.currentBalance')}</p>
                 <p
                   className={`text-2xl font-bold ${currentBalance >= 0 ? 'text-green-400' : 'text-red-400'
                     }`}
                 >
-                  ${currentBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(currentBalance, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">DOP</p>
               </div>
               <div className="w-12 h-12 bg-primary-600 rounded-lg flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-white" />
@@ -345,11 +329,11 @@ const Projections: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Ingresos Proyectados</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.projections.projectedIncome')}</p>
                 <p className="text-2xl font-bold text-green-400">
-                  ${summary.totalProjectedIncome.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.totalProjectedIncome, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">Promedio: ${summary.avgMonthlyIncome.toLocaleString('es-DO', { minimumFractionDigits: 2 })}/mes</p>
+                <p className="text-xs text-dark-400 mt-1">{t('pages.projections.averagePerMonth', { amount: fc(summary.avgMonthlyIncome, primaryCurrency) })}</p>
               </div>
               <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-white" />
@@ -365,11 +349,11 @@ const Projections: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Gastos Proyectados</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.projections.projectedExpenses')}</p>
                 <p className="text-2xl font-bold text-red-400">
-                  ${summary.totalProjectedExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.totalProjectedExpenses, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">Promedio: ${summary.avgMonthlyExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })}/mes</p>
+                <p className="text-xs text-dark-400 mt-1">{t('pages.projections.averagePerMonth', { amount: fc(summary.avgMonthlyExpenses, primaryCurrency) })}</p>
               </div>
               <div className="w-12 h-12 bg-red-600 rounded-lg flex items-center justify-center">
                 <TrendingDown className="w-6 h-6 text-white" />
@@ -385,14 +369,13 @@ const Projections: React.FC = () => {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-dark-400 text-sm mb-1">Saldo Proyectado</p>
+                <p className="text-dark-400 text-sm mb-1">{t('pages.projections.projectedBalance')}</p>
                 <p
                   className={`text-2xl font-bold ${summary.finalProjectedBalance >= 0 ? 'text-green-400' : 'text-red-400'
                     }`}
                 >
-                  ${summary.finalProjectedBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  {fc(summary.finalProjectedBalance, primaryCurrency)}
                 </p>
-                <p className="text-xs text-dark-400 mt-1">DOP</p>
               </div>
               <div className="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-white" />
@@ -412,7 +395,7 @@ const Projections: React.FC = () => {
           transition={{ delay: 0.4 }}
           className="card min-w-0"
         >
-          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Ingresos vs Gastos Proyectados</h2>
+          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.projections.incomeVsExpensesProjected')}</h2>
           <div className="chart-box chart-box--projections w-full min-w-[280px]">
             <ProjectionChartHScroll minWidthPx={projectionChartScrollMinPx}>
               <div className="h-[260px] sm:h-[300px] md:h-[320px] w-full min-h-[220px]">
@@ -427,12 +410,12 @@ const Projections: React.FC = () => {
                     <ProjectionChartXAxis />
                     <YAxis stroke="#94a3b8" />
                     <Tooltip
-                      labelFormatter={(label) => formatProjectionMonthLabel(String(label))}
+                      labelFormatter={(label) => formatProjectionMonthLabel(String(label), localeTag)}
                       contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                     />
                     <Legend />
-                    <Bar dataKey="projectedIncome" fill="#10b981" name="Ingresos" maxBarSize={56} />
-                    <Bar dataKey="projectedExpenses" fill="#ef4444" name="Gastos" maxBarSize={56} />
+                    <Bar dataKey="projectedIncome" fill="#10b981" name={t('pages.projections.chartIncome')} maxBarSize={56} />
+                    <Bar dataKey="projectedExpenses" fill="#ef4444" name={t('pages.projections.chartExpenses')} maxBarSize={56} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -440,6 +423,7 @@ const Projections: React.FC = () => {
                 projections={projections}
                 desktop={chartDesktop}
                 plotMargin={projectionPlotHorizontalPad}
+                localeTag={localeTag}
               />
             </ProjectionChartHScroll>
           </div>
@@ -452,7 +436,7 @@ const Projections: React.FC = () => {
           transition={{ delay: 0.5 }}
           className="card min-w-0"
         >
-          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Flujo Neto Proyectado</h2>
+          <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.projections.netFlowProjected')}</h2>
           <div className="chart-box chart-box--projections w-full min-w-[280px]">
             <ProjectionChartHScroll minWidthPx={projectionChartScrollMinPx}>
               <div className="h-[260px] sm:h-[300px] md:h-[320px] w-full min-h-[220px]">
@@ -462,7 +446,7 @@ const Projections: React.FC = () => {
                     <ProjectionChartXAxis />
                     <YAxis stroke="#94a3b8" />
                     <Tooltip
-                      labelFormatter={(label) => formatProjectionMonthLabel(String(label))}
+                      labelFormatter={(label) => formatProjectionMonthLabel(String(label), localeTag)}
                       contentStyle={{
                         backgroundColor: '#1e293b',
                         border: '1px solid #334155',
@@ -472,7 +456,7 @@ const Projections: React.FC = () => {
                       labelStyle={{ color: '#e2e8f0' }}
                       itemStyle={{ color: '#f8fafc' }}
                     />
-                    <Bar dataKey="netFlow" name="Flujo Neto" maxBarSize={56}>
+                    <Bar dataKey="netFlow" name={t('pages.projections.netFlow')} maxBarSize={56}>
                       {projections.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.netFlow >= 0 ? '#10b981' : '#ef4444'} />
                       ))}
@@ -484,6 +468,7 @@ const Projections: React.FC = () => {
                 projections={projections}
                 desktop={chartDesktop}
                 plotMargin={projectionPlotHorizontalPad}
+                localeTag={localeTag}
               />
             </ProjectionChartHScroll>
           </div>
@@ -497,7 +482,7 @@ const Projections: React.FC = () => {
         transition={{ delay: 0.6 }}
         className="card min-w-0"
       >
-        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Saldo Proyectado Acumulado</h2>
+        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.projections.projectedBalanceAccumulated')}</h2>
         <div className="chart-box chart-box--projections w-full min-w-[280px]">
           <ProjectionChartHScroll minWidthPx={projectionChartScrollMinPx}>
             <div className="h-[300px] sm:h-[360px] md:h-[420px] w-full min-h-[260px]">
@@ -507,7 +492,7 @@ const Projections: React.FC = () => {
                   <ProjectionChartXAxis />
                   <YAxis stroke="#94a3b8" />
                   <Tooltip
-                    labelFormatter={(label) => formatProjectionMonthLabel(String(label))}
+                    labelFormatter={(label) => formatProjectionMonthLabel(String(label), localeTag)}
                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                   />
                   <Line
@@ -516,7 +501,7 @@ const Projections: React.FC = () => {
                     stroke="#0ea5e9"
                     strokeWidth={3}
                     dot={{ fill: '#0ea5e9', r: 3 }}
-                    name="Saldo Proyectado"
+                    name={t('pages.projections.projectedBalance')}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -525,6 +510,7 @@ const Projections: React.FC = () => {
               projections={projections}
               desktop={chartDesktop}
               plotMargin={projectionPlotHorizontalPad}
+              localeTag={localeTag}
             />
           </ProjectionChartHScroll>
         </div>
@@ -537,54 +523,54 @@ const Projections: React.FC = () => {
         transition={{ delay: 0.7 }}
         className="card"
       >
-        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">Proyecciones Mensuales</h2>
+        <h2 className="text-lg sm:text-xl font-semibold text-white mb-4">{t('pages.projections.monthlyProjections')}</h2>
         <>
           <div className="table-responsive table-stack">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-dark-700">
-                  <th className="text-left py-3 px-4 text-dark-400 font-medium">Mes</th>
-                  <th className="text-right py-3 px-4 text-dark-400 font-medium">Ingresos</th>
-                  <th className="text-right py-3 px-4 text-dark-400 font-medium">Gastos</th>
-                  <th className="text-right py-3 px-4 text-dark-400 font-medium">Flujo Neto</th>
-                  <th className="text-right py-3 px-4 text-dark-400 font-medium">Saldo Proyectado</th>
+                  <th className="text-left py-3 px-4 text-dark-400 font-medium">{t('pages.projections.month')}</th>
+                  <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.projections.chartIncome')}</th>
+                  <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.projections.chartExpenses')}</th>
+                  <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.projections.netFlow')}</th>
+                  <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.projections.projectedBalance')}</th>
                 </tr>
               </thead>
               <tbody>
                 {pagedProjections.map((projection, index) => (
                   <tr key={`${projection.month}-${projection.year}-${index}`} className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0">
                     <td
-                      data-label="Mes"
+                      data-label={t('pages.projections.month')}
                       className="py-3 px-4 align-top whitespace-normal break-words md:text-left"
                     >
-                      <span className="table-stack-value">{formatProjectionMonthLabel(projection.month)}</span>
+                      <span className="table-stack-value">{formatProjectionMonthLabel(projection.month, localeTag)}</span>
                     </td>
-                    <td data-label="Ingresos" className="py-3 px-4 text-right text-green-400 md:text-right">
+                    <td data-label={t('pages.projections.chartIncome')} className="py-3 px-4 text-right text-green-400 md:text-right">
                       <span className="table-stack-value text-green-400">
-                        ${projection.projectedIncome.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        {fc(projection.projectedIncome, primaryCurrency)}
                       </span>
                     </td>
-                    <td data-label="Gastos" className="py-3 px-4 text-right text-red-400 md:text-right">
+                    <td data-label={t('pages.projections.chartExpenses')} className="py-3 px-4 text-right text-red-400 md:text-right">
                       <span className="table-stack-value text-red-400">
-                        ${projection.projectedExpenses.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        {fc(projection.projectedExpenses, primaryCurrency)}
                       </span>
                     </td>
                     <td
-                      data-label="Flujo neto"
+                      data-label={t('pages.projections.netFlow')}
                       className={`py-3 px-4 text-right font-semibold md:text-right ${projection.netFlow >= 0 ? 'text-green-400' : 'text-red-400'
                         }`}
                     >
                       <span className={`table-stack-value font-semibold ${projection.netFlow >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${projection.netFlow.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        {fc(projection.netFlow, primaryCurrency)}
                       </span>
                     </td>
                     <td
-                      data-label="Saldo proyectado"
+                      data-label={t('pages.projections.projectedBalance')}
                       className={`py-3 px-4 text-right font-semibold md:text-right ${projection.projectedBalance >= 0 ? 'text-green-400' : 'text-red-400'
                         }`}
                     >
                       <span className={`table-stack-value font-semibold ${projection.projectedBalance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${projection.projectedBalance.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        {fc(projection.projectedBalance, primaryCurrency)}
                       </span>
                     </td>
                   </tr>
@@ -599,7 +585,7 @@ const Projections: React.FC = () => {
             totalItems={projections.length}
             itemsPerPage={projectionPageSize}
             onPageChange={setProjectionPage}
-            itemLabel="meses"
+            itemLabel={t('pages.projections.itemsLabel')}
             variant="card"
             pageSizeOptions={projectionPageSizeOptions}
             onPageSizeChange={setProjectionPageSize}

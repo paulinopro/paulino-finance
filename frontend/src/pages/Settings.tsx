@@ -1,22 +1,55 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { User, Bell, DollarSign, Send } from 'lucide-react';
+import { User, Bell, DollarSign, Send, Globe, Smartphone } from 'lucide-react';
+import { SETTINGS_CURRENCY_OPTIONS, SETTINGS_LOCALE_OPTIONS } from '../constants/userPreferences';
+import { defaultSecondaryForPrimary, useIntlFormatting } from '../context/IntlFormattingContext';
+import { tzI18nKey, pushFailureI18nKey } from '../i18n/config';
+
+const TIMEZONE_IDS = [
+  'America/Santo_Domingo',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/Bogota',
+  'America/Lima',
+  'America/Santiago',
+  'America/Buenos_Aires',
+  'America/Sao_Paulo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Madrid',
+  'Europe/Berlin',
+  'Asia/Tokyo',
+  'Asia/Shanghai',
+  'Asia/Dubai',
+  'UTC',
+] as const;
 
 const Settings: React.FC = () => {
+  const { t } = useTranslation();
+  const { currencySymbol } = useIntlFormatting();
   const { user, updateUser } = useAuth();
-  const [formData, setFormData] = useState({
-    telegramChatId: '',
-    exchangeRateDopUsd: '',
-    timezone: 'America/Santo_Domingo',
-  });
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [timezone, setTimezone] = useState('America/Santo_Domingo');
+  const [currencyPreference, setCurrencyPreference] = useState('DOP');
+  const [secondaryCurrencyPreference, setSecondaryCurrencyPreference] = useState('USD');
+  const [localePreference, setLocalePreference] = useState('es');
+  const [exchangeRateManualInput, setExchangeRateManualInput] = useState('');
   const [notificationSettings, setNotificationSettings] = useState<any>({});
-  const [loading, setLoading] = useState(false);
+  const [telegramSaving, setTelegramSaving] = useState(false);
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [exchangeSaving, setExchangeSaving] = useState(false);
   const [testingNotification, setTestingNotification] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
+  const [pushSyncing, setPushSyncing] = useState(false);
   const [browserNotifPermission, setBrowserNotifPermission] = useState<
     NotificationPermission | 'unsupported'
   >('unsupported');
@@ -29,14 +62,17 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     if (user) {
-      setFormData({
-        telegramChatId: user.telegramChatId || '',
-        exchangeRateDopUsd:
-          user.exchangeRateDopUsd !== undefined && user.exchangeRateDopUsd !== null
-            ? String(user.exchangeRateDopUsd)
-            : '',
-        timezone: user.timezone || 'America/Santo_Domingo',
-      });
+      setTelegramChatId(user.telegramChatId || '');
+      setTimezone(user.timezone || 'America/Santo_Domingo');
+      setCurrencyPreference(user.currencyPreference || 'DOP');
+      setSecondaryCurrencyPreference(
+        user.secondaryCurrencyPreference || defaultSecondaryForPrimary(user.currencyPreference || 'DOP')
+      );
+      setLocalePreference(user.localePreference || 'es');
+      const manual = user.exchangeRateManual;
+      setExchangeRateManualInput(
+        manual !== undefined && manual !== null && Number.isFinite(manual) ? String(manual) : ''
+      );
     }
     fetchNotificationSettings();
   }, [user]);
@@ -45,44 +81,108 @@ const Settings: React.FC = () => {
     try {
       const response = await api.get('/notifications/settings');
       setNotificationSettings(response.data.settings || {});
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching notification settings:', error);
     }
   };
 
-  const handleProfileUpdate = async (e: React.FormEvent) => {
+  const handleSaveTelegram = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setTelegramSaving(true);
     try {
-      // Update user profile via API
       const response = await api.put('/auth/me', {
-        telegramChatId: formData.telegramChatId,
-        exchangeRateDopUsd: parseFloat(formData.exchangeRateDopUsd),
-        timezone: formData.timezone,
+        telegramChatId,
       });
       updateUser(response.data.user);
-      toast.success('Perfil actualizado');
-    } catch (error: any) {
-      toast.error('Error al actualizar perfil');
+      toast.success(t('settings.toastTelegramUpdated'));
+    } catch {
+      toast.error(t('settings.toastTelegramError'));
     } finally {
-      setLoading(false);
+      setTelegramSaving(false);
     }
   };
 
+  const handleSavePreferences = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPrefsSaving(true);
+    try {
+      const response = await api.put('/auth/me', {
+        timezone,
+        currencyPreference,
+        secondaryCurrencyPreference,
+        localePreference,
+      });
+      updateUser(response.data.user);
+      toast.success(t('settings.toastPrefsSaved'));
+    } catch (error: unknown) {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || t('settings.toastPrefsErrorFallback'));
+    } finally {
+      setPrefsSaving(false);
+    }
+  };
+
+  const handleSaveExchangeRate = async (e?: React.MouseEvent | React.FormEvent) => {
+    e?.preventDefault?.();
+    setExchangeSaving(true);
+    try {
+      const parsed = parseFloat(exchangeRateManualInput);
+      const response = await api.put('/auth/me', {
+        exchangeRateManual:
+          exchangeRateManualInput.trim() === ''
+            ? null
+            : Number.isFinite(parsed) && parsed > 0
+              ? parsed
+              : null,
+      });
+      updateUser(response.data.user);
+      toast.success(t('settings.toastExchangeUpdated'));
+    } catch {
+      toast.error(t('settings.toastExchangeError'));
+    } finally {
+      setExchangeSaving(false);
+    }
+  };
 
   const handleTestNotification = async () => {
-    if (!formData.telegramChatId) {
-      toast.error('Debes configurar tu Telegram Chat ID primero');
+    if (!telegramChatId) {
+      toast.error(t('settings.toastTelegramTestNeedChatId'));
       return;
     }
     setTestingNotification(true);
     try {
       await api.post('/notifications/test');
-      toast.success('Notificación de prueba enviada. Revisa tu Telegram.');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al enviar notificación de prueba');
+      toast.success(t('settings.toastTelegramTestSent'));
+    } catch (error: unknown) {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || t('settings.toastTelegramTestErrorFallback'));
     } finally {
       setTestingNotification(false);
+    }
+  };
+
+  const handleTestPushNotification = async () => {
+    if (browserNotifPermission !== 'granted') {
+      toast.error(t(pushFailureI18nKey('no-permission')));
+      return;
+    }
+    setTestingPush(true);
+    try {
+      const pre = await syncPushSubscriptionWithServer();
+      if (!pre.ok) {
+        toast.error(t(pushFailureI18nKey(pre.reason)));
+        return;
+      }
+      const { data } = await api.post<{ success?: boolean; message?: string }>('/notifications/push/test');
+      toast.success(data?.message || t('settings.pushTestFallbackSuccess'));
+    } catch (error: unknown) {
+      const err = error as {
+        response?: { status?: number; data?: { message?: string } };
+      };
+      const msg = err.response?.data?.message;
+      toast.error(msg || t('settings.toastPushTestErrorFallback'));
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -92,129 +192,216 @@ const Settings: React.FC = () => {
         notificationType: type,
         ...settings,
       });
-      toast.success('Configuración de notificaciones actualizada');
+      toast.success(t('settings.notifUpdatedToast'));
       fetchNotificationSettings();
-    } catch (error: any) {
-      toast.error('Error al actualizar configuración');
+    } catch {
+      toast.error(t('settings.notifUpdatedError'));
     }
   };
 
   return (
     <div className="space-y-6">
       <div className="text-center sm:text-left">
-        <h1 className="page-title mb-2">Configuración</h1>
+        <h1 className="page-title mb-2">{t('settings.pageTitle')}</h1>
         <p className="text-dark-400 text-sm sm:text-base max-w-prose mx-auto sm:mx-0">
-          Preferencias de la app. Tu nombre y correo se editan en{' '}
+          {t('settings.introBefore')}
           <Link to="/profile" className="text-primary-400 hover:underline">
-            Mi perfil
+            {t('settings.profileAnchor')}
           </Link>
-          .
+          {t('settings.introAfter')}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Profile Settings */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="card">
           <div className="flex items-center space-x-3 mb-6">
             <User className="w-6 h-6 text-primary-400" />
-            <h2 className="text-xl font-semibold text-white">Telegram y horario</h2>
+            <h2 className="text-xl font-semibold text-white">{t('settings.telegramCardTitle')}</h2>
           </div>
-          <form onSubmit={handleProfileUpdate} className="space-y-4">
+          <form onSubmit={handleSaveTelegram} className="space-y-4">
             <div>
-              <label className="label">Telegram Chat ID</label>
+              <label className="label">{t('settings.telegramChatIdLabel')}</label>
               <input
                 type="text"
-                value={formData.telegramChatId}
-                onChange={(e) => setFormData({ ...formData, telegramChatId: e.target.value })}
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
                 className="input w-full"
                 placeholder="123456789"
               />
-              <p className="text-xs text-dark-400 mt-1">
-                Obtén tu Chat ID enviando un mensaje a tu bot y visitando: https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates
-              </p>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.telegramHint')}</p>
             </div>
-            <div>
-              <label className="label">Zona Horaria (Timezone)</label>
-              <select
-                value={formData.timezone}
-                onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                className="input w-full"
-              >
-                <option value="America/Santo_Domingo">América/Santo Domingo (AST, UTC-4)</option>
-                <option value="America/New_York">América/Nueva York (EST/EDT, UTC-5/-4)</option>
-                <option value="America/Chicago">América/Chicago (CST/CDT, UTC-6/-5)</option>
-                <option value="America/Denver">América/Denver (MST/MDT, UTC-7/-6)</option>
-                <option value="America/Los_Angeles">América/Los Ángeles (PST/PDT, UTC-8/-7)</option>
-                <option value="America/Mexico_City">América/Ciudad de México (CST, UTC-6)</option>
-                <option value="America/Bogota">América/Bogotá (COT, UTC-5)</option>
-                <option value="America/Lima">América/Lima (PET, UTC-5)</option>
-                <option value="America/Santiago">América/Santiago (CLT, UTC-3)</option>
-                <option value="America/Buenos_Aires">América/Buenos Aires (ART, UTC-3)</option>
-                <option value="America/Sao_Paulo">América/São Paulo (BRT, UTC-3)</option>
-                <option value="Europe/London">Europa/Londres (GMT/BST, UTC+0/+1)</option>
-                <option value="Europe/Paris">Europa/París (CET/CEST, UTC+1/+2)</option>
-                <option value="Europe/Madrid">Europa/Madrid (CET/CEST, UTC+1/+2)</option>
-                <option value="Asia/Tokyo">Asia/Tokio (JST, UTC+9)</option>
-                <option value="Asia/Shanghai">Asia/Shanghái (CST, UTC+8)</option>
-                <option value="Asia/Dubai">Asia/Dubái (GST, UTC+4)</option>
-                <option value="UTC">UTC (UTC+0)</option>
-              </select>
-              <p className="text-xs text-dark-400 mt-1">
-                Selecciona tu zona horaria para que las fechas se muestren correctamente
-              </p>
-            </div>
-            <button type="submit" disabled={loading} className="btn-primary w-full">
-              {loading ? 'Guardando...' : 'Guardar Cambios'}
+            <button type="submit" disabled={telegramSaving} className="btn-primary w-full">
+              {telegramSaving ? t('settings.telegramSaving') : t('settings.telegramSaveIdle')}
             </button>
           </form>
         </motion.div>
 
-        {/* Exchange Rate Settings */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="card">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="card"
+        >
+          <div className="flex items-center space-x-3 mb-6">
+            <Globe className="w-6 h-6 text-primary-400" />
+            <h2 className="text-xl font-semibold text-white">{t('settings.prefsCardTitle')}</h2>
+          </div>
+          <form onSubmit={handleSavePreferences} className="space-y-4">
+            <div>
+              <label className="label">{t('settings.timezoneLabel')}</label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="input w-full"
+              >
+                {TIMEZONE_IDS.map((z) => (
+                  <option key={z} value={z}>
+                    {t(tzI18nKey(z))}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.timezoneHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('settings.currencyLabel')}</label>
+              <select
+                value={currencyPreference}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCurrencyPreference(v);
+                  setSecondaryCurrencyPreference((prev) =>
+                    prev === v ? defaultSecondaryForPrimary(v) : prev
+                  );
+                }}
+                className="input w-full"
+              >
+                {SETTINGS_CURRENCY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {t(`currency.${c.code}.label`)} ({currencySymbol(c.code)}) — {t(`currency.${c.code}.hint`)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.currencyHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('settings.secondaryCurrencyLabel')}</label>
+              <select
+                value={secondaryCurrencyPreference}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === currencyPreference) {
+                    toast.error(t('settings.secondaryMustDiffer'));
+                    return;
+                  }
+                  setSecondaryCurrencyPreference(v);
+                }}
+                className="input w-full"
+              >
+                {SETTINGS_CURRENCY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {t(`currency.${c.code}.label`)} ({currencySymbol(c.code)}) — {t(`currency.${c.code}.hint`)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.secondaryCurrencyHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('settings.localeLabel')}</label>
+              <select
+                value={localePreference}
+                onChange={(e) => setLocalePreference(e.target.value)}
+                className="input w-full"
+              >
+                {SETTINGS_LOCALE_OPTIONS.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {t(`settings.localeName.${opt.code}` as const)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.localeHint')}</p>
+            </div>
+            <button type="submit" disabled={prefsSaving} className="btn-primary w-full">
+              {prefsSaving ? t('settings.prefsSaving') : t('settings.prefsSaveIdle')}
+            </button>
+          </form>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="card"
+        >
           <div className="flex items-center space-x-3 mb-6">
             <DollarSign className="w-6 h-6 text-primary-400" />
-            <h2 className="text-xl font-semibold text-white">Tasa de Cambio</h2>
+            <h2 className="text-xl font-semibold text-white">{t('settings.exchangeCardTitle')}</h2>
           </div>
           <div className="space-y-4">
             <div>
-              <label className="label">Tasa DOP/USD</label>
+              <label className="label">
+                {t('settings.exchangeRateLabel', {
+                  primary: currencyPreference,
+                  secondary: secondaryCurrencyPreference,
+                })}
+              </label>
               <input
                 type="number"
                 step="0.01"
-                value={formData.exchangeRateDopUsd}
-                onChange={(e) => setFormData({ ...formData, exchangeRateDopUsd: e.target.value })}
+                value={exchangeRateManualInput}
+                onChange={(e) => setExchangeRateManualInput(e.target.value)}
                 className="input w-full"
+                placeholder={t('settings.exchangeRatePlaceholder')}
               />
-              <p className="text-xs text-dark-400 mt-1">Tasa de cambio para convertir entre DOP y USD</p>
+              <p className="text-xs text-dark-400 mt-1">
+                {t('settings.exchangeRateHint', {
+                  primary: currencyPreference,
+                  secondary: secondaryCurrencyPreference,
+                })}
+              </p>
+              {user?.exchangeRateEffective != null && (
+                <p className="text-xs text-primary-300 mt-1">
+                  {t('settings.exchangeRateEffectiveLine', { rate: user.exchangeRateEffective.toFixed(4) })}
+                </p>
+              )}
             </div>
-            <button onClick={handleProfileUpdate} disabled={loading} className="btn-primary w-full">
-              Actualizar Tasa
+            <button type="button" onClick={handleSaveExchangeRate} disabled={exchangeSaving} className="btn-primary w-full">
+              {exchangeSaving ? t('settings.exchangeSaving') : t('settings.exchangeSaveIdle')}
             </button>
           </div>
         </motion.div>
 
-        {/* Notification Settings */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="card lg:col-span-2">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="card lg:col-span-3"
+        >
           <div className="flex items-center space-x-3 mb-6">
             <Bell className="w-6 h-6 text-primary-400" />
-            <h2 className="text-xl font-semibold text-white">Notificaciones</h2>
+            <h2 className="text-xl font-semibold text-white">{t('settings.notificationsHeading')}</h2>
           </div>
           <div className="space-y-6">
             {['CARD_PAYMENT', 'LOAN_PAYMENT', 'RECURRING_EXPENSE'].map((type) => {
-              const settings = notificationSettings[type] || { enabled: true, telegramEnabled: false, daysBefore: [3, 7] };
+              const settings = notificationSettings[type] || {
+                enabled: true,
+                telegramEnabled: false,
+                daysBefore: [3, 7],
+              };
               return (
                 <div key={type} className="bg-dark-700 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-medium text-white">
-                      {type === 'CARD_PAYMENT' && 'Pagos de Tarjetas'}
-                      {type === 'LOAN_PAYMENT' && 'Pagos de Préstamos'}
-                      {type === 'RECURRING_EXPENSE' && 'Gastos Recurrentes'}
+                      {type === 'CARD_PAYMENT' && t('settings.notifTypeCardPayments')}
+                      {type === 'LOAN_PAYMENT' && t('settings.notifTypeLoanPayments')}
+                      {type === 'RECURRING_EXPENSE' && t('settings.notifTypeRecurringExpense')}
                     </h3>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
                         type="checkbox"
                         checked={settings.enabled}
-                        onChange={(e) => handleNotificationSettingsUpdate(type, { ...settings, enabled: e.target.checked })}
+                        onChange={(e) =>
+                          handleNotificationSettingsUpdate(type, { ...settings, enabled: e.target.checked })
+                        }
                         className="sr-only peer"
                       />
                       <div className="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
@@ -223,28 +410,36 @@ const Settings: React.FC = () => {
                   {settings.enabled && (
                     <div className="space-y-3">
                       <div>
-                        <label className="label">Notificaciones por Telegram</label>
+                        <label className="label">{t('settings.telegramNotifToggleLabel')}</label>
                         <label className="relative inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
                             checked={settings.telegramEnabled}
-                            onChange={(e) => handleNotificationSettingsUpdate(type, { ...settings, telegramEnabled: e.target.checked })}
+                            onChange={(e) =>
+                              handleNotificationSettingsUpdate(type, {
+                                ...settings,
+                                telegramEnabled: e.target.checked,
+                              })
+                            }
                             className="sr-only peer"
                           />
                           <div className="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
                         </label>
                       </div>
                       <div>
-                        <label className="label">Días antes de notificar (separados por comas)</label>
+                        <label className="label">{t('settings.daysBeforeLabel')}</label>
                         <input
                           type="text"
                           value={settings.daysBefore?.join(', ') || '3, 7'}
                           onChange={(e) => {
-                            const days = e.target.value.split(',').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+                            const days = e.target.value
+                              .split(',')
+                              .map((d) => parseInt(d.trim(), 10))
+                              .filter((d) => !isNaN(d));
                             handleNotificationSettingsUpdate(type, { ...settings, daysBefore: days });
                           }}
                           className="input w-full"
-                          placeholder="3, 7"
+                          placeholder={t('settings.daysBeforePlaceholder')}
                         />
                       </div>
                     </div>
@@ -254,67 +449,113 @@ const Settings: React.FC = () => {
             })}
             {browserNotifPermission !== 'unsupported' && (
               <div className="bg-dark-700 rounded-lg p-4">
-                <h3 className="font-medium text-white mb-2">Avisos en el navegador y PWA</h3>
-                <p className="text-dark-400 text-sm mb-3">
-                  Con el permiso activo verás avisos del sistema cuando la app esté en segundo plano (mismo
-                  contenido que el historial, en texto plano). En producción, la PWA puede registrarse para
-                  recibir push del servidor (VAPID en el backend).
-                </p>
+                <h3 className="font-medium text-white mb-2">{t('settings.browserPushTitle')}</h3>
+                <p className="text-dark-400 text-sm mb-3">{t('settings.browserPushDescription')}</p>
                 <p className="text-xs text-dark-500 mb-3">
-                  Estado:{' '}
+                  {t('settings.browserPushStatusLabel')}{' '}
                   {browserNotifPermission === 'granted'
-                    ? 'Permitido'
+                    ? t('settings.browserPushStatusGranted')
                     : browserNotifPermission === 'denied'
-                      ? 'Bloqueado (revísalo en la configuración del navegador)'
-                      : 'Pendiente'}
+                      ? t('settings.browserPushStatusDenied')
+                      : t('settings.browserPushStatusPending')}
                 </p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (typeof Notification === 'undefined') return;
-                    const p = await Notification.requestPermission();
-                    setBrowserNotifPermission(p);
-                    if (p === 'granted') {
-                      const sync = await syncPushSubscriptionWithServer();
-                      if (sync.ok) {
-                        toast.success('Notificaciones activadas y suscripción push sincronizada');
-                      } else {
-                        toast.success('Notificaciones del navegador activadas');
-                      }
-                    } else if (p === 'denied') toast.error('Permiso denegado');
-                  }}
-                  disabled={browserNotifPermission !== 'default'}
-                  className="btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {browserNotifPermission === 'granted'
-                    ? 'Permiso concedido'
-                    : browserNotifPermission === 'denied'
-                      ? 'Permiso bloqueado'
-                      : 'Permitir avisos en el navegador'}
-                </button>
+                {browserNotifPermission === 'default' ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (typeof Notification === 'undefined') return;
+                      const p = await Notification.requestPermission();
+                      setBrowserNotifPermission(p);
+                      if (p === 'granted') {
+                        const syncResult = await syncPushSubscriptionWithServer();
+                        if (syncResult.ok) {
+                          toast.success(t('settings.browserPushSyncOkToast'));
+                        } else {
+                          toast(t(pushFailureI18nKey(syncResult.reason)), { duration: 7000 });
+                        }
+                      } else if (p === 'denied') toast.error(t('settings.browserPushDeniedToast'));
+                    }}
+                    className="btn-secondary w-full"
+                  >
+                    {t('settings.browserPushAllowBtn')}
+                  </button>
+                ) : browserNotifPermission === 'granted' ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-dark-400 leading-relaxed">{t('settings.browserPushSyncExplain')}</p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setPushSyncing(true);
+                        try {
+                          const syncResult = await syncPushSubscriptionWithServer();
+                          if (syncResult.ok) {
+                            toast.success(t('settings.browserPushSyncedToast'));
+                          } else {
+                            toast.error(t(pushFailureI18nKey(syncResult.reason)));
+                          }
+                        } finally {
+                          setPushSyncing(false);
+                        }
+                      }}
+                      disabled={pushSyncing}
+                      className="btn-secondary w-full"
+                    >
+                      {pushSyncing ? t('settings.browserPushSyncSaving') : t('settings.browserPushSyncIdle')}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-dark-400">{t('settings.browserPushBlockedHelp')}</p>
+                )}
               </div>
             )}
             <div className="bg-dark-700 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium text-white">Probar Notificación de Telegram</h3>
+              <div className="flex items-center justify-between mb-4 gap-3">
+                <h3 className="font-medium text-white flex items-center gap-2">
+                  <Smartphone className="w-5 h-5 shrink-0 text-primary-400" aria-hidden />
+                  {t('settings.pushTestTitle')}
+                </h3>
               </div>
-              <p className="text-dark-400 text-sm mb-4">
-                Envía una notificación de prueba a tu Telegram para verificar que la configuración es correcta.
-              </p>
+              <p className="text-dark-400 text-sm mb-4">{t('settings.pushTestDescription')}</p>
               <button
+                type="button"
+                onClick={handleTestPushNotification}
+                disabled={testingPush}
+                className="btn-secondary w-full flex items-center justify-center space-x-2"
+              >
+                {testingPush ? (
+                  <>
+                    <span className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></span>
+                    <span>{t('settings.pushTestSending')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Smartphone size={20} />
+                    <span>{t('settings.pushTestIdle')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="bg-dark-700 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-medium text-white">{t('settings.telegramTestCardTitle')}</h3>
+              </div>
+              <p className="text-dark-400 text-sm mb-4">{t('settings.telegramTestDescription')}</p>
+              <button
+                type="button"
                 onClick={handleTestNotification}
-                disabled={testingNotification || !formData.telegramChatId}
+                disabled={testingNotification || !telegramChatId}
                 className="btn-primary w-full flex items-center justify-center space-x-2"
               >
                 {testingNotification ? (
                   <>
                     <span className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></span>
-                    <span>Enviando...</span>
+                    <span>{t('settings.telegramTestSending')}</span>
                   </>
                 ) : (
                   <>
                     <Send size={20} />
-                    <span>Probar Notificación</span>
+                    <span>{t('settings.telegramTestIdle')}</span>
                   </>
                 )}
               </button>

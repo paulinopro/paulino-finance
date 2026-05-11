@@ -1,0 +1,3 @@
+/*! For license information please see 70981.bf166e65.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[70981],{70981(n,e,i){i.r(e),i.d(e,{default:()=>a});const a=(0,i(21639).A)("RockingChair",[["polyline",{points:"3.5 2 6.5 12.5 18 12.5",key:"y3iy52"}],["line",{x1:"9.5",x2:"5.5",y1:"12.5",y2:"20",key:"19vg5i"}],["line",{x1:"15",x2:"18.5",y1:"12.5",y2:"20",key:"1inpmv"}],["path",{d:"M2.75 18a13 13 0 0 0 18.5 0",key:"1nquas"}]])}}]);
+//# sourceMappingURL=70981.bf166e65.chunk.js.map

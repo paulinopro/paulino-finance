@@ -6,19 +6,13 @@ import toast from 'react-hot-toast';
 import { adminService, type AdminSubscriptionPlanSummary } from '../services/adminService';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
 import type { SubscriptionMe, SubscriptionPaymentItem } from '../services/subscriptionClientService';
-
-const fmt = (iso: string | null | undefined) => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' });
-};
-
-const intervalLabel = (b: SubscriptionMe['billingInterval']) =>
-  b === 'monthly' ? 'Mensual' : b === 'yearly' ? 'Anual' : '—';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 
 const AdminUserDetail: React.FC = () => {
+  const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
+  const { formatDateTimeMedium, formatCurrency: fc, primaryCurrency } = useIntlFormatting();
   const id = parseInt(String(userId), 10);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<{
@@ -37,6 +31,11 @@ const AdminUserDetail: React.FC = () => {
   const [billingSelect, setBillingSelect] = useState<'monthly' | 'yearly'>('monthly');
   const [savingPlan, setSavingPlan] = useState(false);
 
+  const fmt = (iso: string | null | undefined) => (!iso ? '—' : formatDateTimeMedium(iso) || '—');
+
+  const billingIntervalLabel = (b: SubscriptionMe['billingInterval']) =>
+    b === 'monthly' ? t('pages.adminUsers.monthly') : b === 'yearly' ? t('pages.adminUsers.yearly') : '—';
+
   const loadUserData = async () => {
     const [detail, pay] = await Promise.all([
       adminService.getUserById(id),
@@ -47,7 +46,7 @@ const AdminUserDetail: React.FC = () => {
 
   useEffect(() => {
     if (Number.isNaN(id)) {
-      toast.error('ID inválido');
+      toast.error(t('toast.adminUserDetail.invalidId'));
       setLoading(false);
       return;
     }
@@ -71,7 +70,7 @@ const AdminUserDetail: React.FC = () => {
           detail.subscription?.billingInterval === 'yearly' ? 'yearly' : 'monthly'
         );
       } catch (e: any) {
-        if (!cancelled) toast.error(e.response?.data?.message || 'Error al cargar');
+        if (!cancelled) toast.error(e.response?.data?.message || t('toast.adminUserDetail.loadError'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -79,27 +78,27 @@ const AdminUserDetail: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, t]);
 
   const applyPlanChange = async () => {
     if (user?.isSuperAdmin) return;
     if (planSelect === '') {
-      toast.error('Elige un plan');
+      toast.error(t('toast.adminUserDetail.choosePlan'));
       return;
     }
     const newId = parseInt(planSelect, 10);
     if (Number.isNaN(newId)) {
-      toast.error('Plan no válido');
+      toast.error(t('toast.adminUserDetail.invalidPlan'));
       return;
     }
     if (newId === subscription?.plan?.id && billingSelect === (subscription?.billingInterval || 'monthly')) {
-      toast('Sin cambios que aplicar');
+      toast(t('toast.adminUserDetail.noChangesToApply'));
       return;
     }
     setSavingPlan(true);
     try {
       await adminService.updateUser(id, { planId: newId, billingInterval: billingSelect });
-      toast.success('Plan actualizado');
+      toast.success(t('toast.adminUserDetail.planUpdated'));
       const { detail, pay } = await loadUserData();
       setUser(detail.user);
       setSubscription(detail.subscription);
@@ -109,7 +108,7 @@ const AdminUserDetail: React.FC = () => {
         detail.subscription?.billingInterval === 'yearly' ? 'yearly' : 'monthly'
       );
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al asignar plan');
+      toast.error(e.response?.data?.message || t('toast.adminUserDetail.planAssignError'));
     } finally {
       setSavingPlan(false);
     }
@@ -131,14 +130,19 @@ const AdminUserDetail: React.FC = () => {
       <AdminBreadcrumbs userLabel={user.email} />
 
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="page-title">Cliente</h1>
+        <h1 className="page-title">{t('pages.admin.userDetailTitle')}</h1>
         <p className="text-dark-400 mt-1 text-sm">
           {user.email}
           {user.firstName || user.lastName ? ` · ${[user.firstName, user.lastName].filter(Boolean).join(' ')}` : ''}
         </p>
         <p className="text-dark-500 mt-2 text-xs">
-          Cuenta: <span className={user.isActive ? 'text-emerald-400' : 'text-red-400'}>{user.isActive ? 'Activa' : 'Deshabilitada'}</span>
-          {user.isSuperAdmin && <span className="ml-2 text-amber-400">Super admin</span>}
+          {t('pages.adminUserDetail.accountLabel')}{' '}
+          <span className={user.isActive ? 'text-emerald-400' : 'text-red-400'}>
+            {user.isActive ? t('pages.adminUsers.accountActive') : t('pages.adminUsers.accountDisabled')}
+          </span>
+          {user.isSuperAdmin && (
+            <span className="ml-2 text-amber-400">{t('pages.admin.kpiSuperAdmin')}</span>
+          )}
         </p>
       </motion.div>
 
@@ -146,31 +150,41 @@ const AdminUserDetail: React.FC = () => {
         <div className="card space-y-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <CreditCard className="h-5 w-5 text-primary-400" />
-            Suscripción
+            {t('pages.adminUserDetail.subscriptionHeading')}
           </h2>
           {subscription.isSuperAdmin ? (
-            <p className="text-dark-400 text-sm">Usuario con acceso completo (super admin); no aplica plan de pago.</p>
+            <p className="text-dark-400 text-sm">{t('pages.adminUserDetail.superAdminNoPlan')}</p>
           ) : (
             <>
               <div className="grid gap-2 text-sm sm:grid-cols-2">
                 <div>
-                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Plan</p>
+                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                    {t('pages.adminUserDetail.colPlan')}
+                  </p>
                   <p className="text-dark-200">{subscription.plan?.name || subscription.status}</p>
                 </div>
                 <div>
-                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Facturación</p>
-                  <p className="text-dark-200">{intervalLabel(subscription.billingInterval)}</p>
+                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                    {t('pages.adminUserDetail.billing')}
+                  </p>
+                  <p className="text-dark-200">{billingIntervalLabel(subscription.billingInterval)}</p>
                 </div>
                 <div>
-                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Periodo desde</p>
+                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                    {t('pages.adminUserDetail.periodFrom')}
+                  </p>
                   <p className="text-dark-200">{fmt(subscription.currentPeriodStart as string | null)}</p>
                 </div>
                 <div>
-                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Periodo hasta</p>
+                  <p className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                    {t('pages.adminUserDetail.periodTo')}
+                  </p>
                   <p className="text-dark-200">{fmt(subscription.currentPeriodEnd as string | null)}</p>
                 </div>
               </div>
-              <p className="text-xs text-dark-500">Estado API: {subscription.status}</p>
+              <p className="text-xs text-dark-500">
+                {t('pages.adminUserDetail.apiStatus')} {subscription.status}
+              </p>
             </>
           )}
         </div>
@@ -178,25 +192,26 @@ const AdminUserDetail: React.FC = () => {
 
       {!user.isSuperAdmin && plans.length > 0 && (
         <div className="card space-y-3">
-          <h2 className="text-lg font-semibold text-white">Cambiar plan (manual)</h2>
-          <p className="text-xs text-dark-500">
-            Misma lógica que en la lista de administración. Los webhooks de PayPal pueden ajustar periodo
-            e intervalo después.
-          </p>
+          <h2 className="text-lg font-semibold text-white">{t('pages.adminUserDetail.changePlanHeading')}</h2>
+          <p className="text-xs text-dark-500">{t('pages.adminUserDetail.changePlanHint')}</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="min-w-0 sm:flex-1">
-              <span className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">Plan</span>
+              <span className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
+                {t('pages.adminUserDetail.colPlan')}
+              </span>
               <select
                 className="input mt-1 w-full max-w-sm"
                 value={planSelect}
                 onChange={(e) => setPlanSelect(e.target.value)}
                 disabled={savingPlan}
-                aria-label="Plan a asignar"
+                aria-label={t('pages.adminUserDetail.assignPlanAria')}
               >
-                {subscription?.plan == null && <option value="">Seleccionar plan…</option>}
+                {subscription?.plan == null && (
+                  <option value="">{t('pages.adminUserDetail.selectPlanPlaceholder')}</option>
+                )}
                 {subscription?.plan && !plans.some((p) => p.id === subscription.plan?.id) && (
                   <option value={String(subscription.plan.id)}>
-                    {subscription.plan.name} (actual)
+                    {subscription.plan.name} {t('pages.adminUserDetail.currentPlanSuffix')}
                   </option>
                 )}
                 {plans.map((p) => (
@@ -208,17 +223,17 @@ const AdminUserDetail: React.FC = () => {
             </div>
             <div className="w-full min-w-0 sm:w-44">
               <span className="text-[0.65rem] font-medium uppercase tracking-wider text-dark-500">
-                Ciclo
+                {t('pages.adminUserDetail.billingCycle')}
               </span>
               <select
                 className="input mt-1 w-full"
                 value={billingSelect}
                 onChange={(e) => setBillingSelect(e.target.value as 'monthly' | 'yearly')}
                 disabled={savingPlan}
-                aria-label="Ciclo de facturación al asignar"
+                aria-label={t('pages.adminUserDetail.billingCycleAssignAria')}
               >
-                <option value="monthly">Mensual</option>
-                <option value="yearly">Anual</option>
+                <option value="monthly">{t('pages.adminUsers.monthly')}</option>
+                <option value="yearly">{t('pages.adminUsers.yearly')}</option>
               </select>
             </div>
             <button
@@ -227,7 +242,7 @@ const AdminUserDetail: React.FC = () => {
               disabled={savingPlan}
               className="btn-primary h-[42px] w-full sm:w-auto shrink-0"
             >
-              {savingPlan ? 'Guardando…' : 'Aplicar'}
+              {savingPlan ? t('pages.adminUserDetail.saving') : t('pages.adminUserDetail.apply')}
             </button>
           </div>
         </div>
@@ -237,19 +252,19 @@ const AdminUserDetail: React.FC = () => {
         <div className="border-b border-dark-700 px-4 py-3 sm:px-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <Receipt className="h-5 w-5 text-primary-400" />
-            Historial de pagos
+            {t('pages.adminUserDetail.paymentsHeading')}
           </h2>
         </div>
         {payments.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-dark-500 sm:px-5">Sin pagos registrados.</p>
+          <p className="px-4 py-8 text-center text-sm text-dark-500 sm:px-5">{t('pages.adminUserDetail.noPayments')}</p>
         ) : (
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
               <tr className="border-b border-dark-600/80 bg-dark-900/50 text-[0.7rem] uppercase tracking-wider text-dark-500">
-                <th className="px-4 py-2 font-medium sm:px-5">Fecha pago</th>
-                <th className="px-2 py-2 font-medium">Plan</th>
-                <th className="px-2 py-2 font-medium">Importe</th>
-                <th className="px-2 py-2 font-medium">Periodo</th>
+                <th className="px-4 py-2 font-medium sm:px-5">{t('pages.adminUserDetail.colPaidAt')}</th>
+                <th className="px-2 py-2 font-medium">{t('pages.adminUserDetail.colPlan')}</th>
+                <th className="px-2 py-2 font-medium">{t('pages.adminUserDetail.colAmount')}</th>
+                <th className="px-2 py-2 font-medium">{t('pages.adminUserDetail.colPeriod')}</th>
               </tr>
             </thead>
             <tbody>
@@ -258,9 +273,7 @@ const AdminUserDetail: React.FC = () => {
                   <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-dark-300 sm:px-5">{fmt(p.paidAt)}</td>
                   <td className="px-2 py-2.5">{p.planName || '—'}</td>
                   <td className="px-2 py-2.5 tabular-nums">
-                    {new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' }).format(
-                      parseFloat(p.amount) || 0
-                    )}
+                    {fc(parseFloat(p.amount) || 0, p.currency || primaryCurrency)}
                   </td>
                   <td className="px-2 py-2.5 text-xs text-dark-400">
                     {p.periodStart || p.periodEnd ? `${fmt(p.periodStart)} → ${fmt(p.periodEnd)}` : '—'}

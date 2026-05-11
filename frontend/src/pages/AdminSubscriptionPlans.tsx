@@ -5,15 +5,13 @@ import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import { Layers, Plus, Trash2, Save, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { adminService } from '../services/adminService';
-import {
-  SUBSCRIPTION_MODULE_KEYS,
-  enabledModulesHasAtLeastOne,
-  subscriptionModuleLabelEs,
-} from '../constants/subscriptionModules';
+import { SUBSCRIPTION_MODULE_KEYS, enabledModulesHasAtLeastOne } from '../constants/subscriptionModules';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
 
 const emptyModules = () => {
   const o: Record<string, boolean> = {};
@@ -23,7 +21,12 @@ const emptyModules = () => {
   return o;
 };
 
+const ADMIN_PLAN_EDIT_FIELDS = ['name', 'slug', 'description', 'currency', 'priceMonthly', 'priceYearly', 'sortOrder'] as const;
+
 const AdminSubscriptionPlans: React.FC = () => {
+  const { t } = useTranslation();
+  const moduleLabel = (key: string) => t(`pages.subscriptionModuleLabels.${key}`);
+  const { formatCurrency: fc, primaryCurrency } = useIntlFormatting();
   const { pageSize: adminPlansPageSize, setPageSize: setAdminPlansPageSize, pageSizeOptions: adminPlansPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:adminSubscriptionPlans', TABLE_PAGE_SIZE);
   const editModalRef = useRef<HTMLDivElement>(null);
@@ -44,7 +47,7 @@ const AdminSubscriptionPlans: React.FC = () => {
       const data = await adminService.listSubscriptionPlans();
       setPlans(data.plans);
     } catch {
-      toast.error('Error al cargar planes');
+      toast.error(t('toast.adminPlans.loadError'));
     } finally {
       setLoading(false);
     }
@@ -71,7 +74,7 @@ const AdminSubscriptionPlans: React.FC = () => {
   const saveEdit = async () => {
     if (!editing) return;
     if (!enabledModulesHasAtLeastOne(editing.enabledModules)) {
-      toast.error('Seleccione al menos un módulo para el plan');
+      toast.error(t('toast.adminPlans.modulesRequired'));
       return;
     }
     try {
@@ -88,11 +91,11 @@ const AdminSubscriptionPlans: React.FC = () => {
         isActive: editing.isActive,
         sortOrder: parseInt(String(editing.sortOrder), 10) || 0,
       });
-      toast.success('Plan guardado');
+      toast.success(t('toast.adminPlans.saved'));
       setEditing(null);
       load();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al guardar');
+      toast.error(e.response?.data?.message || t('toast.adminPlans.saveError'));
     }
   };
 
@@ -125,11 +128,11 @@ const AdminSubscriptionPlans: React.FC = () => {
     const name = newPlanName.trim();
     const slug = newPlanSlug.trim().toLowerCase().replace(/\s+/g, '-').slice(0, 80);
     if (!name) {
-      toast.error('Indica un nombre para el plan');
+      toast.error(t('toast.adminPlans.nameRequired'));
       return;
     }
     if (!slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-      toast.error('Slug inválido: use minúsculas, números y guiones (ej. premium-plus)');
+      toast.error(t('toast.adminPlans.slugInvalid'));
       return;
     }
     setCreateSaving(true);
@@ -145,11 +148,11 @@ const AdminSubscriptionPlans: React.FC = () => {
         isActive: true,
         sortOrder: plans.length,
       });
-      toast.success('Plan creado. Puedes editar precios, módulos y PayPal a continuación.');
+      toast.success(t('toast.adminPlans.createdHint'));
       closeCreate();
       load();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al crear el plan');
+      toast.error(e.response?.data?.message || t('toast.adminPlans.createError'));
     } finally {
       setCreateSaving(false);
     }
@@ -160,30 +163,28 @@ const AdminSubscriptionPlans: React.FC = () => {
     try {
       const r = await adminService.syncSubscriptionPlanPaypal(id);
       const parts: string[] = [];
-      if (r.created.product) parts.push('producto');
-      if (r.created.monthly) parts.push('plan mensual');
-      if (r.created.yearly) parts.push('plan anual');
+      if (r.created.product) parts.push(t('toast.adminPlans.paypalProduct'));
+      if (r.created.monthly) parts.push(t('toast.adminPlans.paypalMonthly'));
+      if (r.created.yearly) parts.push(t('toast.adminPlans.paypalYearly'));
       toast.success(
-        parts.length
-          ? `PayPal: creado ${parts.join(', ')}`
-          : 'Ya estaba sincronizado (sin cambios en PayPal)'
+        parts.length ? t('toast.adminPlans.paypalCreated', { parts: parts.join(', ') }) : t('toast.adminPlans.paypalSyncedNoop')
       );
       load();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Error al sincronizar con PayPal');
+      toast.error(e.response?.data?.message || t('toast.adminPlans.paypalSyncError'));
     } finally {
       setSyncingId(null);
     }
   };
 
   const remove = async (id: number) => {
-    if (!window.confirm('¿Eliminar este plan?')) return;
+    if (!window.confirm(t('confirm.deletePlan'))) return;
     try {
       await adminService.deleteSubscriptionPlan(id);
-      toast.success('Eliminado');
+      toast.success(t('toast.adminPlans.deleted'));
       load();
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'No se puede eliminar');
+      toast.error(e.response?.data?.message || t('toast.adminPlans.deleteError'));
     }
   };
 
@@ -201,40 +202,30 @@ const AdminSubscriptionPlans: React.FC = () => {
         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
           <Layers className="w-8 h-8 text-primary-400 shrink-0" />
           <div>
-            <h1 className="page-title">Planes de suscripción</h1>
-            <p className="text-dark-400 text-sm">Precios, PayPal plan IDs y módulos por plan</p>
+            <h1 className="page-title">{t('pages.adminPlans.title')}</h1>
+            <p className="text-dark-400 text-sm">{t('pages.adminPlans.subtitle')}</p>
           </div>
         </div>
         <button type="button" onClick={openCreate} className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto">
           <Plus className="w-4 h-4" />
-          Nuevo plan
+          {t('pages.adminPlans.newPlan')}
         </button>
       </div>
 
       <details className="rounded-xl border border-dark-700 bg-dark-900/35 px-3 py-2 text-sm text-dark-300">
         <summary className="cursor-pointer text-primary-400/95 font-medium select-none">
-          Ayuda: PayPal (sincronizar e IDs)
+          {t('pages.adminPlans.helpTitle')}
         </summary>
         <ul className="mt-2 space-y-1.5 list-disc pl-4 text-xs text-dark-400">
-          <li>
-            El API necesita{' '}
-            <span className="font-mono text-dark-200">PAYPAL_CLIENT_ID</span>,{' '}
-            <span className="font-mono text-dark-200">PAYPAL_CLIENT_SECRET</span> y{' '}
-            <span className="font-mono text-dark-200">PAYPAL_API_BASE</span> (sandbox o live).
-          </li>
-          <li>
-            <span className="text-dark-200">Sincronizar PayPal</span> crea el producto en el catálogo y los planes de pago
-            mensual y anual según los precios guardados; rellena los IDs en la base.
-          </li>
-          <li>
-            También puedes pegar manualmente IDs de producto y de planes si ya existen en el panel de PayPal.
-          </li>
-          <li>Si cambias precios, puede hacer falta volver a sincronizar para alinear el catálogo con la app.</li>
+          <li>{t('pages.adminPlans.helpLi1')}</li>
+          <li>{t('pages.adminPlans.helpLi2')}</li>
+          <li>{t('pages.adminPlans.helpLi3')}</li>
+          <li>{t('pages.adminPlans.helpLi4')}</li>
         </ul>
       </details>
 
       {loading ? (
-        <p className="text-dark-500">Cargando…</p>
+        <p className="text-dark-500">{t('common.actions.loading')}</p>
       ) : (
         <>
           <div className="space-y-4">
@@ -245,13 +236,19 @@ const AdminSubscriptionPlans: React.FC = () => {
                 <p className="text-dark-500 text-sm">{p.slug}</p>
                 <p className="text-dark-400 text-sm mt-2">{p.description}</p>
                 <p className="text-primary-300 mt-2">
-                  {p.currency} {p.priceMonthly}/mes · {p.priceYearly}/año
+                  {fc(Number(p.priceMonthly) || 0, (p.currency || primaryCurrency) as string)}{' '}
+                  {t('pages.adminPlans.perMonth')} ·{' '}
+                  {fc(Number(p.priceYearly) || 0, (p.currency || primaryCurrency) as string)}{' '}
+                  {t('pages.adminPlans.perYear')}
                 </p>
                 <p className="text-xs text-dark-500 mt-1">
-                  PayPal producto: {p.paypalProductId || '—'}
+                  {t('pages.adminPlans.paypalProductLabel')} {p.paypalProductId || t('common.emptyDash')}
                 </p>
                 <p className="text-xs text-dark-500 mt-0.5">
-                  Plan ID mensual: {p.paypalPlanIdMonthly || '—'} · anual: {p.paypalPlanIdYearly || '—'}
+                  {t('pages.adminPlans.planIdsLine', {
+                    monthly: p.paypalPlanIdMonthly || t('common.emptyDash'),
+                    yearly: p.paypalPlanIdYearly || t('common.emptyDash'),
+                  })}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -260,13 +257,13 @@ const AdminSubscriptionPlans: React.FC = () => {
                   className="btn-secondary text-sm inline-flex items-center gap-1.5"
                   disabled={syncingId === p.id}
                   onClick={() => syncPaypal(p.id)}
-                  title="Crear en PayPal el producto y los planes de facturación (mensual/anual) según los precios"
+                  title={t('pages.adminPlans.syncPayPalTooltip')}
                 >
                   <RefreshCw className={`w-4 h-4 ${syncingId === p.id ? 'animate-spin' : ''}`} />
-                  Sincronizar PayPal
+                  {t('pages.adminPlans.syncPayPal')}
                 </button>
                 <button type="button" className="btn-secondary text-sm" onClick={() => setEditing({ ...p })}>
-                  Editar
+                  {t('pages.adminPlans.editButton')}
                 </button>
                 <button type="button" className="text-red-400 p-2" onClick={() => remove(p.id)}>
                   <Trash2 className="w-4 h-4" />
@@ -282,7 +279,7 @@ const AdminSubscriptionPlans: React.FC = () => {
             totalItems={plans.length}
             itemsPerPage={adminPlansPageSize}
             onPageChange={setPlansPage}
-            itemLabel="planes"
+            itemLabel={t('pages.adminPlans.plansPaginationLabel')}
             variant="card"
             pageSizeOptions={adminPlansPageSizeOptions}
             onPageSizeChange={setAdminPlansPageSize}
@@ -305,29 +302,26 @@ const AdminSubscriptionPlans: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="admin-plan-create-title" className="text-xl font-semibold text-white mb-1">
-              Nuevo plan
+              {t('pages.adminPlans.createTitle')}
             </h3>
-            <p className="text-dark-500 text-xs mb-4">
-              Se crea con precio 0 y módulos mínimos (resumen, suscripción, perfil). Ajusta precios, matriz de
-              módulos e IDs de PayPal en &quot;Editar&quot;.
-            </p>
+            <p className="text-dark-500 text-xs mb-4">{t('pages.adminPlans.createIntro')}</p>
             <div className="space-y-3 text-sm">
               <div>
                 <label className="label" htmlFor="new-plan-name">
-                  Nombre visible
+                  {t('pages.adminPlans.displayNameLabel')}
                 </label>
                 <input
                   id="new-plan-name"
                   className="input w-full"
                   value={newPlanName}
                   onChange={(e) => setNewPlanName(e.target.value)}
-                  placeholder="Ej. Premium"
+                  placeholder={t('pages.adminPlans.displayNamePlaceholder')}
                   autoComplete="off"
                 />
               </div>
               <div>
                 <label className="label" htmlFor="new-plan-slug">
-                  Slug (URL interna)
+                  {t('pages.adminPlans.slugLabel')}
                 </label>
                 <input
                   id="new-plan-slug"
@@ -337,12 +331,10 @@ const AdminSubscriptionPlans: React.FC = () => {
                     setSlugTouched(true);
                     setNewPlanSlug(e.target.value);
                   }}
-                  placeholder="premium"
+                  placeholder={t('pages.adminPlans.slugPlaceholder')}
                   autoComplete="off"
                 />
-                <p className="text-dark-500 text-[0.65rem] mt-1">
-                  Se genera desde el nombre hasta que edites este campo.
-                </p>
+                <p className="text-dark-500 text-[0.65rem] mt-1">{t('pages.adminPlans.slugHint')}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 mt-6">
@@ -353,10 +345,10 @@ const AdminSubscriptionPlans: React.FC = () => {
                 onClick={() => void submitCreate()}
               >
                 <Plus className="w-4 h-4" />
-                {createSaving ? 'Creando…' : 'Crear plan'}
+                {createSaving ? t('pages.adminPlans.creating') : t('pages.adminPlans.createSubmit')}
               </button>
               <button type="button" className="btn-secondary" disabled={createSaving} onClick={closeCreate}>
-                Cancelar
+                {t('common.actions.cancel')}
               </button>
             </div>
           </div>
@@ -374,32 +366,30 @@ const AdminSubscriptionPlans: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="admin-plan-modal-title" className="text-xl font-semibold text-white mb-4">
-              Editar plan
+              {t('pages.adminPlans.editTitle')}
             </h3>
             <div className="space-y-3 text-sm">
-              {['name', 'slug', 'description', 'currency', 'priceMonthly', 'priceYearly', 'sortOrder'].map(
-                (field) => (
+              {ADMIN_PLAN_EDIT_FIELDS.map((field) => (
                   <div key={field}>
-                    <label className="label capitalize">{field}</label>
+                    <label className="label">{t(`pages.adminPlans.planField.${field}`)}</label>
                     <input
                       className="input w-full"
                       value={editing[field] ?? ''}
                       onChange={(e) => setEditing({ ...editing, [field]: e.target.value })}
                     />
                   </div>
-                )
-              )}
+                ))}
               <div>
-                <label className="label">PayPal product ID (PROD-…)</label>
+                <label className="label">{t('pages.adminPlans.paypalProductIdLabel')}</label>
                 <input
                   className="input w-full"
                   value={editing.paypalProductId ?? ''}
                   onChange={(e) => setEditing({ ...editing, paypalProductId: e.target.value })}
-                  placeholder="Opcional si usas Sincronizar PayPal"
+                  placeholder={t('pages.adminPlans.paypalFieldPlaceholder')}
                 />
               </div>
               <div>
-                <label className="label">PayPal plan ID (mensual)</label>
+                <label className="label">{t('pages.adminPlans.paypalPlanMonthlyLabel')}</label>
                 <input
                   className="input w-full"
                   value={editing.paypalPlanIdMonthly ?? ''}
@@ -407,7 +397,7 @@ const AdminSubscriptionPlans: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="label">PayPal plan ID (anual)</label>
+                <label className="label">{t('pages.adminPlans.paypalPlanYearlyLabel')}</label>
                 <input
                   className="input w-full"
                   value={editing.paypalPlanIdYearly ?? ''}
@@ -420,10 +410,10 @@ const AdminSubscriptionPlans: React.FC = () => {
                   checked={!!editing.isActive}
                   onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })}
                 />
-                Activo
+                {t('pages.adminPlans.isActive')}
               </label>
               <div>
-                <p className="label">Módulos incluidos</p>
+                <p className="label">{t('pages.adminPlans.includedModules')}</p>
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                   {SUBSCRIPTION_MODULE_KEYS.map((key) => (
                     <label key={key} className="flex items-center gap-2 text-dark-300 text-xs">
@@ -440,7 +430,7 @@ const AdminSubscriptionPlans: React.FC = () => {
                           })
                         }
                       />
-                      {subscriptionModuleLabelEs(key)}
+                      {moduleLabel(key)}
                     </label>
                   ))}
                 </div>
@@ -449,10 +439,10 @@ const AdminSubscriptionPlans: React.FC = () => {
             <div className="flex gap-2 mt-6">
               <button type="button" className="btn-primary flex items-center gap-2" onClick={saveEdit}>
                 <Save className="w-4 h-4" />
-                Guardar
+                {t('common.actions.save')}
               </button>
               <button type="button" className="btn-secondary" onClick={() => setEditing(null)}>
-                Cancelar
+                {t('common.actions.cancel')}
               </button>
             </div>
           </div>

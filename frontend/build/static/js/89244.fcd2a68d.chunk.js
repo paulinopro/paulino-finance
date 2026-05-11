@@ -1,0 +1,3 @@
+/*! For license information please see 89244.fcd2a68d.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[89244],{89244(n,e,a){a.r(e),a.d(e,{default:()=>t});const t=(0,a(21639).A)("CloudLightning",[["path",{d:"M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973",key:"1cez44"}],["path",{d:"m13 12-3 5h4l-3 5",key:"1t22er"}]])}}]);
+//# sourceMappingURL=89244.fcd2a68d.chunk.js.map

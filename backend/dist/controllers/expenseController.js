@@ -8,6 +8,8 @@ const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync")
 const expenseDeletionService_1 = require("../services/expenseDeletionService");
 const vehicleExpenseLinkSync_1 = require("../services/vehicleExpenseLinkSync");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
+const recurrenceBoundary_1 = require("../utils/recurrenceBoundary");
+const dateUtils_1 = require("../utils/dateUtils");
 function validateExpenseSchedule(recurrenceType, frequency, paymentDay, paymentMonth, date) {
     if (recurrenceType === 'non_recurrent') {
         if (date === undefined || date === null || date === '') {
@@ -124,7 +126,7 @@ const getExpenses = async (req, res) => {
       SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
              e.category,
              e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-             e.bank_account_id, e.created_at, e.updated_at,
+             e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
       FROM expenses e
       LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
@@ -166,6 +168,8 @@ const getExpenses = async (req, res) => {
                 vehicleLabel: row.vehicle_id != null
                     ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
                     : null,
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             };
@@ -213,7 +217,7 @@ const getExpense = async (req, res) => {
         const result = await (0, database_1.query)(`SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
               e.category,
               e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-              e.bank_account_id, e.created_at, e.updated_at,
+              e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
               v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model
        FROM expenses e
        LEFT JOIN vehicle_expenses ve ON ve.linked_expense_id = e.id
@@ -253,6 +257,8 @@ const getExpense = async (req, res) => {
                 vehicleLabel: row.vehicle_id != null
                     ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
                     : null,
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -285,14 +291,25 @@ const createExpense = async (req, res) => {
     const amt = parseFloat(String(amount));
     const bankAccountId = parseBankAccountIdFromBody(req.body, 'create', null);
     const initialPaid = typeof isPaid === 'boolean' ? isPaid : false;
+    const ledgerGastoDesc = `Gasto: ${String(description)}`;
+    let recurrenceStartDate = null;
+    let recurrenceEndDate = null;
+    if (tx.recurrenceType === 'recurrent') {
+        const rb = (0, recurrenceBoundary_1.parseRecurrenceBoundaryFromBody)(body);
+        if (rb.error) {
+            return res.status(400).json({ message: rb.error });
+        }
+        recurrenceStartDate = rb.start;
+        recurrenceEndDate = rb.end;
+    }
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
         const result = await client.query(`INSERT INTO expenses 
-       (user_id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, bank_account_id, is_paid)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (user_id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, bank_account_id, is_paid, recurrence_start_date, recurrence_end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category,
-                 payment_day, payment_month, date, is_paid, bank_account_id, created_at, updated_at, last_paid_month, last_paid_year`, [
+                 payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at, last_paid_month, last_paid_year`, [
             userId,
             description,
             amt,
@@ -306,6 +323,8 @@ const createExpense = async (req, res) => {
             date || null,
             bankAccountId,
             initialPaid,
+            tx.recurrenceType === 'recurrent' ? recurrenceStartDate : null,
+            tx.recurrenceType === 'recurrent' ? recurrenceEndDate : null,
         ]);
         const rowId = result.rows[0].id;
         if (initialPaid &&
@@ -315,7 +334,9 @@ const createExpense = async (req, res) => {
                 frequency: tx.frequency,
             })) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client, {
+                    description: ledgerGastoDesc,
+                });
             }
             catch (e) {
                 if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -335,7 +356,9 @@ const createExpense = async (req, res) => {
             const currentYear = now.getFullYear();
             if (bankAccountId) {
                 try {
-                    await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client);
+                    await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -amt, client, {
+                        description: ledgerGastoDesc,
+                    });
                 }
                 catch (e) {
                     if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -371,6 +394,8 @@ const createExpense = async (req, res) => {
                 date: row.date,
                 isPaid: row.is_paid,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -391,7 +416,7 @@ const updateExpense = async (req, res) => {
     const expenseId = parseInt(req.params.id);
     const { description, amount, currency, category, paymentDay, paymentMonth, date, isPaid } = req.body;
     const oldResult = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency, category,
-            payment_day, payment_month, date, is_paid, bank_account_id
+            payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date
      FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
     if (oldResult.rows.length === 0) {
         return res.status(404).json({ message: 'Expense not found' });
@@ -437,6 +462,16 @@ const updateExpense = async (req, res) => {
             message: 'Un gasto vinculado a un vehículo debe ser puntual (no recurrente ni anual).',
         });
     }
+    let recurrenceStartForDb = null;
+    let recurrenceEndForDb = null;
+    if (tx.recurrenceType === 'recurrent') {
+        const rb = (0, recurrenceBoundary_1.parseRecurrenceBoundaryFromBody)(body);
+        if (rb.error) {
+            return res.status(400).json({ message: rb.error });
+        }
+        recurrenceStartForDb = rb.start;
+        recurrenceEndForDb = rb.end;
+    }
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
@@ -444,7 +479,7 @@ const updateExpense = async (req, res) => {
             recurrence_type: old.recurrence_type,
             frequency: old.frequency,
         }) && old.bank_account_id) {
-            await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, parseFloat(old.amount), client);
+            await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, parseFloat(old.amount), client, { description: `Reversión: «${old.description}»` });
         }
         const result = await client.query(`UPDATE expenses
        SET description = $1,
@@ -459,10 +494,12 @@ const updateExpense = async (req, res) => {
            date = $10,
            is_paid = $11,
            bank_account_id = $12,
+           recurrence_start_date = $13,
+           recurrence_end_date = $14,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $13 AND user_id = $14
+       WHERE id = $15 AND user_id = $16
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category,
-                 payment_day, payment_month, date, is_paid, bank_account_id, created_at, updated_at`, [
+                 payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at`, [
             newDesc,
             newAmount,
             newCurrency,
@@ -475,6 +512,8 @@ const updateExpense = async (req, res) => {
             newDate,
             newIsPaid,
             newBankId,
+            tx.recurrenceType === 'recurrent' ? recurrenceStartForDb : null,
+            tx.recurrenceType === 'recurrent' ? recurrenceEndForDb : null,
             expenseId,
             userId,
         ]);
@@ -484,7 +523,9 @@ const updateExpense = async (req, res) => {
         }) &&
             newBankId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, newCurrency, -newAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, newCurrency, -newAmount, client, {
+                    description: `Gasto: ${newDesc}`,
+                });
             }
             catch (e) {
                 if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -526,6 +567,8 @@ const updateExpense = async (req, res) => {
                 date: row.date,
                 isPaid: row.is_paid,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -568,7 +611,7 @@ const updateExpensePaymentStatus = async (req, res) => {
         if (typeof isPaid !== 'boolean') {
             return res.status(400).json({ message: 'isPaid must be a boolean' });
         }
-        const checkResult = await (0, database_1.query)(`SELECT id, recurrence_type, frequency, amount, currency, bank_account_id, last_paid_month, last_paid_year
+        const checkResult = await (0, database_1.query)(`SELECT id, description, recurrence_type, frequency, amount, currency, bank_account_id, last_paid_month, last_paid_year
        FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({ message: 'Expense not found' });
@@ -585,7 +628,11 @@ const updateExpensePaymentStatus = async (req, res) => {
             const amt = parseFloat(expense.amount);
             const delta = paid ? -amt : amt;
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, expense.bank_account_id, expense.currency, delta);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, expense.bank_account_id, expense.currency, delta, undefined, {
+                    description: delta < 0
+                        ? `Pago recurrente (mes actual): «${expense.description}»`
+                        : `Reversión de pago recurrente: «${expense.description}»`,
+                });
             }
             catch (e) {
                 console.error('Recurring expense balance:', e);

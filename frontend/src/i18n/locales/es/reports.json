@@ -1,0 +1,135 @@
+{
+  "types": {
+    "expenses": { "title": "Gastos", "description": "Movimientos por estado y categoría" },
+    "loans": { "title": "Préstamos", "description": "Activos, pagados y saldos" },
+    "cards": { "title": "Tarjetas", "description": "Límites, deuda y disponible" },
+    "accounts": { "title": "Cuentas", "description": "Saldos DOP y USD" },
+    "comprehensive": { "title": "Completo", "description": "Visión global de tu cartera" }
+  },
+  "summary": {
+    "total": "Registros / total",
+    "paid": "Pagados",
+    "pending": "Pendientes",
+    "active": "Activos",
+    "totalPaid": "Total pagado",
+    "totalPending": "Total pendiente",
+    "totalActive": "Total activo",
+    "totalDebt": "Deuda total",
+    "totalLimit": "Límite total",
+    "totalBalance": "Balance total (DOP eq.)",
+    "totalBalanceDop": "Balance DOP",
+    "totalBalanceUsd": "Balance USD",
+    "savings": "Cuentas de ahorro",
+    "checking": "Cuentas corrientes",
+    "totalCardDebt": "Deuda en tarjetas",
+    "totalLoanDebt": "Deuda en préstamos",
+    "netWorth": "Patrimonio neto"
+  },
+  "reportResultTitle": {
+    "comprehensive": "Reporte completo — visión global",
+    "typed": "Reporte de {{type}}"
+  },
+  "periodPreset": {
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "this_week": "Esta semana",
+    "this_month": "Este mes",
+    "last_month": "Mes anterior",
+    "last_7_days": "Últimos 7 días",
+    "last_30_days": "Últimos 30 días",
+    "this_year": "Este año",
+    "custom": "Personalizado"
+  },
+  "pdfSlug": {
+    "expenses": "gastos",
+    "loans": "prestamos",
+    "cards": "tarjetas",
+    "accounts": "cuentas",
+    "comprehensive": "completo"
+  },
+  "pdfFilenamePrefix": "reporte",
+  "ui": {
+    "reportTypeSection": "Tipo de reporte",
+    "filtersSection": "Filtros",
+    "periodLabel": "Período",
+    "dateFrom": "Fecha desde",
+    "dateTo": "Fecha hasta",
+    "statusLabel": "Estado",
+    "statusPendingExpenses": "Pendientes",
+    "statusPendingLoans": "Activos (no pagados)",
+    "loading": "Generando…",
+    "resultSection": "Resultado",
+    "periodLine": "Período: {{range}}"
+  },
+  "statusFilter": {
+    "all": "Todos",
+    "paid": "Pagados",
+    "pending": "Pendientes"
+  },
+  "actions": {
+    "generate": "Generar reporte",
+    "exportPdf": "Exportar PDF"
+  },
+  "emptyState": "Genera un reporte para ver los datos aquí.",
+  "tables": {
+    "common": {
+      "na": "N/A",
+      "description": "Descripción",
+      "amount": "Monto",
+      "category": "Categoría",
+      "status": "Estado",
+      "bank": "Banco",
+      "loan": "Préstamo",
+      "totalAmount": "Monto total",
+      "progress": "Progreso",
+      "card": "Tarjeta",
+      "limit": "Límite",
+      "debt": "Deuda",
+      "available": "Disponible",
+      "type": "Tipo",
+      "number": "Número",
+      "balanceDop": "Balance DOP",
+      "balanceUsd": "Balance USD"
+    },
+    "expenses": {
+      "emptyPeriod": "No hay gastos en el período seleccionado."
+    },
+    "loans": {
+      "emptyPeriod": "No hay préstamos en el período seleccionado."
+    },
+    "cards": {
+      "empty": "No hay tarjetas que coincidan con el criterio."
+    },
+    "accounts": {
+      "empty": "No hay cuentas registradas."
+    }
+  },
+  "expenseStatus": {
+    "paid": "Pagado",
+    "pending": "Pendiente"
+  },
+  "loanStatus": {
+    "paid": "Pagado",
+    "active": "Activo",
+    "delinquent": "En mora"
+  },
+  "accountType": {
+    "savings": "Ahorro",
+    "checking": "Corriente"
+  },
+  "comprehensive": {
+    "overviewTitle": "Resumen general",
+    "balanceTotal": "Balance total",
+    "expensesSection": "Gastos",
+    "loansSection": "Préstamos",
+    "cardsSection": "Tarjetas de crédito",
+    "accountsSection": "Cuentas bancarias"
+  },
+  "pagination": {
+    "expenses": "gastos",
+    "loans": "préstamos",
+    "cards": "tarjetas",
+    "accounts": "cuentas",
+    "rows": "filas"
+  }
+}

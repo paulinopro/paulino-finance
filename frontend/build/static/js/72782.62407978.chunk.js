@@ -1,0 +1,3 @@
+/*! For license information please see 72782.62407978.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[72782],{72782(n,e,c){c.r(e),c.d(e,{default:()=>a});const a=(0,c(21639).A)("Compass",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["polygon",{points:"16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76",key:"m9r19z"}]])}}]);
+//# sourceMappingURL=72782.62407978.chunk.js.map

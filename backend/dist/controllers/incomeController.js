@@ -6,6 +6,9 @@ const exchangeRate_1 = require("../utils/exchangeRate");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
+const recurrenceBoundary_1 = require("../utils/recurrenceBoundary");
+const calendarService_1 = require("../services/calendarService");
+const dateUtils_1 = require("../utils/dateUtils");
 /** Ingresos recurrentes: valida frecuencia y campos de calendario (independiente de nature fijo/variable). */
 function validateRecurrentIncomeSchedule(frequency, receiptDay, date) {
     const fq = (0, incomeExpenseTaxonomy_1.normalizeFrequency)(frequency);
@@ -97,7 +100,8 @@ const getIncome = async (req, res) => {
         // Get paginated results
         let queryText = `
       SELECT id, description, amount, currency, nature, recurrence_type, frequency,
-              receipt_day, date, bank_account_id, is_received, created_at, updated_at
+              receipt_day, date, bank_account_id, is_received,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at
        FROM income
        ${whereClause}
        ORDER BY created_at DESC
@@ -117,6 +121,8 @@ const getIncome = async (req, res) => {
             date: row.date,
             bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
             isReceived: Boolean(row.is_received),
+            recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+            recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         }));
@@ -161,7 +167,8 @@ const getIncomeItem = async (req, res) => {
         const userId = req.userId;
         const incomeId = parseInt(req.params.id);
         const result = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency,
-              receipt_day, date, bank_account_id, is_received, created_at, updated_at
+              receipt_day, date, bank_account_id, is_received,
+              recurrence_start_date, recurrence_end_date, created_at, updated_at
        FROM income
        WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
         if (result.rows.length === 0) {
@@ -182,6 +189,8 @@ const getIncomeItem = async (req, res) => {
                 date: row.date,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
                 isReceived: Boolean(row.is_received),
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -231,14 +240,25 @@ const createIncome = async (req, res) => {
     const bankAccountId = parseBankAccountIdFromBody(req.body, 'create', null);
     const amt = parseFloat(String(amount));
     const initialReceived = typeof isReceived === 'boolean' ? isReceived : false;
+    const ledgerIncomeDesc = `Ingreso: ${String(description)}`;
+    let recurrenceStartDate = null;
+    let recurrenceEndDate = null;
+    if (recurrenceType === 'recurrent') {
+        const rb = (0, recurrenceBoundary_1.parseRecurrenceBoundaryFromBody)(req.body);
+        if (rb.error) {
+            return res.status(400).json({ message: rb.error });
+        }
+        recurrenceStartDate = rb.start;
+        recurrenceEndDate = rb.end;
+    }
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
         const result = await client.query(`INSERT INTO income 
-       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       (user_id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency,
-                 receipt_day, date, bank_account_id, is_received, created_at, updated_at`, [
+                 receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`, [
             userId,
             description,
             amt,
@@ -250,10 +270,14 @@ const createIncome = async (req, res) => {
             date || null,
             bankAccountId,
             initialReceived,
+            recurrenceType === 'recurrent' ? recurrenceStartDate : null,
+            recurrenceType === 'recurrent' ? recurrenceEndDate : null,
         ]);
         if (initialReceived && bankAccountId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, amt, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, amt, client, {
+                    description: ledgerIncomeDesc,
+                });
             }
             catch (e) {
                 if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -284,6 +308,8 @@ const createIncome = async (req, res) => {
                 date: row.date,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
                 isReceived: Boolean(row.is_received),
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -303,7 +329,8 @@ const updateIncome = async (req, res) => {
     const userId = req.userId;
     const incomeId = parseInt(req.params.id);
     const { description, amount, currency, frequency, receiptDay, date } = req.body;
-    const oldResult = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received
+    const oldResult = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received,
+            recurrence_start_date, recurrence_end_date
      FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
     if (oldResult.rows.length === 0) {
         return res.status(404).json({ message: 'Income item not found' });
@@ -364,11 +391,21 @@ const updateIncome = async (req, res) => {
         return res.status(400).json({ message: 'Indique la fecha para un ingreso puntual' });
     }
     const receiptDayForDb = newRecurrence === 'recurrent' && newFrequencyStored === 'monthly' ? newReceiptDay : null;
+    let recurrenceStartForDb = null;
+    let recurrenceEndForDb = null;
+    if (newRecurrence === 'recurrent') {
+        const rb = (0, recurrenceBoundary_1.parseRecurrenceBoundaryFromBody)(req.body);
+        if (rb.error) {
+            return res.status(400).json({ message: rb.error });
+        }
+        recurrenceStartForDb = rb.start;
+        recurrenceEndForDb = rb.end;
+    }
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
         if (old.bank_account_id && old.is_received) {
-            await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, -parseFloat(old.amount), client);
+            await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, -parseFloat(old.amount), client, { description: `Reversión: «${old.description}»` });
         }
         const result = await client.query(`UPDATE income
        SET description = $1,
@@ -381,10 +418,12 @@ const updateIncome = async (req, res) => {
            date = $8,
            bank_account_id = $9,
            is_received = $10,
+           recurrence_start_date = $11,
+           recurrence_end_date = $12,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $11 AND user_id = $12
+       WHERE id = $13 AND user_id = $14
        RETURNING id, description, amount, currency, nature, recurrence_type, frequency,
-                 receipt_day, date, bank_account_id, is_received, created_at, updated_at`, [
+                 receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`, [
             newDesc,
             newAmount,
             newCurrency,
@@ -395,12 +434,16 @@ const updateIncome = async (req, res) => {
             newDate,
             newBankId,
             newIsReceived,
+            newRecurrence === 'recurrent' ? recurrenceStartForDb : null,
+            newRecurrence === 'recurrent' ? recurrenceEndForDb : null,
             incomeId,
             userId,
         ]);
         if (newBankId && newIsReceived) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, newCurrency, newAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, newCurrency, newAmount, client, {
+                    description: `Ingreso: ${newDesc}`,
+                });
             }
             catch (e) {
                 if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
@@ -432,6 +475,8 @@ const updateIncome = async (req, res) => {
                 date: row.date,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
                 isReceived: Boolean(row.is_received),
+                recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
+                recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -451,7 +496,7 @@ const deleteIncome = async (req, res) => {
     try {
         const userId = req.userId;
         const incomeId = parseInt(req.params.id);
-        const pre = await (0, database_1.query)(`SELECT bank_account_id, amount, currency, is_received FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
+        const pre = await (0, database_1.query)(`SELECT bank_account_id, amount, currency, is_received, description FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
         if (pre.rows.length === 0) {
             return res.status(404).json({ message: 'Income item not found' });
         }
@@ -459,7 +504,7 @@ const deleteIncome = async (req, res) => {
         await (0, accountsPaymentLinkSync_1.deleteReceivablePaymentByIncomeId)(userId, incomeId);
         if (row.bank_account_id && row.is_received) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, -parseFloat(row.amount));
+                await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, -parseFloat(row.amount), undefined, { description: `Reversión por eliminación: «${row.description}»` });
             }
             catch (e) {
                 console.error('Reverse balance on income delete:', e);
@@ -472,6 +517,7 @@ const deleteIncome = async (req, res) => {
         if (del.rows.length === 0) {
             return res.status(404).json({ message: 'Income item not found' });
         }
+        await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, incomeId, ['INCOME']);
         res.json({
             success: true,
             message: 'Income deleted successfully',
@@ -491,7 +537,7 @@ const updateIncomeReceiptStatus = async (req, res) => {
         if (typeof isReceived !== 'boolean') {
             return res.status(400).json({ message: 'isReceived must be a boolean' });
         }
-        const checkResult = await (0, database_1.query)(`SELECT is_received, bank_account_id, amount, currency FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
+        const checkResult = await (0, database_1.query)(`SELECT is_received, description, bank_account_id, amount, currency FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({ message: 'Income not found' });
         }
@@ -519,7 +565,11 @@ const updateIncomeReceiptStatus = async (req, res) => {
                 const amt = parseFloat(row.amount);
                 const delta = isReceived ? amt : -amt;
                 try {
-                    await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, delta, client);
+                    await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, delta, client, {
+                        description: delta > 0
+                            ? `Ingreso recibido: «${row.description}»`
+                            : `Ingreso dejado pendiente (reversión): «${row.description}»`,
+                    });
                 }
                 catch (e) {
                     if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {

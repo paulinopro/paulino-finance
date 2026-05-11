@@ -1,12 +1,18 @@
+import i18n from '../i18n/config';
+
 /**
  * Format date using user's timezone
  * The dateString should be in format YYYY-MM-DD
  */
-export const formatDateInTimezone = (dateString: string, timezone: string = 'America/Santo_Domingo'): string => {
+export const formatDateInTimezone = (
+  dateString: string,
+  timezone: string = 'America/Santo_Domingo',
+  localeTag: string = 'es-DO'
+): string => {
   // Validate date string
   if (!dateString || typeof dateString !== 'string' || dateString.trim() === '') {
     console.warn('formatDateInTimezone: Invalid date string', dateString);
-    return 'Fecha inválida';
+    return i18n.t('common.invalidDate');
   }
   
   // Trim whitespace
@@ -43,7 +49,7 @@ export const formatDateInTimezone = (dateString: string, timezone: string = 'Ame
   }
   
   try {
-    const formatted = new Intl.DateTimeFormat('es-DO', {
+    const formatted = new Intl.DateTimeFormat(localeTag, {
       timeZone: timezone,
       year: 'numeric',
       month: 'short',
@@ -134,40 +140,40 @@ export function calendarDateToSortableMs(value: string | null | undefined): numb
 }
 
 /** Ejes de gráficos: fecha API `YYYY-MM-DD` → etiqueta local sin desfase UTC. */
-export function formatChartAxisEsShort(value: string | null | undefined): string {
+export function formatChartAxisEsShort(value: string | null | undefined, localeTag: string = 'es-DO'): string {
   const ymd = formatDateForInput(value);
   if (!ymd) return '';
   const [y, m, d] = ymd.split('-').map((x) => parseInt(x, 10));
   if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return '';
-  return new Date(y, m - 1, d).toLocaleDateString('es-DO', { day: 'numeric', month: 'short' });
+  return new Date(y, m - 1, d).toLocaleDateString(localeTag, { day: 'numeric', month: 'short' });
 }
 
-export function formatChartTooltipEs(value: string | null | undefined): string {
+export function formatChartTooltipEs(value: string | null | undefined, localeTag: string = 'es-DO'): string {
   const ymd = formatDateForInput(value);
   if (!ymd) return '';
   const [y, m, d] = ymd.split('-').map((x) => parseInt(x, 10));
   if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return '';
-  return new Date(y, m - 1, d).toLocaleDateString('es-DO');
+  return new Date(y, m - 1, d).toLocaleDateString(localeTag);
 }
 
 /**
  * Texto largo en español (ej. "jueves, 2 de abril de 2026") para fechas solo-calendario del API.
  * No usar `new Date('YYYY-MM-DD')` (medianoche UTC → día anterior en es-DO).
  */
-export function formatCalendarDateLongEs(value: string | null | undefined): string {
+export function formatCalendarDateLongEs(value: string | null | undefined, localeTag: string = 'es-DO'): string {
   const ymd = formatDateForInput(value);
   if (!ymd) return '';
   const parts = ymd.split('-').map((x) => parseInt(x, 10));
   if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return '';
   const [y, m, d] = parts;
   const local = new Date(y, m - 1, d);
-  const s = local.toLocaleDateString('es-DO', {
+  const s = local.toLocaleDateString(localeTag, {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  return s ? s.charAt(0).toLocaleUpperCase(localeTag) + s.slice(1) : s;
 }
 
 /**

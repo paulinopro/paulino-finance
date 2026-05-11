@@ -1,0 +1,13 @@
+{
+  "card": "Card",
+  "loan": "Loan",
+  "recurring": "Recurring",
+  "system": "System",
+  "CARD_PAYMENT": "Card payment",
+  "LOAN_PAYMENT": "Loan payment",
+  "RECURRING_EXPENSE": "Recurring expense",
+  "EXPENSE": "Expense",
+  "INCOME": "Income",
+  "REMINDER": "Reminder",
+  "SYSTEM": "System"
+}

@@ -16,18 +16,19 @@ import {
 import OfflineBanner from './OfflineBanner';
 import { clearSuperAdminClientView, setSuperAdminClientViewOn } from '../constants/superAdminClientView';
 import { LAYOUT_DESKTOP_SHELL_MEDIA } from '../constants/layout';
+import { useTranslation } from 'react-i18next';
 
 const SIDEBAR_COLLAPSED_KEY = 'paulino-admin-sidebar-collapsed';
 
 const NAV = [
-  { to: '/admin', label: 'Resumen', icon: LayoutDashboard, isActive: (p: string) => p === '/admin' || p === '/admin/' },
-  { to: '/admin/users', label: 'Usuarios', icon: Users, isActive: (p: string) => p === '/admin/users' || p.startsWith('/admin/users/') },
-  { to: '/admin/settings', label: 'Configuración', icon: Settings, isActive: (p: string) => p === '/admin/settings' },
-  { to: '/admin/audit', label: 'Auditoría', icon: ListTree, isActive: (p: string) => p === '/admin/audit' },
-  { to: '/admin/system', label: 'Estado', icon: Stethoscope, isActive: (p: string) => p === '/admin/system' },
+  { to: '/admin', labelKey: 'layout.adminNavOverview' as const, icon: LayoutDashboard, isActive: (p: string) => p === '/admin' || p === '/admin/' },
+  { to: '/admin/users', labelKey: 'layout.adminNavUsers' as const, icon: Users, isActive: (p: string) => p === '/admin/users' || p.startsWith('/admin/users/') },
+  { to: '/admin/settings', labelKey: 'layout.adminNavSettings' as const, icon: Settings, isActive: (p: string) => p === '/admin/settings' },
+  { to: '/admin/audit', labelKey: 'layout.adminNavAudit' as const, icon: ListTree, isActive: (p: string) => p === '/admin/audit' },
+  { to: '/admin/system', labelKey: 'layout.adminNavStatus' as const, icon: Stethoscope, isActive: (p: string) => p === '/admin/system' },
   {
     to: '/admin/subscriptions',
-    label: 'Planes (producto)',
+    labelKey: 'layout.adminNavPlans' as const,
     icon: Layers,
     isActive: (p: string) => p === '/admin/subscriptions' || p.startsWith('/admin/subscriptions/'),
   },
@@ -37,6 +38,7 @@ const NAV = [
  * Shell solo para rutas bajo /admin: sin menú de cliente, sin notificaciones de app.
  */
 const AdminLayout: React.FC = () => {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -101,7 +103,9 @@ const AdminLayout: React.FC = () => {
         <div className="flex flex-col h-full min-h-0">
           <div className="flex items-center justify-between gap-2 p-4 sm:p-6 border-b shrink-0 border-amber-900/25">
             <div className="min-w-0">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-amber-500/90 mb-0.5">Consola</p>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-amber-500/90 mb-0.5">
+                {t('layout.adminConsoleBadge')}
+              </p>
               <h1 className="text-lg sm:text-2xl font-bold truncate bg-gradient-to-r from-amber-200/95 to-amber-500/80 bg-clip-text text-transparent">
                 Paulino Finance
               </h1>
@@ -110,7 +114,7 @@ const AdminLayout: React.FC = () => {
               type="button"
               onClick={closeMobileDrawer}
               className="md:hidden min-h-[44px] min-w-[44px] p-2 -mr-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80"
-              aria-label="Cerrar menú"
+              aria-label={t('layout.adminCloseMenuAria')}
             >
               <X size={22} />
             </button>
@@ -130,7 +134,7 @@ const AdminLayout: React.FC = () => {
                   }`}
                 >
                   <item.icon size={20} />
-                  <span className="font-medium">{item.label}</span>
+                  <span className="font-medium">{t(item.labelKey)}</span>
                 </Link>
               );
             })}
@@ -161,7 +165,7 @@ const AdminLayout: React.FC = () => {
               }}
               className="block w-full text-center text-xs text-amber-500/80 hover:text-amber-400 py-2 mb-2"
             >
-              Ir a la app
+              {t('layout.adminGoToApp')}
             </Link>
             <button
               type="button"
@@ -169,7 +173,7 @@ const AdminLayout: React.FC = () => {
               className="w-full flex items-center space-x-3 px-3 sm:px-4 py-3.5 rounded-lg text-dark-300 hover:bg-dark-700 hover:text-white transition-colors min-h-[48px]"
             >
               <LogOut size={20} />
-              <span className="font-medium">Cerrar sesión</span>
+              <span className="font-medium">{t('layout.adminLogout')}</span>
             </button>
           </div>
         </div>
@@ -177,7 +181,7 @@ const AdminLayout: React.FC = () => {
       {!isDesktopShell && sidebarOpen && (
         <button
           type="button"
-          aria-label="Cerrar menú"
+          aria-label={t('layout.adminCloseMenuAria')}
           className="fixed inset-0 bg-black/50 z-40 cursor-default border-0 p-0"
           onClick={closeMobileDrawer}
         />
@@ -193,13 +197,13 @@ const AdminLayout: React.FC = () => {
               type="button"
               onClick={toggleSidebar}
               className="min-h-[40px] min-w-[40px] sm:min-h-[44px] sm:min-w-[44px] -ml-1 p-2 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700/80 shrink-0"
-              aria-label={sidebarVisible ? 'Ocultar menú lateral' : 'Mostrar menú lateral'}
+              aria-label={sidebarVisible ? t('layout.adminToggleSidebarHideAria') : t('layout.adminToggleSidebarShowAria')}
               aria-expanded={sidebarVisible}
             >
               {sidebarVisible ? <PanelLeftClose size={22} aria-hidden /> : <PanelLeftOpen size={22} aria-hidden />}
             </button>
             <span className="hidden sm:inline text-[11px] font-semibold uppercase tracking-widest text-amber-500/80 truncate">
-              Operación
+              {t('layout.adminOperationBadge')}
             </span>
           </div>
         </header>

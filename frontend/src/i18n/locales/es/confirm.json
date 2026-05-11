@@ -1,0 +1,23 @@
+{
+  "notificationTemplatesReset": "¿Estás seguro de restaurar la plantilla a los valores por defecto?",
+  "deletePlan": "¿Eliminar este plan?",
+  "deleteCategory": "¿Estás seguro de que deseas eliminar esta categoría?",
+  "deleteIncome": "¿Estás seguro de eliminar este ingreso?",
+  "deleteExpense": "¿Estás seguro de eliminar este gasto?",
+  "deleteGoalPayment": "¿Eliminar este abono? Se actualizará el progreso de la meta.",
+  "deleteFinancialGoal": "¿Estás seguro de que deseas eliminar esta meta financiera?",
+  "deleteBudget": "¿Estás seguro de que deseas eliminar este presupuesto?",
+  "deletePayablePayment": "¿Eliminar este abono? Se eliminará el gasto vinculado en el módulo de Gastos y se actualizará el saldo de la cuenta.",
+  "deletePayableAccount": "¿Estás seguro de que deseas eliminar esta cuenta por pagar?",
+  "deleteReceivablePayment": "¿Eliminar este abono? Se eliminará el ingreso vinculado en el módulo de Ingresos y se actualizará el saldo de la cuenta.",
+  "deleteReceivableAccount": "¿Estás seguro de que deseas eliminar esta cuenta por cobrar?",
+  "deleteCardPayment": "¿Eliminar este pago de tarjeta? Se revertirá la deuda y el saldo de la cuenta si aplica.",
+  "deleteCard": "¿Estás seguro de eliminar esta tarjeta?",
+  "deleteBankAccount": "¿Estás seguro de eliminar esta cuenta?",
+  "deleteLoanPayment": "¿Estás seguro de eliminar este pago?",
+  "deleteLoan": "¿Estás seguro de eliminar este préstamo?",
+  "deleteVehicle": "¿Estás seguro de que deseas eliminar este vehículo? Todos sus gastos también se eliminarán.",
+  "deleteVehicleExpense": "¿Estás seguro de que deseas eliminar este gasto?",
+  "disableUser": "¿Deshabilitar la cuenta {{email}}? No podrá iniciar sesión hasta que la reactives desde esta consola.",
+  "deleteAmortizationPayment": "¿Estás seguro de eliminar este pago?"
+}

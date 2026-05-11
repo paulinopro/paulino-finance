@@ -6,19 +6,28 @@ import { adminService, type AdminAuditEvent } from '../services/adminService';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import AdminBreadcrumbs from '../components/AdminBreadcrumbs';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
-const ACTION_OPTIONS = [
-  { value: '', label: 'Todas las acciones' },
-  { value: 'user.impersonate', label: 'Suplantar' },
-  { value: 'user.impersonate_end', label: 'Fin de suplantación' },
-  { value: 'user.update', label: 'Actualizar usuario' },
-  { value: 'settings.registration', label: 'Config. registro' },
-  { value: 'settings.maintenance', label: 'Config. mantenimiento' },
-  { value: 'plan.create', label: 'Crear plan' },
-  { value: 'plan.update', label: 'Actualizar plan' },
-  { value: 'plan.delete', label: 'Eliminar plan' },
-  { value: 'plan.sync_paypal', label: 'Sync PayPal' },
-];
+const ADMIN_AUDIT_ACTION_VALUES = [
+  '',
+  'user.impersonate',
+  'user.impersonate_end',
+  'user.update',
+  'settings.registration',
+  'settings.maintenance',
+  'plan.create',
+  'plan.update',
+  'plan.delete',
+  'plan.sync_paypal',
+] as const;
+
+function auditActionOptionLabel(t: TFunction, value: string): string {
+  if (!value) return t('pages.adminAudit.actionLabels.all');
+  const key = value.replace(/\./g, '_');
+  return t(`pages.adminAudit.actionLabels.${key}`);
+}
 
 function formatDetails(details: unknown): string {
   if (details == null) return '—';
@@ -33,6 +42,8 @@ function formatDetails(details: unknown): string {
 const ADMIN_AUDIT_DEFAULT_PAGE_SIZE = 30;
 
 const AdminAudit: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatDateTimeMedium } = useIntlFormatting();
   const { pageSize: limit, setPageSize: setAuditPageLimit, pageSizeOptions: auditPageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:adminAudit', ADMIN_AUDIT_DEFAULT_PAGE_SIZE);
   const [events, setEvents] = useState<AdminAuditEvent[]>([]);
@@ -54,11 +65,11 @@ const AdminAudit: React.FC = () => {
       setTotal(r.total);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      toast.error(err.response?.data?.message || 'Error al cargar auditoría');
+      toast.error(err.response?.data?.message || t('toast.adminAudit.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [page, action, limit]);
+  }, [page, action, limit, t]);
 
   useEffect(() => {
     void load();
@@ -79,10 +90,10 @@ const AdminAudit: React.FC = () => {
   const downloadCsv = async () => {
     try {
       await adminService.downloadAuditCsv({ action: action || undefined });
-      toast.success('Descarga lista');
+      toast.success(t('toast.adminAudit.exportSuccess'));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
-      toast.error(err.response?.data?.message || 'Error al exportar');
+      toast.error(err.response?.data?.message || t('toast.adminAudit.exportError'));
     }
   };
 
@@ -96,13 +107,13 @@ const AdminAudit: React.FC = () => {
               <ListTree className="w-8 h-8" />
             </div>
             <div>
-              <h1 className="page-title">Auditoría</h1>
-              <p className="text-dark-400 text-sm">Acciones registradas en consola (super admin)</p>
+              <h1 className="page-title">{t('pages.adminAudit.title')}</h1>
+              <p className="text-dark-400 text-sm">{t('pages.adminAudit.subtitle')}</p>
             </div>
           </div>
           <button type="button" onClick={downloadCsv} className="btn-primary inline-flex items-center gap-2">
             <Download className="w-4 h-4" />
-            CSV (hasta 5.000)
+            {t('pages.adminAudit.exportCsvLimit')}
           </button>
         </div>
 
@@ -114,17 +125,17 @@ const AdminAudit: React.FC = () => {
                 className="input pl-10 w-full"
                 value={actionInput}
                 onChange={(e) => setActionInput(e.target.value)}
-                aria-label="Filtrar por acción"
+                aria-label={t('pages.adminAudit.filterActionAria')}
               >
-                {ACTION_OPTIONS.map((o) => (
-                  <option key={o.value || 'all'} value={o.value}>
-                    {o.label}
+                {ADMIN_AUDIT_ACTION_VALUES.map((v) => (
+                  <option key={v || 'all'} value={v}>
+                    {auditActionOptionLabel(t, v)}
                   </option>
                 ))}
               </select>
             </div>
             <button type="submit" className="btn-primary px-4 shrink-0">
-              Filtrar
+              {t('pages.adminAudit.filterSubmit')}
             </button>
           </div>
         </form>
@@ -134,44 +145,42 @@ const AdminAudit: React.FC = () => {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-dark-700 text-dark-400">
-                  <th className="py-3 px-2">Fecha</th>
-                  <th className="py-3 px-2">Acción</th>
-                  <th className="py-3 px-2">Actor</th>
-                  <th className="py-3 px-2">Objetivo</th>
-                  <th className="py-3 px-2 min-w-[120px]">Detalle</th>
+                  <th className="py-3 px-2">{t('pages.adminAudit.colDate')}</th>
+                  <th className="py-3 px-2">{t('pages.adminAudit.colAction')}</th>
+                  <th className="py-3 px-2">{t('pages.adminAudit.colActor')}</th>
+                  <th className="py-3 px-2">{t('pages.adminAudit.colTarget')}</th>
+                  <th className="py-3 px-2 min-w-[120px]">{t('pages.adminAudit.colDetail')}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-dark-500">
-                      Cargando…
+                      {t('common.actions.loading')}
                     </td>
                   </tr>
                 ) : events.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-dark-500">
-                      Sin eventos
+                      {t('pages.adminAudit.emptyEvents')}
                     </td>
                   </tr>
                 ) : (
                   events.map((ev) => (
                     <tr key={ev.id} className="border-b border-dark-800/80 hover:bg-dark-800/40 max-md:border-0">
-                      <td data-label="Fecha" className="py-3 px-2 text-dark-300 whitespace-nowrap">
-                        {ev.createdAt
-                          ? new Date(ev.createdAt).toLocaleString('es-419', { dateStyle: 'short', timeStyle: 'short' })
-                          : '—'}
+                      <td data-label={t('pages.adminAudit.colDate')} className="py-3 px-2 text-dark-300 whitespace-nowrap">
+                        {ev.createdAt ? formatDateTimeMedium(ev.createdAt) : '—'}
                       </td>
-                      <td data-label="Acción" className="py-3 px-2 font-mono text-xs text-primary-200 break-all">
+                      <td data-label={t('pages.adminAudit.colAction')} className="py-3 px-2 font-mono text-xs text-primary-200 break-all">
                         {ev.action}
                       </td>
-                      <td data-label="Actor" className="py-3 px-2 break-all">
+                      <td data-label={t('pages.adminAudit.colActor')} className="py-3 px-2 break-all">
                         {ev.actorEmail}
                       </td>
-                      <td data-label="Objetivo" className="py-3 px-2 text-dark-400 text-xs break-all">
+                      <td data-label={t('pages.adminAudit.colTarget')} className="py-3 px-2 text-dark-400 text-xs break-all">
                         {[ev.targetType, ev.targetId != null ? `#${ev.targetId}` : ''].filter(Boolean).join(' ') || '—'}
                       </td>
-                      <td data-label="Detalle" className="py-3 px-2 text-dark-500 text-xs max-w-[min(100vw,20rem)] md:max-w-md">
+                      <td data-label={t('pages.adminAudit.colDetail')} className="py-3 px-2 text-dark-500 text-xs max-w-[min(100vw,20rem)] md:max-w-md">
                         <span className="line-clamp-3" title={formatDetails(ev.details)}>
                           {formatDetails(ev.details)}
                         </span>
@@ -190,7 +199,7 @@ const AdminAudit: React.FC = () => {
           totalItems={total}
           itemsPerPage={limit}
           onPageChange={setPage}
-          itemLabel="eventos"
+          itemLabel={t('pages.adminAudit.itemsLabel')}
           disabled={loading}
           variant="card"
           pageSizeOptions={auditPageSizeOptions}

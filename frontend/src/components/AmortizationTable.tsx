@@ -5,10 +5,12 @@ import { AmortizationScheduleItem, BankAccount, LoanAmortizationSummary, LoanPay
 import { X, CheckCircle, Clock, AlertCircle, Calendar, Edit, Trash2, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
 import { formatDateInTimezone, todayYmdLocal } from '../utils/dateUtils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
-import { formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
+import { useTranslation } from 'react-i18next';
 
 interface AmortizationTableProps {
   loanId: number;
@@ -21,6 +23,8 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
   const paymentPanelRef = useRef<HTMLDivElement>(null);
   const editPaymentPanelRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
+  const { t } = useTranslation();
+  const { formatCurrency: fc, localeTag, primaryCurrency, secondaryCurrency } = useIntlFormatting();
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<LoanAmortizationSummary | null>(null);
   const [schedule, setSchedule] = useState<AmortizationScheduleItem[]>([]);
@@ -60,12 +64,12 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
       const loanResponse = await api.get(`/loans/${loanId}`);
       setPayments(loanResponse.data.loan.payments || []);
     } catch (error: any) {
-      toast.error('Error al cargar tabla de amortización');
+      toast.error(t('toast.amortization.loadError'));
       console.error(error);
     } finally {
       setLoading(false);
     }
-  }, [loanId]);
+  }, [loanId, t]);
 
   useEffect(() => {
     fetchAmortizationData();
@@ -74,8 +78,10 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
   const accountsForAmortPayment = useMemo(() => {
     const c = summary?.currency;
     if (!c) return [];
-    return bankAccounts.filter((a) => a.currencyType === 'DUAL' || a.currencyType === c);
-  }, [bankAccounts, summary?.currency]);
+    return bankAccounts.filter((a: BankAccount) =>
+      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+    );
+  }, [bankAccounts, summary?.currency, primaryCurrency, secondaryCurrency]);
 
   const bankAccountNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -102,7 +108,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
       }
       await api.post(`/loans/${loanId}/payment`, payload);
 
-      toast.success('Pago registrado exitosamente');
+      toast.success(t('toast.amortization.paymentRegistered'));
       setShowPaymentModal(false);
       setSelectedInstallment(null);
       setPaymentData({
@@ -116,7 +122,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
       fetchAmortizationData();
       if (onPaymentUpdate) onPaymentUpdate();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al registrar pago');
+      toast.error(error.response?.data?.message || t('toast.amortization.paymentRegisterError'));
     }
   };
 
@@ -139,7 +145,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
       }
       await api.put(`/loans/payments/${editingPayment.id}`, putPayload);
 
-      toast.success('Pago actualizado exitosamente');
+      toast.success(t('toast.amortization.paymentUpdated'));
       setShowEditPaymentModal(false);
       setEditingPayment(null);
       setPaymentData({
@@ -153,20 +159,20 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
       fetchAmortizationData();
       if (onPaymentUpdate) onPaymentUpdate();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al actualizar pago');
+      toast.error(error.response?.data?.message || t('toast.amortization.paymentUpdateError'));
     }
   };
 
   const handleDeletePayment = async (paymentId: number) => {
-    if (!window.confirm('¿Estás seguro de eliminar este pago?')) return;
+    if (!window.confirm(t('confirm.deleteAmortizationPayment'))) return;
 
     try {
       await api.delete(`/loans/${loanId}/payments/${paymentId}`);
-      toast.success('Pago eliminado exitosamente');
+      toast.success(t('toast.amortization.paymentDeleted'));
       fetchAmortizationData();
       if (onPaymentUpdate) onPaymentUpdate();
     } catch (error: any) {
-      toast.error('Error al eliminar pago');
+      toast.error(t('toast.amortization.paymentDeleteError'));
     }
   };
 
@@ -186,28 +192,23 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'PAID':
-        return 'Pagado';
+        return t('pages.calendarStatuses.PAID');
       case 'PENDING':
-        return 'Pendiente';
+        return t('pages.calendarStatuses.PENDING');
       case 'OVERDUE':
-        return 'Atrasado';
+        return t('pages.calendarStatuses.OVERDUE');
       default:
-        return 'Futuro';
+        return t('pages.calendarStatuses.PENDING');
     }
   };
 
-  const formatCurrency = (amount: number, currency: string = 'DOP') => {
-    return new Intl.NumberFormat('es-DO', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  };
+  const loanCurrency = summary?.currency ?? primaryCurrency;
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return 'Fecha inválida';
+    if (!dateString) return t('pages.loans.dateUnavailable');
     const timezone = user?.timezone || 'America/Santo_Domingo';
     try {
-      return formatDateInTimezone(dateString, timezone);
+      return formatDateInTimezone(dateString, timezone, localeTag);
     } catch (error) {
       console.error('Error formatting date:', dateString, error);
       return dateString; // Return original string if formatting fails
@@ -277,7 +278,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
         <div className="sticky top-0 bg-dark-800 border-b border-dark-700 p-6 flex items-center justify-between">
           <div>
             <h2 id="amortization-main-title" className="text-2xl font-bold text-white">
-              Tabla de Amortización
+              {t('pages.loans.amortizationTitle')}
             </h2>
             <p className="text-dark-400 mt-1">
               {summary.loanName} {summary.bankName && `- ${summary.bankName}`}
@@ -294,25 +295,25 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
         <div className="p-6 space-y-6">
           {/* Summary Card */}
           <div className="bg-dark-700 rounded-lg p-6 border border-dark-600">
-            <h3 className="text-lg font-semibold text-white mb-4">Resumen del Préstamo</h3>
+            <h3 className="text-lg font-semibold text-white mb-4">{t('pages.loans.loanInformation')}</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <p className="text-sm text-dark-400">Monto Original</p>
+                <p className="text-sm text-dark-400">{t('pages.loans.totalAmount')}</p>
                 <p className="text-xl font-bold text-white">
-                  {formatCurrency(summary.originalAmount)} {summary.currency}
+                  {fc(summary.originalAmount, loanCurrency)}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-dark-400">Saldo Actual</p>
+                <p className="text-sm text-dark-400">{t('pages.loans.remainingAmount')}</p>
                 <p className="text-xl font-bold text-white">
-                  {formatCurrency(summary.currentBalance)} {summary.currency}
+                  {fc(summary.currentBalance, loanCurrency)}
                 </p>
                 <p className="text-xs text-dark-400">
                   ({summary.balancePercentage.toFixed(1)}% pendiente)
                 </p>
               </div>
               <div>
-                <p className="text-sm text-dark-400">Cuotas Pagadas</p>
+                <p className="text-sm text-dark-400">{t('pages.loans.totalInstallmentsSummary')}</p>
                 <p className="text-xl font-bold text-white">
                   {summary.paidInstallments}/{summary.totalInstallments}
                 </p>
@@ -321,20 +322,20 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 </p>
               </div>
               <div>
-                <p className="text-sm text-dark-400">Capital Pagado</p>
+                <p className="text-sm text-dark-400">{t('pages.loans.principal')}</p>
                 <p className="text-lg font-semibold text-green-400">
-                  {formatCurrency(summary.totalPrincipalPaid)} {summary.currency}
+                  {fc(summary.totalPrincipalPaid, loanCurrency)}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-dark-400">Interés Pagado</p>
+                <p className="text-sm text-dark-400">{t('pages.loans.interest')}</p>
                 <p className="text-lg font-semibold text-yellow-400">
-                  {formatCurrency(summary.totalInterestPaid)} {summary.currency}
+                  {fc(summary.totalInterestPaid, loanCurrency)}
                 </p>
               </div>
               {summary.nextPaymentDate && (
                 <div>
-                  <p className="text-sm text-dark-400">Próximo Vencimiento</p>
+                  <p className="text-sm text-dark-400">{t('pages.loans.nextPayment')}</p>
                   <p className="text-lg font-semibold text-white">
                     {formatDate(summary.nextPaymentDate)}
                   </p>
@@ -347,39 +348,39 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
           {currentInstallment && (
             <div className="bg-primary-900/20 border border-primary-600 rounded-lg p-6">
               <h3 className="text-lg font-semibold text-white mb-4">
-                Cuota Actual #{currentInstallment.installmentNumber}
+                {t('pages.loans.installmentNumber', { number: currentInstallment.installmentNumber })}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <p className="text-sm text-dark-400">Vencimiento</p>
+                  <p className="text-sm text-dark-400">{t('pages.loans.dueDate')}</p>
                   <p className="text-lg font-semibold text-white">
                     {formatDate(currentInstallment.dueDate)}
                   </p>
                   <p className="text-sm text-dark-400 mt-1">
-                    Estado: {getStatusLabel(currentInstallment.status)}
+                    {t('pages.loans.statusLabel')}: {getStatusLabel(currentInstallment.status)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-dark-400">Total a Pagar</p>
+                  <p className="text-sm text-dark-400">{t('pages.loans.total')}</p>
                   <p className="text-2xl font-bold text-white">
-                    {formatCurrency(currentInstallment.totalDue)} {summary.currency}
+                    {fc(currentInstallment.totalDue, loanCurrency)}
                   </p>
                 </div>
               </div>
               <div className="bg-dark-700 rounded-lg p-4 mb-4">
-                <p className="text-sm font-semibold text-white mb-2">Componentes de la Cuota:</p>
+                <p className="text-sm font-semibold text-white mb-2">{t('pages.loans.installmentComponents')}</p>
                 <div className="space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-dark-400">Capital Programado:</span>
-                    <span className="text-white">{formatCurrency(currentInstallment.principalAmount)}</span>
+                    <span className="text-dark-400">{t('pages.loans.scheduledPrincipal')}</span>
+                    <span className="text-white">{fc(currentInstallment.principalAmount, loanCurrency)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-dark-400">Interés Programado:</span>
-                    <span className="text-white">{formatCurrency(currentInstallment.interestAmount)}</span>
+                    <span className="text-dark-400">{t('pages.loans.scheduledInterest')}</span>
+                    <span className="text-white">{fc(currentInstallment.interestAmount, loanCurrency)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-dark-400">Cargo Fijo:</span>
-                    <span className="text-white">{formatCurrency(currentInstallment.chargeAmount)}</span>
+                    <span className="text-dark-400">{t('pages.loans.fixedCharge')}</span>
+                    <span className="text-white">{fc(currentInstallment.chargeAmount, loanCurrency)}</span>
                   </div>
                 </div>
               </div>
@@ -394,7 +395,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 }}
                 className="btn-primary w-full"
               >
-                Registrar Pago
+                {t('pages.loans.registerPayment')}
               </button>
             </div>
           )}
@@ -406,15 +407,15 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 <thead className="bg-dark-600">
                   <tr>
                     <th className="text-left py-3 px-4 text-dark-400 font-medium">#</th>
-                    <th className="text-left py-3 px-4 text-dark-400 font-medium">Fecha</th>
-                    <th className="text-left py-3 px-4 text-dark-400 font-medium">Estado</th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Capital</th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Interés</th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Cargo</th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Total</th>
-                    <th className="text-right py-3 px-4 text-dark-400 font-medium">Saldo Final</th>
-                    <th className="text-center py-3 px-4 text-dark-400 font-medium">Progreso</th>
-                    <th className="text-center py-3 px-4 text-dark-400 font-medium">Acciones</th>
+                    <th className="text-left py-3 px-4 text-dark-400 font-medium">{t('pages.loans.date')}</th>
+                    <th className="text-left py-3 px-4 text-dark-400 font-medium">{t('pages.loans.statusLabel')}</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.principal')}</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.interest')}</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.charge')}</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.total')}</th>
+                    <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.balance')}</th>
+                    <th className="text-center py-3 px-4 text-dark-400 font-medium">{t('pages.loans.amortizationProgress')}</th>
+                    <th className="text-center py-3 px-4 text-dark-400 font-medium">{t('common.actions.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -442,17 +443,19 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                       >
                         <td data-label="#" className="py-3 px-4 font-medium">
                           <span className="table-stack-value text-white">
-                            {item.installmentNumber === 0 ? '0 (Desembolso)' : item.installmentNumber}
+                            {item.installmentNumber === 0
+                              ? t('pages.loans.disbursementInstallment')
+                              : item.installmentNumber}
                           </span>
                         </td>
-                        <td data-label="Fecha" className="py-3 px-4">
+                        <td data-label={t('pages.loans.date')} className="py-3 px-4">
                           <span className="table-stack-value text-white">{formatDate(item.dueDate)}</span>
                         </td>
-                        <td data-label="Estado" className="py-3 px-4">
+                        <td data-label={t('pages.loans.statusLabel')} className="py-3 px-4">
                           <span className="table-stack-value">
                             <div className="flex items-center justify-end gap-2">
                               {item.installmentNumber === 0 ? (
-                                <span className="text-blue-400 text-sm">Desembolso</span>
+                                <span className="text-blue-400 text-sm">{t('pages.loans.disbursement')}</span>
                               ) : (
                                 <>
                                   {getStatusIcon(item.status)}
@@ -462,40 +465,40 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                             </div>
                           </span>
                         </td>
-                        <td data-label="Capital" className="py-3 px-4 text-right text-white md:text-right">
+                        <td data-label={t('pages.loans.principal')} className="py-3 px-4 text-right text-white md:text-right">
                           <span className="table-stack-value text-white">
                             {item.installmentNumber === 0 ? (
                               <span className="text-dark-400">-</span>
                             ) : (
-                              formatCurrency(item.principalAmount)
+                              fc(item.principalAmount, loanCurrency)
                             )}
                           </span>
                         </td>
-                        <td data-label="Interés" className="py-3 px-4 text-right text-white md:text-right">
+                        <td data-label={t('pages.loans.interest')} className="py-3 px-4 text-right text-white md:text-right">
                           <span className="table-stack-value text-white">
                             {item.installmentNumber === 0 ? (
                               <span className="text-dark-400">-</span>
                             ) : (
-                              formatCurrency(item.interestAmount)
+                              fc(item.interestAmount, loanCurrency)
                             )}
                           </span>
                         </td>
-                        <td data-label="Cargo" className="py-3 px-4 text-right text-white md:text-right">
+                        <td data-label={t('pages.loans.charge')} className="py-3 px-4 text-right text-white md:text-right">
                           <span className="table-stack-value text-white">
                             {item.installmentNumber === 0 ? (
                               <span className="text-dark-400">-</span>
                             ) : (
-                              formatCurrency(item.chargeAmount)
+                              fc(item.chargeAmount, loanCurrency)
                             )}
                           </span>
                         </td>
-                        <td data-label="Total" className="py-3 px-4 text-right font-semibold text-white md:text-right">
-                          <span className="table-stack-value font-semibold text-white">{formatCurrency(item.totalDue)}</span>
+                        <td data-label={t('pages.loans.total')} className="py-3 px-4 text-right font-semibold text-white md:text-right">
+                          <span className="table-stack-value font-semibold text-white">{fc(item.totalDue, loanCurrency)}</span>
                         </td>
-                        <td data-label="Saldo final" className="py-3 px-4 text-right text-white md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(item.outstandingBalance)}</span>
+                        <td data-label={t('pages.loans.balance')} className="py-3 px-4 text-right text-white md:text-right">
+                          <span className="table-stack-value text-white">{fc(item.outstandingBalance, loanCurrency)}</span>
                         </td>
-                        <td data-label="Progreso" className="py-3 px-4">
+                        <td data-label={t('pages.loans.amortizationProgress')} className="py-3 px-4">
                           <span className="table-stack-value w-full max-w-[8rem]">
                             {item.installmentNumber === 0 ? (
                               <span className="text-dark-400 text-xs">-</span>
@@ -511,7 +514,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                             )}
                           </span>
                         </td>
-                        <td data-label="Acciones" className="py-3 px-4">
+                        <td data-label={t('common.actions.actions')} className="py-3 px-4">
                           <span className="table-stack-value">
                           <div className="flex items-center justify-end gap-2">
                             {(item.installmentNumber === 0 || item.status === 'PENDING' || item.status === 'OVERDUE') ? (
@@ -530,7 +533,11 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                   setShowPaymentModal(true);
                                 }}
                                 className="p-2 text-primary-400 hover:text-primary-300"
-                                title={item.installmentNumber === 0 ? "Registrar Pago al Capital" : "Registrar Pago"}
+                                title={
+                                  item.installmentNumber === 0
+                                    ? t('common.actions.registerPrincipalPayment')
+                                    : t('common.actions.registerPayment')
+                                }
                               >
                                 <DollarSign size={18} />
                               </button>
@@ -553,14 +560,14 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                     setShowEditPaymentModal(true);
                                   }}
                                   className="p-2 text-blue-400 hover:text-blue-300"
-                                  title="Editar Pago"
+                                  title={t('common.actions.edit')}
                                 >
                                   <Edit size={18} />
                                 </button>
                                 <button
                                   onClick={() => handleDeletePayment(p.id)}
                                   className="p-2 text-red-400 hover:text-red-300"
-                                  title="Eliminar Pago"
+                                  title={t('common.actions.delete')}
                                 >
                                   <Trash2 size={18} />
                                 </button>
@@ -581,54 +588,54 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
           {/* Payment History */}
           {payments.length > 0 && (
             <div className="bg-dark-700 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Historial de Pagos Realizados</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">{t('pages.loans.paymentsHistory')}</h3>
               <div className="table-responsive table-stack">
                 <table className="w-full">
                   <thead className="bg-dark-600">
                     <tr>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Fecha</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Monto Pagado</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Capital</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Interés</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Cargo</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Mora</th>
-                      <th className="text-right py-3 px-4 text-dark-400 font-medium">Saldo Después</th>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Origen</th>
-                      <th className="text-center py-3 px-4 text-dark-400 font-medium">Acciones</th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">{t('pages.loans.date')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.amount')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.principal')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.interest')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.charge')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.lateFee')}</th>
+                      <th className="text-right py-3 px-4 text-dark-400 font-medium">{t('pages.loans.balance')}</th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">{t('pages.loans.source')}</th>
+                      <th className="text-center py-3 px-4 text-dark-400 font-medium">{t('common.actions.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {payments.map((payment) => (
                       <tr key={payment.id} className="border-b border-dark-600 hover:bg-dark-600 max-md:border-0">
-                        <td data-label="Fecha" className="py-3 px-4">
+                        <td data-label={t('pages.loans.date')} className="py-3 px-4">
                           <span className="table-stack-value text-white">{formatDate(payment.paymentDate)}</span>
                         </td>
-                        <td data-label="Monto pagado" className="py-3 px-4 text-right font-semibold md:text-right">
-                          <span className="table-stack-value font-semibold text-white">{formatCurrency(payment.amount)}</span>
+                        <td data-label={t('pages.loans.amount')} className="py-3 px-4 text-right font-semibold md:text-right">
+                          <span className="table-stack-value font-semibold text-white">{fc(payment.amount, loanCurrency)}</span>
                         </td>
-                        <td data-label="Capital" className="py-3 px-4 text-right md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(payment.principalAmount || 0)}</span>
+                        <td data-label={t('pages.loans.principal')} className="py-3 px-4 text-right md:text-right">
+                          <span className="table-stack-value text-white">{fc(payment.principalAmount || 0, loanCurrency)}</span>
                         </td>
-                        <td data-label="Interés" className="py-3 px-4 text-right md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(payment.interestAmount || 0)}</span>
+                        <td data-label={t('pages.loans.interest')} className="py-3 px-4 text-right md:text-right">
+                          <span className="table-stack-value text-white">{fc(payment.interestAmount || 0, loanCurrency)}</span>
                         </td>
-                        <td data-label="Cargo" className="py-3 px-4 text-right md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(payment.chargeAmount || 0)}</span>
+                        <td data-label={t('pages.loans.charge')} className="py-3 px-4 text-right md:text-right">
+                          <span className="table-stack-value text-white">{fc(payment.chargeAmount || 0, loanCurrency)}</span>
                         </td>
-                        <td data-label="Mora" className="py-3 px-4 text-right md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(payment.lateFee || 0)}</span>
+                        <td data-label={t('pages.loans.lateFee')} className="py-3 px-4 text-right md:text-right">
+                          <span className="table-stack-value text-white">{fc(payment.lateFee || 0, loanCurrency)}</span>
                         </td>
-                        <td data-label="Saldo después" className="py-3 px-4 text-right md:text-right">
-                          <span className="table-stack-value text-white">{formatCurrency(payment.outstandingBalance || 0)}</span>
+                        <td data-label={t('pages.loans.balance')} className="py-3 px-4 text-right md:text-right">
+                          <span className="table-stack-value text-white">{fc(payment.outstandingBalance || 0, loanCurrency)}</span>
                         </td>
-                        <td data-label="Origen" className="py-3 px-4 text-left md:text-left max-w-[12rem]">
+                        <td data-label={t('pages.loans.source')} className="py-3 px-4 text-left md:text-left max-w-[12rem]">
                           <span className="table-stack-value text-dark-300 text-sm break-words">
                             {payment.bankAccountId != null
-                              ? bankAccountNameById.get(payment.bankAccountId) ?? `Cuenta #${payment.bankAccountId}`
-                              : '—'}
+                              ? bankAccountNameById.get(payment.bankAccountId) ?? t('pages.loans.accountNumber', { id: payment.bankAccountId })
+                              : t('pages.loans.noLinkedAccount')}
                           </span>
                         </td>
-                        <td data-label="Acciones" className="py-3 px-4">
+                        <td data-label={t('common.actions.actions')} className="py-3 px-4">
                           <span className="table-stack-value">
                           <div className="flex items-center justify-end gap-2">
                             <button
@@ -645,7 +652,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                                 setShowEditPaymentModal(true);
                               }}
                               className="p-2 text-blue-400 hover:text-blue-300"
-                              title="Editar"
+                              title={t('common.actions.edit')}
                             >
                               <Edit size={18} />
                             </button>
@@ -653,7 +660,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                               type="button"
                               onClick={() => handleDeletePayment(payment.id)}
                               className="p-2 text-red-400 hover:text-red-300"
-                              title="Eliminar"
+                              title={t('common.actions.delete')}
                             >
                               <Trash2 size={18} />
                             </button>
@@ -684,11 +691,11 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="amortization-register-payment-title" className="text-xl font-bold text-white mb-4">
-              Registrar Pago
+              {t('pages.loans.registerPayment')}
             </h3>
             <form onSubmit={handleRegisterPayment} className="space-y-4">
               <div>
-                <label className="label">Fecha de Pago</label>
+                <label className="label">{t('pages.loans.paymentDate')}</label>
                 <input
                   type="date"
                   value={paymentData.paymentDate}
@@ -698,7 +705,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 />
               </div>
               <div>
-                <label className="label">Monto</label>
+                <label className="label">{t('pages.loans.amount')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -709,7 +716,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 />
               </div>
               <div>
-                <label className="label">Tipo de Pago</label>
+                <label className="label">{t('pages.loans.paymentTypeLabel')}</label>
                 <select
                   value={paymentData.paymentType}
                   onChange={(e) =>
@@ -717,20 +724,20 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   }
                   className="input w-full"
                 >
-                  <option value="COMPLETE">Completo</option>
-                  <option value="PARTIAL">Parcial</option>
-                  <option value="ADVANCE">Anticipado</option>
-                  <option value="INTEREST">Intereses</option>
+                  <option value="COMPLETE">{t('pages.loans.paymentType.complete')}</option>
+                  <option value="PARTIAL">{t('pages.loans.paymentType.partial')}</option>
+                  <option value="ADVANCE">{t('pages.loans.paymentType.advance')}</option>
+                  <option value="INTEREST">{t('pages.loans.paymentType.interest')}</option>
                 </select>
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.loans.sourceAccountOptional')}</label>
                 <select
                   value={paymentData.bankAccountId}
                   onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
                   className="input w-full"
                 >
-                  <option value="">Sin vincular saldo</option>
+                  <option value="">{t('pages.loans.unlinkedBalance')}</option>
                   {accountsForAmortPayment.map((a) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -739,11 +746,11 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   ))}
                 </select>
                 {summary && (
-                  <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {summary.currency}</p>
+                  <p className="text-xs text-dark-500 mt-1">{t('pages.loans.loanCurrency', { currency: summary.currency })}</p>
                 )}
               </div>
               <div>
-                <label className="label">Notas (opcional)</label>
+                <label className="label">{t('pages.loans.notesOptional')}</label>
                 <textarea
                   value={paymentData.notes}
                   onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}
@@ -754,20 +761,20 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
               {selectedInstallment?.installmentNumber === 0 && (
                 <div className="bg-blue-900/20 border border-blue-600 rounded-lg p-3">
                   <p className="text-sm text-blue-300">
-                    Los pagos a la cuota 0 (Desembolso) se aplican directamente al capital.
+                    {t('pages.loans.disbursementHint')}
                   </p>
                 </div>
               )}
               <div className="flex space-x-4 pt-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Registrar Pago
+                  {t('pages.loans.register')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowPaymentModal(false)}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>
@@ -789,11 +796,11 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="amortization-edit-payment-title" className="text-xl font-bold text-white mb-4">
-              Editar Pago
+              {t('common.actions.edit')}
             </h3>
             <form onSubmit={handleEditPayment} className="space-y-4">
               <div>
-                <label className="label">Fecha de Pago</label>
+                <label className="label">{t('pages.loans.paymentDate')}</label>
                 <input
                   type="date"
                   value={paymentData.paymentDate}
@@ -803,7 +810,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 />
               </div>
               <div>
-                <label className="label">Monto</label>
+                <label className="label">{t('pages.loans.amount')}</label>
                 <input
                   type="number"
                   step="0.01"
@@ -814,7 +821,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                 />
               </div>
               <div>
-                <label className="label">Tipo de Pago</label>
+                <label className="label">{t('pages.loans.paymentTypeLabel')}</label>
                 <select
                   value={paymentData.paymentType}
                   onChange={(e) =>
@@ -822,20 +829,20 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   }
                   className="input w-full"
                 >
-                  <option value="COMPLETE">Completo</option>
-                  <option value="PARTIAL">Parcial</option>
-                  <option value="ADVANCE">Anticipado</option>
-                  <option value="INTEREST">Intereses</option>
+                  <option value="COMPLETE">{t('pages.loans.paymentType.complete')}</option>
+                  <option value="PARTIAL">{t('pages.loans.paymentType.partial')}</option>
+                  <option value="ADVANCE">{t('pages.loans.paymentType.advance')}</option>
+                  <option value="INTEREST">{t('pages.loans.paymentType.interest')}</option>
                 </select>
               </div>
               <div>
-                <label className="label">Cuenta origen (opcional)</label>
+                <label className="label">{t('pages.loans.sourceAccountOptional')}</label>
                 <select
                   value={paymentData.bankAccountId}
                   onChange={(e) => setPaymentData({ ...paymentData, bankAccountId: e.target.value })}
                   className="input w-full"
                 >
-                  <option value="">Sin vincular saldo</option>
+                  <option value="">{t('pages.loans.unlinkedBalance')}</option>
                   {accountsForAmortPayment.map((a) => (
                     <option key={a.id} value={a.id}>
                       {(a.accountKind === 'cash' || a.accountKind === 'wallet' ? '💵 ' : '🏦 ')}
@@ -844,11 +851,11 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   ))}
                 </select>
                 {summary && (
-                  <p className="text-xs text-dark-500 mt-1">Moneda del préstamo: {summary.currency}</p>
+                  <p className="text-xs text-dark-500 mt-1">{t('pages.loans.loanCurrency', { currency: summary.currency })}</p>
                 )}
               </div>
               <div>
-                <label className="label">Notas (opcional)</label>
+                <label className="label">{t('pages.loans.notesOptional')}</label>
                 <textarea
                   value={paymentData.notes}
                   onChange={(e) => setPaymentData({ ...paymentData, notes: e.target.value })}
@@ -858,7 +865,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
               </div>
               <div className="flex space-x-4 pt-4">
                 <button type="submit" className="btn-primary flex-1">
-                  Actualizar Pago
+                  {t('pages.loans.updatePayment')}
                 </button>
                 <button
                   type="button"
@@ -868,7 +875,7 @@ const AmortizationTable: React.FC<AmortizationTableProps> = ({ loanId, onClose, 
                   }}
                   className="btn-secondary flex-1"
                 >
-                  Cancelar
+                  {t('common.actions.cancel')}
                 </button>
               </div>
             </form>

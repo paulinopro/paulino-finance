@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import AuthBrandMark from '../components/AuthBrandMark';
 
 const Login: React.FC = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,10 +20,10 @@ const Login: React.FC = () => {
 
     try {
       await login(email, password);
-      toast.success('¡Bienvenido!');
+      toast.success(t('auth.login.toastWelcome'));
       navigate('/');
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al iniciar sesión');
+      toast.error(error.response?.data?.message || t('auth.login.toastErrorFallback'));
     } finally {
       setLoading(false);
     }
@@ -38,14 +40,14 @@ const Login: React.FC = () => {
         <div className="card">
           <div className="text-center mb-8">
             <AuthBrandMark />
-            <h1 className="page-title mb-2">Paulino Finance</h1>
-            <p className="text-dark-400 text-sm sm:text-base">Inicia sesión en tu cuenta</p>
+            <h1 className="page-title mb-2">{t('auth.login.title')}</h1>
+            <p className="text-dark-400 text-sm sm:text-base">{t('auth.login.subtitle')}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label htmlFor="email" className="label">
-                Correo Electrónico
+                {t('auth.login.email')}
               </label>
               <input
                 id="email"
@@ -61,13 +63,13 @@ const Login: React.FC = () => {
             <div>
               <div className="flex items-center justify-between gap-2 mb-1">
                 <label htmlFor="password" className="label mb-0">
-                  Contraseña
+                  {t('auth.login.password')}
                 </label>
                 <Link
                   to="/forgot-password"
                   className="text-xs sm:text-sm text-primary-500 hover:text-primary-400 font-medium shrink-0"
                 >
-                  ¿Olvidaste tu contraseña?
+                  {t('auth.login.forgotPassword')}
                 </Link>
               </div>
               <input
@@ -86,14 +88,14 @@ const Login: React.FC = () => {
               disabled={loading}
               className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+              {loading ? t('auth.login.submitLoading') : t('auth.login.submitIdle')}
             </button>
           </form>
 
           <p className="mt-6 text-center text-dark-400">
-            ¿No tienes una cuenta?{' '}
+            {t('auth.login.noAccount')}{' '}
             <Link to="/register" className="text-primary-500 hover:text-primary-400 font-medium">
-              Regístrate
+              {t('auth.login.signupCta')}
             </Link>
           </p>
         </div>

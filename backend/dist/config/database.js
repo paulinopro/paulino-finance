@@ -7,6 +7,7 @@ exports.initializeDatabase = exports.syncSuperAdminsFromEnv = exports.getClient 
 const pg_1 = require("pg");
 const dotenv_1 = __importDefault(require("dotenv"));
 const subscriptionModules_1 = require("../constants/subscriptionModules");
+const expenseCategoryPresets_1 = require("../constants/expenseCategoryPresets");
 const notificationTemplateSeed_1 = require("../services/notificationTemplateSeed");
 dotenv_1.default.config();
 const pool = new pg_1.Pool({
@@ -105,6 +106,7 @@ const createTables = async () => {
       currency_preference VARCHAR(3) DEFAULT 'DOP',
       exchange_rate_dop_usd DECIMAL(10, 2) DEFAULT 55.00,
       timezone VARCHAR(50) DEFAULT 'America/Santo_Domingo',
+      locale_preference VARCHAR(16) DEFAULT 'es',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -149,6 +151,10 @@ const createTables = async () => {
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                      WHERE table_schema = 'public' AND table_name='users' AND column_name='cedula') THEN
         ALTER TABLE users ADD COLUMN cedula VARCHAR(50);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                     WHERE table_schema = 'public' AND table_name='users' AND column_name='locale_preference') THEN
+        ALTER TABLE users ADD COLUMN locale_preference VARCHAR(16) DEFAULT 'es';
       END IF;
     END $$;
   `);
@@ -232,6 +238,7 @@ const createTables = async () => {
     )
   `);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_subscription_payments_user_paid ON subscription_payments(user_id, paid_at DESC)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`);
     await (0, exports.query)(`
     DO $$
     BEGIN
@@ -298,13 +305,36 @@ const createTables = async () => {
       UNIQUE(user_id, name)
     )
   `);
-    // Insert default categories for existing users
     await (0, exports.query)(`
-    INSERT INTO expense_categories (user_id, name)
-    SELECT id, unnest(ARRAY['Alimentación', 'Transporte', 'Servicios', 'Entretenimiento', 'Salud', 'Educación', 'Ropa', 'Otros'])
-    FROM users
-    ON CONFLICT (user_id, name) DO NOTHING
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expense_categories' AND column_name = 'icon'
+      ) THEN
+        ALTER TABLE expense_categories ADD COLUMN icon VARCHAR(64);
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expense_categories' AND column_name = 'color'
+      ) THEN
+        ALTER TABLE expense_categories ADD COLUMN color VARCHAR(16);
+      END IF;
+    END $$;
   `);
+    const ecPresets = expenseCategoryPresets_1.EXPENSE_CATEGORY_DEFAULT_PRESETS;
+    await (0, exports.query)(`INSERT INTO expense_categories (user_id, name, icon, color)
+     SELECT u.id, c.name, c.icon, c.color
+     FROM users u
+     CROSS JOIN (
+       SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+         AS preset(name, icon, color)
+     ) c
+     ON CONFLICT (user_id, name) DO NOTHING`, [
+        ecPresets.map((p) => p.name),
+        ecPresets.map((p) => p.icon),
+        ecPresets.map((p) => p.color),
+    ]);
     // Loans table
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS loans (
@@ -575,6 +605,35 @@ const createTables = async () => {
     END $$;
   `);
     await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'recurrence_start_date'
+      ) THEN
+        ALTER TABLE income ADD COLUMN recurrence_start_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'recurrence_end_date'
+      ) THEN
+        ALTER TABLE income ADD COLUMN recurrence_end_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'recurrence_start_date'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN recurrence_start_date DATE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'expenses' AND column_name = 'recurrence_end_date'
+      ) THEN
+        ALTER TABLE expenses ADD COLUMN recurrence_end_date DATE;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS account_transfers (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -600,6 +659,21 @@ const createTables = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS bank_account_movements (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bank_account_id INTEGER NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+      amount DECIMAL(15, 4) NOT NULL CHECK (amount >= 0),
+      currency VARCHAR(3) NOT NULL CHECK (currency IN ('DOP', 'USD')),
+      direction VARCHAR(3) NOT NULL CHECK (direction IN ('IN', 'OUT')),
+      description TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'pending', 'cancelled')),
+      occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_bank_account_movements_account_occurred ON bank_account_movements(bank_account_id, occurred_at DESC)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_bank_account_movements_user_occurred ON bank_account_movements(user_id, occurred_at DESC)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_account_transfers_user_id ON account_transfers(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_cash_adjustments_user_id ON cash_adjustments(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_income_bank_account_id ON income(bank_account_id)`);
@@ -733,15 +807,28 @@ const createTables = async () => {
       recurrence_pattern VARCHAR(50),
       color VARCHAR(7) DEFAULT '#3b82f6',
       notes TEXT,
+      show_on_calendar BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, event_type, related_id, event_date)
     )
   `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name = 'show_on_calendar'
+      ) THEN
+        ALTER TABLE calendar_events ADD COLUMN show_on_calendar BOOLEAN NOT NULL DEFAULT true;
+      END IF;
+    END $$;
+  `);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(event_date)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_type ON calendar_events(event_type)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_status ON calendar_events(status)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_show_on_calendar ON calendar_events(user_id, show_on_calendar)`);
     // Create indexes for better performance
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_credit_cards_user_id ON credit_cards(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)`);

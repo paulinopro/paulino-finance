@@ -1,0 +1,3 @@
+/*! For license information please see 23258.3cd23d49.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[23258],{23258(e,a,n){n.r(a),n.d(a,{default:()=>p});const p=(0,n(21639).A)("LampDesk",[["path",{d:"m14 5-3 3 2 7 8-8-7-2Z",key:"1b0msb"}],["path",{d:"m14 5-3 3-3-3 3-3 3 3Z",key:"1uemms"}],["path",{d:"M9.5 6.5 4 12l3 6",key:"1bx08v"}],["path",{d:"M3 22v-2c0-1.1.9-2 2-2h4a2 2 0 0 1 2 2v2H3Z",key:"wap775"}]])}}]);
+//# sourceMappingURL=23258.3cd23d49.chunk.js.map

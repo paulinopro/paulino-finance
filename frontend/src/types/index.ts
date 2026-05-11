@@ -7,7 +7,16 @@ export interface User {
   cedula?: string | null;
   telegramChatId?: string;
   currencyPreference: string;
-  exchangeRateDopUsd: number;
+  /** Segunda moneda del par (formularios y totales); servidor deduce si falta o coincide con la principal. */
+  secondaryCurrencyPreference?: string;
+  /** `es` | `en` | `de` — predeterminado en servidor `es`. */
+  localePreference?: string;
+  /** Tasa manual (secundaria por 1 principal); vacío en UI = usar tasa del día. */
+  exchangeRateManual?: number | null;
+  /** Tasa aplicada (manual o API/cache). Secundaria por 1 unidad de principal. */
+  exchangeRateEffective?: number;
+  /** @deprecated Usar `exchangeRateEffective`; mismo valor numérico. */
+  exchangeRateDopUsd?: number;
   timezone?: string;
   isSuperAdmin?: boolean;
   isActive?: boolean;
@@ -118,6 +127,10 @@ export interface LoanAmortizationSummary {
 export interface ExpenseCategory {
   id: number;
   name: string;
+  /** Clave de ícono Lucide PascalCase (servidor/API) */
+  icon?: string | null;
+  /** Color hex #rrggbb */
+  color?: string | null;
   createdAt: string;
 }
 
@@ -135,6 +148,10 @@ export interface CalendarEvent {
   recurrencePattern?: string;
   color: string;
   notes?: string;
+  /** Desde API (JOIN ingreso/gasto); para modal de monto variable en calendario */
+  sourceNature?: 'fixed' | 'variable';
+  sourceRecurrenceType?: 'recurrent' | 'non_recurrent';
+  sourceFrequency?: string | null;
 }
 
 export interface FinancialSummary {
@@ -143,8 +160,8 @@ export interface FinancialSummary {
   balance: number;
   pendingPayments: number;
   overduePayments: number;
-  /** Si viene del API, los montos ya están unificados en esta moneda. */
-  displayCurrency?: 'DOP';
+  /** Si viene del API, los montos ya están unificados en esta moneda (código ISO). */
+  displayCurrency?: string;
 }
 
 /** Tipo fijo/variable — API `nature` */
@@ -237,6 +254,20 @@ export interface BankAccount {
   updatedAt: string;
 }
 
+/** Movimiento de libro en una cuenta (entrada/salida de balance). API: GET /accounts/:id/movements */
+export type BankAccountMovementDirection = 'IN' | 'OUT';
+export type BankAccountMovementStatusCode = 'completed' | 'pending' | 'cancelled';
+
+export interface BankAccountLedgerMovement {
+  id: number;
+  amount: number;
+  currency: string;
+  direction: BankAccountMovementDirection;
+  description: string;
+  status: BankAccountMovementStatusCode;
+  occurredAt: string;
+}
+
 /** Notificación in-app (evitar el nombre `Notification`: choca con la API del navegador en el bundler). */
 export interface AppNotification {
   id: number;
@@ -295,6 +326,9 @@ export interface DashboardSummary {
   loans: number;
   vehicles: number;
   exchangeRate: number;
+  /** Códigos ISO del par en preferencias (etiqueta resumen / tasa). */
+  primaryCurrency?: string;
+  secondaryCurrency?: string;
 }
 
 export interface DashboardStats {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Download, Share2, X } from 'lucide-react';
 import { useMobileTabBarVisible } from '../hooks/useMobileTabBarVisible';
+import { useTranslation } from 'react-i18next';
 
 const DISMISS_KEY = 'paulino-install-prompt-dismissed';
 
@@ -30,6 +31,7 @@ function allowInstallContext(): boolean {
  * CTA para instalar la PWA: Chromium (beforeinstallprompt) o instrucciones para Safari iOS.
  */
 const InstallAppPrompt: React.FC = () => {
+  const { t } = useTranslation();
   const mobileTabBar = useMobileTabBarVisible();
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => {
@@ -101,7 +103,7 @@ const InstallAppPrompt: React.FC = () => {
           : 'bottom-[5.25rem] sm:bottom-[5.5rem]'
       }`}
       role="region"
-      aria-label="Instalar aplicación"
+      aria-label={t('common.installPrompt.regionAria')}
     >
       <div className="pointer-events-auto max-w-lg mx-auto rounded-xl border border-dark-600 bg-dark-800/95 backdrop-blur-sm shadow-xl text-sm text-dark-100">
         <div className="flex items-start gap-3 p-3 sm:p-4">
@@ -113,9 +115,9 @@ const InstallAppPrompt: React.FC = () => {
           <div className="flex-1 min-w-0 space-y-2">
             {showChromium ? (
               <>
-                <p className="text-white font-medium">Instalar Paulino Finance</p>
+                <p className="text-white font-medium">{t('common.installPrompt.title')}</p>
                 <p className="text-dark-400 text-xs sm:text-sm">
-                  Accede más rápido desde tu pantalla de inicio, como una app.
+                  {t('common.installPrompt.subtitle')}
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
@@ -123,30 +125,32 @@ const InstallAppPrompt: React.FC = () => {
                     onClick={onInstall}
                     className="inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-medium text-sm"
                   >
-                    Instalar
+                    {t('common.installPrompt.install')}
                   </button>
                   <button
                     type="button"
                     onClick={dismiss}
                     className="inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700 text-sm"
                   >
-                    Ahora no
+                    {t('common.installPrompt.notNow')}
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <p className="text-white font-medium">Añadir a pantalla de inicio</p>
+                <p className="text-white font-medium">{t('common.installPrompt.iosTitle')}</p>
                 <p className="text-dark-400 text-xs sm:text-sm">
-                  En Safari: pulsa el botón <strong className="text-dark-300">Compartir</strong> y elige{' '}
-                  <strong className="text-dark-300">Añadir a pantalla de inicio</strong>.
+                  {t('common.installPrompt.iosPrefix')}{' '}
+                  <strong className="text-dark-300">{t('common.installPrompt.iosShare')}</strong>{' '}
+                  {t('common.installPrompt.iosAndChoose')}{' '}
+                  <strong className="text-dark-300">{t('common.installPrompt.iosAddToHome')}</strong>.
                 </p>
                 <button
                   type="button"
                   onClick={dismiss}
                   className="inline-flex items-center justify-center min-h-[44px] px-3 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700 text-sm mt-1"
                 >
-                  Entendido
+                  {t('common.installPrompt.gotIt')}
                 </button>
               </>
             )}
@@ -155,7 +159,7 @@ const InstallAppPrompt: React.FC = () => {
             type="button"
             onClick={dismiss}
             className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-dark-400 hover:text-white hover:bg-dark-700"
-            aria-label="Cerrar aviso de instalación"
+            aria-label={t('common.installPrompt.closeAria')}
           >
             <X size={20} />
           </button>

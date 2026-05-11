@@ -1,39 +1,79 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { resolveExchangeRateDopUsd } from '../utils/exchangeRate';
+import {
+  amountToPrimary,
+  bankBalancesToPrimary,
+  getConversionContextForUser,
+  type UserConversionContext,
+} from '../services/userCurrencyConversion';
 import { describeExpenseScheduleEs, normalizeFrequency } from '../constants/incomeExpenseTaxonomy';
 import { renderReportPdf, Kpi } from '../utils/reportPdfLayout';
 
-async function getExchangeRateForUser(userId: number): Promise<number> {
-  const r = await query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-  return resolveExchangeRateDopUsd(r.rows[0]?.exchange_rate_dop_usd);
+function cardDebtToPrimary(c: any, ctx: UserConversionContext): number {
+  if (c.currencyType === 'DOP') return amountToPrimary(c.currentDebtDop, ctx.pair.primary, ctx);
+  if (c.currencyType === 'USD') return amountToPrimary(c.currentDebtUsd, ctx.pair.secondary, ctx);
+  return bankBalancesToPrimary(c.currentDebtDop, c.currentDebtUsd, ctx);
 }
 
-// Helper function to format currency
+function cardLimitToPrimary(c: any, ctx: UserConversionContext): number {
+  if (c.currencyType === 'DOP') return amountToPrimary(c.creditLimitDop, ctx.pair.primary, ctx);
+  if (c.currencyType === 'USD') return amountToPrimary(c.creditLimitUsd, ctx.pair.secondary, ctx);
+  return bankBalancesToPrimary(c.creditLimitDop, c.creditLimitUsd, ctx);
+}
+
+function accountToPrimary(a: any, ctx: UserConversionContext): number {
+  if (a.currencyType === 'DOP') return amountToPrimary(a.balanceDop, ctx.pair.primary, ctx);
+  if (a.currencyType === 'USD') return amountToPrimary(a.balanceUsd, ctx.pair.secondary, ctx);
+  return bankBalancesToPrimary(a.balanceDop, a.balanceUsd, ctx);
+}
+
+/** Formato moneda; `currency` = código ISO (p. ej. DOP, USD, EUR). */
 const formatCurrency = (amount: number, currency: string): string => {
-  return new Intl.NumberFormat('es-DO', {
-    style: 'currency',
-    currency: currency === 'DOP' ? 'DOP' : 'USD',
-  }).format(amount);
+  const code = String(currency || 'USD')
+    .toUpperCase()
+    .slice(0, 3);
+  try {
+    return new Intl.NumberFormat('es-DO', {
+      style: 'currency',
+      currency: code,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${code}`;
+  }
+};
+
+const rateSubtitle = (ctx: UserConversionContext) => {
+  const p = ctx.pair.primary;
+  const s = ctx.pair.secondary;
+  const r = ctx.pairRateSecondaryPerPrimary;
+  return `Par ${p}/${s} — ${s} por 1 ${p}: ${Number.isFinite(r) ? r.toFixed(4) : '—'}`;
 };
 
 // ——— PDF: layout unificado (reportPdfLayout) ———
 
 const generateExpensesPDF = async (
   expenses: any[],
-  filters: { fromDate?: string; toDate?: string; status?: string }
+  filters: { fromDate?: string; toDate?: string; status?: string },
+  ctx: UserConversionContext
 ): Promise<Buffer> => {
   const paid = expenses.filter((e) => e.isPaid);
   const pending = expenses.filter((e) => !e.isPaid);
-  const totalPaid = paid.reduce((sum, e) => sum + e.amount, 0);
-  const totalPending = pending.reduce((sum, e) => sum + e.amount, 0);
+  const totalPaid = paid.reduce(
+    (sum, e) => sum + amountToPrimary(e.amount, String(e.currency || 'DOP'), ctx),
+    0
+  );
+  const totalPending = pending.reduce(
+    (sum, e) => sum + amountToPrimary(e.amount, String(e.currency || 'DOP'), ctx),
+    0
+  );
   const statusExtra =
     filters.status === 'paid' ? 'Solo pagados' : filters.status === 'pending' ? 'Solo pendientes' : undefined;
+  const p = ctx.pair.primary;
 
   const kpis: Kpi[] = [
-    { label: 'Total pagado (DOP eq.)', value: formatCurrency(totalPaid, 'DOP'), kind: 'pos' },
-    { label: 'Total pendiente (DOP eq.)', value: formatCurrency(totalPending, 'DOP'), kind: 'amber' },
+    { label: `Total pagado (${p} eq.)`, value: formatCurrency(totalPaid, p), kind: 'pos' },
+    { label: `Total pendiente (${p} eq.)`, value: formatCurrency(totalPending, p), kind: 'amber' },
     { label: 'Registros', value: String(expenses.length) },
     { label: 'Ratio pagados', value: `${paid.length} / ${pending.length}` },
   ];
@@ -57,18 +97,32 @@ const generateExpensesPDF = async (
 
 const generateLoansPDF = async (
   loans: any[],
-  filters: { fromDate?: string; toDate?: string; status?: string }
+  filters: { fromDate?: string; toDate?: string; status?: string },
+  ctx: UserConversionContext
 ): Promise<Buffer> => {
   const active = loans.filter((l) => l.status === 'ACTIVE');
   const paidL = loans.filter((l) => l.status === 'PAID');
-  const totalActive = active.reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
-  const totalPaid = paidL.reduce((sum, l) => sum + l.totalAmount, 0);
+  const totalActive = active.reduce(
+    (sum, l) =>
+      sum +
+      amountToPrimary(
+        l.remainingBalance ?? l.totalAmount,
+        String(l.currency || 'DOP'),
+        ctx
+      ),
+    0
+  );
+  const totalPaid = paidL.reduce(
+    (sum, l) => sum + amountToPrimary(l.totalAmount, String(l.currency || 'DOP'), ctx),
+    0
+  );
   const st =
     filters.status === 'active' ? 'Solo activos' : filters.status === 'paid' ? 'Solo pagados' : undefined;
+  const p = ctx.pair.primary;
 
   const kpis: Kpi[] = [
-    { label: 'Deuda en activos (aprox.)', value: formatCurrency(totalActive, 'DOP'), kind: 'neg' },
-    { label: 'Total préstamos cerrados', value: formatCurrency(totalPaid, 'DOP') },
+    { label: `Deuda en activos (${p} eq.)`, value: formatCurrency(totalActive, p), kind: 'neg' },
+    { label: `Capital préstamos cerrados (${p} eq.)`, value: formatCurrency(totalPaid, p) },
     { label: 'Registros', value: String(loans.length) },
     { label: 'Activos / pagados', value: `${active.length} / ${paidL.length}` },
   ];
@@ -92,44 +146,40 @@ const generateLoansPDF = async (
 };
 
 /** Dual: un solo renglón (separador · sin salto a mitad de “+”). */
-const limLine = (c: any) => {
-  if (c.currencyType === 'DOP') return formatCurrency(c.creditLimitDop, 'DOP');
-  if (c.currencyType === 'USD') return formatCurrency(c.creditLimitUsd, 'USD');
-  return `${formatCurrency(c.creditLimitDop, 'DOP')}\u00A0·\u00A0${formatCurrency(c.creditLimitUsd, 'USD')}`;
+const limLine = (c: any, ctx: UserConversionContext) => {
+  const p = ctx.pair.primary;
+  const s = ctx.pair.secondary;
+  if (c.currencyType === 'DOP') return formatCurrency(c.creditLimitDop, p);
+  if (c.currencyType === 'USD') return formatCurrency(c.creditLimitUsd, s);
+  return `${formatCurrency(c.creditLimitDop, p)}\u00A0·\u00A0${formatCurrency(c.creditLimitUsd, s)}`;
 };
 
-const debtLine = (c: any) => {
-  if (c.currencyType === 'DOP') return formatCurrency(c.currentDebtDop, 'DOP');
-  if (c.currencyType === 'USD') return formatCurrency(c.currentDebtUsd, 'USD');
-  return `${formatCurrency(c.currentDebtDop, 'DOP')}\u00A0·\u00A0${formatCurrency(c.currentDebtUsd, 'USD')}`;
+const debtLine = (c: any, ctx: UserConversionContext) => {
+  const p = ctx.pair.primary;
+  const s = ctx.pair.secondary;
+  if (c.currencyType === 'DOP') return formatCurrency(c.currentDebtDop, p);
+  if (c.currencyType === 'USD') return formatCurrency(c.currentDebtUsd, s);
+  return `${formatCurrency(c.currentDebtDop, p)}\u00A0·\u00A0${formatCurrency(c.currentDebtUsd, s)}`;
 };
 
 const generateCardsPDF = async (
   cards: any[],
   filters: { fromDate?: string; toDate?: string },
-  exchangeRateDopUsd: number
+  ctx: UserConversionContext
 ): Promise<Buffer> => {
-  const r = exchangeRateDopUsd;
-  const totalDebt = cards.reduce((sum, c) => {
-    if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-    if (c.currencyType === 'USD') return sum + c.currentDebtUsd * r;
-    return sum + c.currentDebtDop + c.currentDebtUsd * r;
-  }, 0);
-  const totalLimit = cards.reduce((sum, c) => {
-    if (c.currencyType === 'DOP') return sum + c.creditLimitDop;
-    if (c.currencyType === 'USD') return sum + c.creditLimitUsd * r;
-    return sum + c.creditLimitDop + c.creditLimitUsd * r;
-  }, 0);
+  const p = ctx.pair.primary;
+  const totalDebt = cards.reduce((sum, c) => sum + cardDebtToPrimary(c, ctx), 0);
+  const totalLimit = cards.reduce((sum, c) => sum + cardLimitToPrimary(c, ctx), 0);
   const avail = totalLimit - totalDebt;
   const kpis: Kpi[] = [
-    { label: 'Límite total (DOP eq.)', value: formatCurrency(totalLimit, 'DOP') },
-    { label: 'Deuda total (DOP eq.)', value: formatCurrency(totalDebt, 'DOP'), kind: 'neg' },
-    { label: 'Disponible (DOP eq.)', value: formatCurrency(avail, 'DOP'), kind: 'pos' },
+    { label: `Límite total (${p} eq.)`, value: formatCurrency(totalLimit, p) },
+    { label: `Deuda total (${p} eq.)`, value: formatCurrency(totalDebt, p), kind: 'neg' },
+    { label: `Disponible (${p} eq.)`, value: formatCurrency(avail, p), kind: 'pos' },
     { label: 'Tarjetas', value: String(cards.length) },
   ];
   return renderReportPdf(
     'Reporte de tarjetas de crédito',
-    `Límites\u00A0y\u00A0deudas — tasa USD: 1 = ${r.toFixed(2)} DOP`,
+    `Límites\u00A0y\u00A0deudas — ${rateSubtitle(ctx)}`,
     (s) => {
       s.period(filters.fromDate, filters.toDate);
       s.kpis(kpis, 2);
@@ -140,8 +190,8 @@ const generateCardsPDF = async (
         cards.map((c) => [
           String(c.cardName).slice(0, 32),
           c.bankName,
-          limLine(c),
-          debtLine(c),
+          limLine(c, ctx),
+          debtLine(c, ctx),
           `${c.cutOffDay ?? '—'}/${c.paymentDueDay ?? '—'}`,
         ]),
         { noWrapColumns: [2, 3] }
@@ -153,9 +203,8 @@ const generateCardsPDF = async (
 const generateAccountsPDF = async (
   accounts: any[],
   filters: { fromDate?: string; toDate?: string },
-  exchangeRateDopUsd: number
+  ctx: UserConversionContext
 ): Promise<Buffer> => {
-  const r = exchangeRateDopUsd;
   const totalBalanceDop = accounts.reduce((sum, a) => {
     if (a.currencyType === 'DOP' || a.currencyType === 'DUAL') return sum + a.balanceDop;
     return sum;
@@ -164,30 +213,28 @@ const generateAccountsPDF = async (
     if (a.currencyType === 'USD' || a.currencyType === 'DUAL') return sum + a.balanceUsd;
     return sum;
   }, 0);
-  const totalEq = accounts.reduce((sum, a) => {
-    if (a.currencyType === 'DOP') return sum + a.balanceDop;
-    if (a.currencyType === 'USD') return sum + a.balanceUsd * r;
-    return sum + a.balanceDop + a.balanceUsd * r;
-  }, 0);
+  const totalEq = accounts.reduce((sum, a) => sum + accountToPrimary(a, ctx), 0);
+  const p = ctx.pair.primary;
+  const s = ctx.pair.secondary;
   const kpis: Kpi[] = [
-    { label: 'Balance DOP', value: formatCurrency(totalBalanceDop, 'DOP') },
-    { label: 'Balance USD', value: formatCurrency(totalBalanceUsd, 'USD') },
-    { label: 'Total DOP eq.', value: formatCurrency(totalEq, 'DOP'), kind: 'pos' },
+    { label: `Balance ${p}`, value: formatCurrency(totalBalanceDop, p) },
+    { label: `Balance ${s}`, value: formatCurrency(totalBalanceUsd, s) },
+    { label: `Total (${p} eq.)`, value: formatCurrency(totalEq, p), kind: 'pos' },
     { label: 'Cuentas', value: String(accounts.length) },
   ];
-  return renderReportPdf('Reporte de cuentas bancarias', 'Saldos en pesos y dólares', (s) => {
-    s.period(filters.fromDate, filters.toDate);
-    s.kpis(kpis, 2);
-    s.section('Detalle de cuentas');
-    s.table(
-      ['Banco', 'Tipo', 'N.º', 'DOP', 'USD'],
+  return renderReportPdf('Reporte de cuentas bancarias', 'Saldos por moneda del par', (layout) => {
+    layout.period(filters.fromDate, filters.toDate);
+    layout.kpis(kpis, 2);
+    layout.section('Detalle de cuentas');
+    layout.table(
+      ['Banco', 'Tipo', 'N.º', p, s],
       [120, 68, 78, 98, 135],
       accounts.map((a) => [
         a.bankName,
         a.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente',
         a.accountNumber || '—',
-        a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, 'DOP'),
-        a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, 'USD'),
+        a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, p),
+        a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, s),
       ])
     );
   });
@@ -201,36 +248,41 @@ const generateComprehensivePDF = async (
     accounts: any[];
   },
   filters: { fromDate?: string; toDate?: string },
-  exchangeRateDopUsd: number
+  ctx: UserConversionContext
 ): Promise<Buffer> => {
-  const r = exchangeRateDopUsd;
   const { expenses, loans, cards, accounts } = data;
-  const totalBalance = accounts.reduce((sum, a) => {
-    if (a.currencyType === 'DOP') return sum + a.balanceDop;
-    if (a.currencyType === 'USD') return sum + a.balanceUsd * r;
-    return sum + a.balanceDop + a.balanceUsd * r;
-  }, 0);
-  const totalCardDebt = cards.reduce((sum, c) => {
-    if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-    if (c.currencyType === 'USD') return sum + c.currentDebtUsd * r;
-    return sum + c.currentDebtDop + c.currentDebtUsd * r;
-  }, 0);
+  const p = ctx.pair.primary;
+  const totalBalance = accounts.reduce((sum, a) => sum + accountToPrimary(a, ctx), 0);
+  const totalCardDebt = cards.reduce((sum, c) => sum + cardDebtToPrimary(c, ctx), 0);
   const totalLoanDebt = loans
     .filter((l) => l.status === 'ACTIVE')
-    .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
+    .reduce(
+      (sum, l) =>
+        sum +
+        amountToPrimary(
+          l.remainingBalance ?? l.totalAmount,
+          String(l.currency || 'DOP'),
+          ctx
+        ),
+      0
+    );
   const netWorth = totalBalance - totalCardDebt - totalLoanDebt;
   const paidE = expenses.filter((e) => e.isPaid);
   const penE = expenses.filter((e) => !e.isPaid);
+  const expensesEq = [...paidE, ...penE].reduce(
+    (x, e) => x + amountToPrimary(e.amount, String(e.currency || 'DOP'), ctx),
+    0
+  );
 
   return renderReportPdf('Reporte financiero completo', 'Resumen ejecutivo, KPIs y tablas detalladas', (s) => {
     s.period(filters.fromDate, filters.toDate);
     s.kpis(
       [
-        { label: 'Balance cuentas (DOP eq.)', value: formatCurrency(totalBalance, 'DOP'), kind: 'pos' },
-        { label: 'Deuda tarjetas (DOP eq.)', value: formatCurrency(totalCardDebt, 'DOP'), kind: 'neg' },
-        { label: 'Deuda préstamos (activos)', value: formatCurrency(totalLoanDebt, 'DOP'), kind: 'neg' },
-        { label: 'Patrimonio neto (aprox.)', value: formatCurrency(netWorth, 'DOP'), kind: netWorth >= 0 ? 'pos' : 'neg' },
-        { label: 'Gastos en período', value: formatCurrency(paidE.reduce((x, e) => x + e.amount, 0) + penE.reduce((x, e) => x + e.amount, 0), 'DOP') },
+        { label: `Balance cuentas (${p} eq.)`, value: formatCurrency(totalBalance, p), kind: 'pos' },
+        { label: `Deuda tarjetas (${p} eq.)`, value: formatCurrency(totalCardDebt, p), kind: 'neg' },
+        { label: `Deuda préstamos activos (${p} eq.)`, value: formatCurrency(totalLoanDebt, p), kind: 'neg' },
+        { label: 'Patrimonio neto (aprox.)', value: formatCurrency(netWorth, p), kind: netWorth >= 0 ? 'pos' : 'neg' },
+        { label: `Gastos (registros, ${p} eq.)`, value: formatCurrency(expensesEq, p) },
         { label: 'Gastos pag. / pend.', value: `${paidE.length} / ${penE.length}` },
       ],
       2
@@ -239,13 +291,13 @@ const generateComprehensivePDF = async (
     s.section('Cuentas bancarias');
     if (accounts.length) {
       s.table(
-        ['Banco', 'Tipo', 'DOP', 'USD'],
+        ['Banco', 'Tipo', ctx.pair.primary, ctx.pair.secondary],
         [150, 90, 128, 131],
         accounts.map((a) => [
           a.bankName,
           a.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente',
-          a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, 'DOP'),
-          a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, 'USD'),
+          a.currencyType === 'USD' ? '—' : formatCurrency(a.balanceDop, ctx.pair.primary),
+          a.currencyType === 'DOP' ? '—' : formatCurrency(a.balanceUsd, ctx.pair.secondary),
         ])
       );
     } else {
@@ -257,7 +309,7 @@ const generateComprehensivePDF = async (
       s.table(
         ['Tarjeta', 'Banco', 'Límites', 'Deudas'],
         [100, 88, 156, 156],
-        cards.map((c) => [String(c.cardName).slice(0, 40), c.bankName, limLine(c), debtLine(c)]),
+        cards.map((c) => [String(c.cardName).slice(0, 40), c.bankName, limLine(c, ctx), debtLine(c, ctx)]),
         { noWrapColumns: [2, 3] }
       );
     } else {
@@ -300,6 +352,7 @@ const generateComprehensivePDF = async (
 export const getExpensesReport = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
+    const ctx = await getConversionContextForUser(userId);
     const { fromDate, toDate, status, format } = req.query;
 
     let queryText = `
@@ -370,25 +423,38 @@ export const getExpensesReport = async (req: AuthRequest, res: Response) => {
     }
 
     if (format === 'pdf') {
-      const pdfBuffer = await generateExpensesPDF(expenses, {
-        fromDate: fromDate as string,
-        toDate: toDate as string,
-        status: status as string,
-      });
+      const pdfBuffer = await generateExpensesPDF(
+        expenses,
+        {
+          fromDate: fromDate as string,
+          toDate: toDate as string,
+          status: status as string,
+        },
+        ctx
+      );
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=reporte-gastos-${Date.now()}.pdf`);
       res.send(pdfBuffer);
     } else {
+      const paidList = expenses.filter((e) => e.isPaid);
+      const pendList = expenses.filter((e) => !e.isPaid);
       res.json({
         success: true,
         expenses,
         summary: {
           total: expenses.length,
-          paid: expenses.filter((e) => e.isPaid).length,
-          pending: expenses.filter((e) => !e.isPaid).length,
-          totalPaid: expenses.filter((e) => e.isPaid).reduce((sum, e) => sum + e.amount, 0),
-          totalPending: expenses.filter((e) => !e.isPaid).reduce((sum, e) => sum + e.amount, 0),
+          paid: paidList.length,
+          pending: pendList.length,
+          totalPaid: paidList.reduce(
+            (sum, e) => sum + amountToPrimary(e.amount, String(e.currency || 'DOP'), ctx),
+            0
+          ),
+          totalPending: pendList.reduce(
+            (sum, e) => sum + amountToPrimary(e.amount, String(e.currency || 'DOP'), ctx),
+            0
+          ),
+          primaryCurrency: ctx.pair.primary,
         },
       });
     }
@@ -402,6 +468,7 @@ export const getExpensesReport = async (req: AuthRequest, res: Response) => {
 export const getLoansReport = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
+    const ctx = await getConversionContextForUser(userId);
     const { fromDate, toDate, status, format } = req.query;
 
     let queryText = `
@@ -461,27 +528,44 @@ export const getLoansReport = async (req: AuthRequest, res: Response) => {
     }
 
     if (format === 'pdf') {
-      const pdfBuffer = await generateLoansPDF(loans, {
-        fromDate: fromDate as string,
-        toDate: toDate as string,
-        status: status as string,
-      });
+      const pdfBuffer = await generateLoansPDF(
+        loans,
+        {
+          fromDate: fromDate as string,
+          toDate: toDate as string,
+          status: status as string,
+        },
+        ctx
+      );
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=reporte-prestamos-${Date.now()}.pdf`);
       res.send(pdfBuffer);
     } else {
+      const activeLoans = loans.filter((l) => l.status === 'ACTIVE');
+      const paidLoans = loans.filter((l) => l.status === 'PAID');
       res.json({
         success: true,
         loans,
         summary: {
           total: loans.length,
-          active: loans.filter((l) => l.status === 'ACTIVE').length,
-          paid: loans.filter((l) => l.status === 'PAID').length,
-          totalActive: loans
-            .filter((l) => l.status === 'ACTIVE')
-            .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0),
-          totalPaid: loans.filter((l) => l.status === 'PAID').reduce((sum, l) => sum + l.totalAmount, 0),
+          active: activeLoans.length,
+          paid: paidLoans.length,
+          totalActive: activeLoans.reduce(
+            (sum, l) =>
+              sum +
+              amountToPrimary(
+                l.remainingBalance ?? l.totalAmount,
+                String(l.currency || 'DOP'),
+                ctx
+              ),
+            0
+          ),
+          totalPaid: paidLoans.reduce(
+            (sum, l) => sum + amountToPrimary(l.totalAmount, String(l.currency || 'DOP'), ctx),
+            0
+          ),
+          primaryCurrency: ctx.pair.primary,
         },
       });
     }
@@ -497,7 +581,7 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { format } = req.query;
 
-    const rate = await getExchangeRateForUser(userId);
+    const ctx = await getConversionContextForUser(userId);
 
     const result = await query(
       `SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
@@ -527,7 +611,7 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
     }));
 
     if (format === 'pdf') {
-      const pdfBuffer = await generateCardsPDF(cards, {}, rate);
+      const pdfBuffer = await generateCardsPDF(cards, {}, ctx);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=reporte-tarjetas-${Date.now()}.pdf`);
@@ -538,16 +622,11 @@ export const getCardsReport = async (req: AuthRequest, res: Response) => {
         cards,
         summary: {
           total: cards.length,
-          totalDebt: cards.reduce((sum, c) => {
-            if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-            if (c.currencyType === 'USD') return sum + c.currentDebtUsd * rate;
-            return sum + c.currentDebtDop + c.currentDebtUsd * rate;
-          }, 0),
-          totalLimit: cards.reduce((sum, c) => {
-            if (c.currencyType === 'DOP') return sum + c.creditLimitDop;
-            if (c.currencyType === 'USD') return sum + c.creditLimitUsd * rate;
-            return sum + c.creditLimitDop + c.creditLimitUsd * rate;
-          }, 0),
+          totalDebt: cards.reduce((sum, c) => sum + cardDebtToPrimary(c, ctx), 0),
+          totalLimit: cards.reduce((sum, c) => sum + cardLimitToPrimary(c, ctx), 0),
+          primaryCurrency: ctx.pair.primary,
+          secondaryCurrency: ctx.pair.secondary,
+          exchangeRate: ctx.pairRateSecondaryPerPrimary,
         },
       });
     }
@@ -563,7 +642,7 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { fromDate, toDate, format } = req.query;
 
-    const rate = await getExchangeRateForUser(userId);
+    const ctx = await getConversionContextForUser(userId);
 
     let queryText = `
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
@@ -609,7 +688,7 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
           fromDate: fromDate as string,
           toDate: toDate as string,
         },
-        rate
+        ctx
       );
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -626,11 +705,7 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
         return sum;
       }, 0);
 
-      const totalBalance = accounts.reduce((sum, a) => {
-        if (a.currencyType === 'DOP') return sum + a.balanceDop;
-        if (a.currencyType === 'USD') return sum + a.balanceUsd * rate;
-        return sum + a.balanceDop + a.balanceUsd * rate;
-      }, 0);
+      const totalBalance = accounts.reduce((sum, a) => sum + accountToPrimary(a, ctx), 0);
 
       res.json({
         success: true,
@@ -640,6 +715,9 @@ export const getAccountsReport = async (req: AuthRequest, res: Response) => {
           totalBalanceDop,
           totalBalanceUsd,
           totalBalance,
+          primaryCurrency: ctx.pair.primary,
+          secondaryCurrency: ctx.pair.secondary,
+          exchangeRate: ctx.pairRateSecondaryPerPrimary,
           savings: accounts.filter((a) => a.accountType === 'SAVINGS').length,
           checking: accounts.filter((a) => a.accountType === 'CHECKING').length,
         },
@@ -658,7 +736,7 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
     const { fromDate, toDate, format } = req.query;
 
     // Get all data + tasa del usuario (.env si no hay valor en BD)
-    const [expensesResult, loansResult, cardsResult, accountsResult, userRateResult] = await Promise.all([
+    const [expensesResult, loansResult, cardsResult, accountsResult] = await Promise.all([
       query(
         `SELECT id, description, amount, currency, nature, category, is_paid, 
                 last_paid_month, last_paid_year, recurrence_type, frequency, created_at
@@ -685,10 +763,9 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
          FROM bank_accounts WHERE user_id = $1`,
         [userId]
       ),
-      query('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]),
     ]);
 
-    const rate = resolveExchangeRateDopUsd(userRateResult.rows[0]?.exchange_rate_dop_usd);
+    const ctxReport = await getConversionContextForUser(userId);
 
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
@@ -749,21 +826,24 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
       currencyType: row.currency_type,
     }));
 
-    const totalBalanceForSummary = accounts.reduce((sum, a) => {
-      if (a.currencyType === 'DOP') return sum + a.balanceDop;
-      if (a.currencyType === 'USD') return sum + a.balanceUsd * rate;
-      return sum + a.balanceDop + a.balanceUsd * rate;
-    }, 0);
+    const totalBalanceForSummary = accounts.reduce(
+      (sum, a) => sum + bankBalancesToPrimary(a.balanceDop, a.balanceUsd, ctxReport),
+      0
+    );
 
-    const totalCardDebtForSummary = cards.reduce((sum, c) => {
-      if (c.currencyType === 'DOP') return sum + c.currentDebtDop;
-      if (c.currencyType === 'USD') return sum + c.currentDebtUsd * rate;
-      return sum + c.currentDebtDop + c.currentDebtUsd * rate;
-    }, 0);
+    const totalCardDebtForSummary = cards.reduce(
+      (sum, c) => sum + bankBalancesToPrimary(c.currentDebtDop, c.currentDebtUsd, ctxReport),
+      0
+    );
 
     const totalLoanDebtForSummary = loans
       .filter((l) => l.status === 'ACTIVE')
-      .reduce((sum, l) => sum + (l.remainingBalance || l.totalAmount), 0);
+      .reduce(
+        (sum, l) =>
+          sum +
+          amountToPrimary(l.remainingBalance || 0, String(l.currency || 'DOP'), ctxReport),
+        0
+      );
 
     const netWorthComputed = totalBalanceForSummary - totalCardDebtForSummary - totalLoanDebtForSummary;
 
@@ -774,7 +854,7 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
           fromDate: fromDate as string,
           toDate: toDate as string,
         },
-        rate
+        ctxReport
       );
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -794,6 +874,9 @@ export const getComprehensiveReport = async (req: AuthRequest, res: Response) =>
           totalCardDebt: totalCardDebtForSummary,
           totalLoanDebt: totalLoanDebtForSummary,
           netWorth: netWorthComputed,
+          primaryCurrency: ctxReport.pair.primary,
+          secondaryCurrency: ctxReport.pair.secondary,
+          exchangeRate: ctxReport.pairRateSecondaryPerPrimary,
         },
       });
     }

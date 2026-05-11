@@ -50,7 +50,10 @@ const createCashAdjustment = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
-        await (0, accountBalance_1.applyBalanceDelta)(userId, accountId, String(currency), delta, client);
+        const rsn = reason && String(reason).trim() ? `: ${String(reason).trim()}` : '';
+        await (0, accountBalance_1.applyBalanceDelta)(userId, accountId, String(currency), delta, client, {
+            description: delta > 0 ? `Entrada por ajuste de caja${rsn}` : `Salida por ajuste de caja${rsn}`,
+        });
         const ins = await client.query(`INSERT INTO cash_adjustments (user_id, bank_account_id, amount_delta, currency, reason, counted_total)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, created_at`, [

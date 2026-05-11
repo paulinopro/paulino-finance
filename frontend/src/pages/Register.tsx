@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import AuthBrandMark from '../components/AuthBrandMark';
 import api from '../services/api';
 
 const Register: React.FC = () => {
+  const { t } = useTranslation();
   const [registrationEnabled, setRegistrationEnabled] = useState<boolean | null>(null);
   const [formData, setFormData] = useState({
     email: '',
@@ -37,12 +39,12 @@ const Register: React.FC = () => {
     e.preventDefault();
 
     if (formData.password !== formData.confirmPassword) {
-      toast.error('Las contraseñas no coinciden');
+      toast.error(t('auth.register.passwordsMismatch'));
       return;
     }
 
     if (formData.password.length < 6) {
-      toast.error('La contraseña debe tener al menos 6 caracteres');
+      toast.error(t('auth.register.passwordTooShort'));
       return;
     }
 
@@ -55,10 +57,10 @@ const Register: React.FC = () => {
         formData.firstName || undefined,
         formData.lastName || undefined
       );
-      toast.success('¡Cuenta creada exitosamente!');
+      toast.success(t('auth.register.toastCreated'));
       navigate('/');
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Error al crear la cuenta');
+      toast.error(error.response?.data?.message || t('auth.register.toastErrorFallback'));
     } finally {
       setLoading(false);
     }
@@ -75,19 +77,18 @@ const Register: React.FC = () => {
         <div className="card">
           <div className="text-center mb-8">
             <AuthBrandMark />
-            <h1 className="page-title mb-2">Crear Cuenta</h1>
-            <p className="text-dark-400 text-sm sm:text-base">Regístrate para comenzar</p>
+            <h1 className="page-title mb-2">{t('auth.register.title')}</h1>
+            <p className="text-dark-400 text-sm sm:text-base">{t('auth.register.subtitle')}</p>
           </div>
 
           {registrationEnabled === false && (
             <div className="mb-6 p-4 rounded-lg bg-dark-700 border border-dark-600 text-dark-200 text-sm text-center">
-              El registro de nuevas cuentas está deshabilitado. Si necesitas acceso, contacta al
-              administrador.
+              {t('auth.register.disabledBanner')}
             </div>
           )}
 
           {registrationEnabled === null && (
-            <p className="text-center text-dark-500 text-sm mb-4">Comprobando…</p>
+            <p className="text-center text-dark-500 text-sm mb-4">{t('auth.register.checkingStatus')}</p>
           )}
 
           {registrationEnabled !== false && (
@@ -95,7 +96,7 @@ const Register: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="firstName" className="label">
-                  Nombre
+                  {t('auth.register.firstName')}
                 </label>
                 <input
                   id="firstName"
@@ -104,12 +105,12 @@ const Register: React.FC = () => {
                   value={formData.firstName}
                   onChange={handleChange}
                   className="input w-full"
-                  placeholder="Juan"
+                  placeholder={t('auth.register.phonePlaceholderFN')}
                 />
               </div>
               <div>
                 <label htmlFor="lastName" className="label">
-                  Apellido
+                  {t('auth.register.lastName')}
                 </label>
                 <input
                   id="lastName"
@@ -118,14 +119,14 @@ const Register: React.FC = () => {
                   value={formData.lastName}
                   onChange={handleChange}
                   className="input w-full"
-                  placeholder="Pérez"
+                  placeholder={t('auth.register.phonePlaceholderLN')}
                 />
               </div>
             </div>
 
             <div>
               <label htmlFor="email" className="label">
-                Correo Electrónico
+                {t('auth.register.email')}
               </label>
               <input
                 id="email"
@@ -141,7 +142,7 @@ const Register: React.FC = () => {
 
             <div>
               <label htmlFor="password" className="label">
-                Contraseña
+                {t('auth.register.password')}
               </label>
               <input
                 id="password"
@@ -158,7 +159,7 @@ const Register: React.FC = () => {
 
             <div>
               <label htmlFor="confirmPassword" className="label">
-                Confirmar Contraseña
+                {t('auth.register.confirmPassword')}
               </label>
               <input
                 id="confirmPassword"
@@ -178,15 +179,15 @@ const Register: React.FC = () => {
               disabled={loading || registrationEnabled !== true}
               className="btn-primary w-full py-3 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Creando cuenta...' : 'Crear Cuenta'}
+              {loading ? t('auth.register.submitLoading') : t('auth.register.submitIdle')}
             </button>
           </form>
           )}
 
           <p className="mt-6 text-center text-dark-400">
-            ¿Ya tienes una cuenta?{' '}
+            {t('auth.register.haveAccount')}{' '}
             <Link to="/login" className="text-primary-500 hover:text-primary-400 font-medium">
-              Inicia sesión
+              {t('auth.register.loginCta')}
             </Link>
           </p>
         </div>

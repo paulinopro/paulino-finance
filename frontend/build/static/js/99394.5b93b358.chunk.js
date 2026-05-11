@@ -1,0 +1,3 @@
+/*! For license information please see 99394.5b93b358.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[99394],{99394(a,n,e){e.r(n),e.d(n,{default:()=>f});const f=(0,e(21639).A)("AudioWaveform",[["path",{d:"M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2-2",key:"57tc96"}]])}}]);
+//# sourceMappingURL=99394.5b93b358.chunk.js.map

@@ -11,6 +11,7 @@ import {
   getSystemSettings,
   updateSystemSettings,
   getAdminSubscriptionDataQuality,
+  getAdminNotificationScheduler,
   impersonateUser,
   stopImpersonation,
   updateUserAdmin,
@@ -31,6 +32,7 @@ router.use(authenticate, requireSuperAdmin);
 
 router.get('/stats', getAdminStats);
 router.get('/health', getAdminHealth);
+router.get('/notification-scheduler', getAdminNotificationScheduler);
 router.get('/data-quality/subscription-payments', getAdminSubscriptionDataQuality);
 router.get('/audit-log', listAdminAuditLog);
 router.get('/users', listUsers);

@@ -21,3 +21,5 @@ export const TABLE_PAGE_SIZE_ACCOUNTS_PAYABLE = 12;
 export const TABLE_PAGE_SIZE_ACCOUNTS_RECEIVABLE = 12;
 export const TABLE_PAGE_SIZE_BUDGETS = 12;
 export const TABLE_PAGE_SIZE_GOALS = 8;
+/** Lista no leídas en el panel del campanario: 5 ítems visibles antes de paginar el resto. */
+export const TABLE_PAGE_SIZE_LAYOUT_NOTIFICATIONS = 5;

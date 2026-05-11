@@ -16,94 +16,43 @@ import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
-import {
-  getDateRangeForReportPeriod,
-  REPORT_PERIOD_OPTIONS,
-  type ReportPeriodKey,
-} from '../utils/reportPeriodRange';
+import { useIntlFormatting } from '../context/IntlFormattingContext';
+import { useTranslation } from 'react-i18next';
+import { getDateRangeForReportPeriod, type ReportPeriodKey } from '../utils/reportPeriodRange';
 
 type ReportTypeId = 'expenses' | 'loans' | 'cards' | 'accounts' | 'comprehensive';
 
-/** Slug en español para nombres de archivo (sin tildes; alineado con el backend). */
-const REPORT_PDF_FILENAME_ES: Record<ReportTypeId, string> = {
-  expenses: 'gastos',
-  loans: 'prestamos',
-  cards: 'tarjetas',
-  accounts: 'cuentas',
-  comprehensive: 'completo',
-};
+const REPORT_PERIOD_KEYS: ReportPeriodKey[] = [
+  'today',
+  'yesterday',
+  'this_week',
+  'this_month',
+  'last_month',
+  'last_7_days',
+  'last_30_days',
+  'this_year',
+  'custom',
+];
 
-const REPORT_TYPES: {
-  id: ReportTypeId;
-  title: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: string;
-  selectedRing: string;
-}[] = [
-    {
-      id: 'expenses',
-      title: 'Gastos',
-      description: 'Movimientos por estado y categoría',
-      icon: Receipt,
-      accent: 'text-amber-400',
-      selectedRing: 'ring-2 ring-amber-500/50 border-amber-500/40 bg-amber-500/5',
-    },
-    {
-      id: 'loans',
-      title: 'Préstamos',
-      description: 'Activos, pagados y saldos',
-      icon: Landmark,
-      accent: 'text-sky-400',
-      selectedRing: 'ring-2 ring-sky-500/50 border-sky-500/40 bg-sky-500/5',
-    },
-    {
-      id: 'cards',
-      title: 'Tarjetas',
-      description: 'Límites, deuda y disponible',
-      icon: CreditCard,
-      accent: 'text-violet-400',
-      selectedRing: 'ring-2 ring-violet-500/50 border-violet-500/40 bg-violet-500/5',
-    },
-    {
-      id: 'accounts',
-      title: 'Cuentas',
-      description: 'Saldos DOP y USD',
-      icon: Building2,
-      accent: 'text-emerald-400',
-      selectedRing: 'ring-2 ring-emerald-500/50 border-emerald-500/40 bg-emerald-500/5',
-    },
-    {
-      id: 'comprehensive',
-      title: 'Completo',
-      description: 'Visión global de tu cartera',
-      icon: LayoutGrid,
-      accent: 'text-primary-400',
-      selectedRing: 'ring-2 ring-primary-500/50 border-primary-500/40 bg-primary-500/5',
-    },
-  ];
-
-const SUMMARY_KEY_META: Record<
-  string,
-  { label: string; border: string; valueClass?: string }
-> = {
-  total: { label: 'Registros / total', border: 'border-l-slate-500' },
-  paid: { label: 'Pagados', border: 'border-l-emerald-500' },
-  pending: { label: 'Pendientes', border: 'border-l-amber-500' },
-  active: { label: 'Activos', border: 'border-l-sky-500' },
-  totalPaid: { label: 'Total pagado', border: 'border-l-emerald-500' },
-  totalPending: { label: 'Total pendiente', border: 'border-l-amber-500' },
-  totalActive: { label: 'Total activo', border: 'border-l-sky-500' },
-  totalDebt: { label: 'Deuda total', border: 'border-l-rose-500' },
-  totalLimit: { label: 'Límite total', border: 'border-l-violet-500' },
-  totalBalance: { label: 'Balance total (DOP eq.)', border: 'border-l-primary-500' },
-  totalBalanceDop: { label: 'Balance DOP', border: 'border-l-emerald-500' },
-  totalBalanceUsd: { label: 'Balance USD', border: 'border-l-blue-500' },
-  savings: { label: 'Cuentas de ahorro', border: 'border-l-teal-500' },
-  checking: { label: 'Cuentas corrientes', border: 'border-l-cyan-500' },
-  totalCardDebt: { label: 'Deuda en tarjetas', border: 'border-l-rose-500', valueClass: 'text-rose-400' },
-  totalLoanDebt: { label: 'Deuda en préstamos', border: 'border-l-rose-500', valueClass: 'text-rose-400' },
-  netWorth: { label: 'Patrimonio neto', border: 'border-l-emerald-500', valueClass: 'text-emerald-400' },
+/** Bordes y estilo de valor para tarjetas del resumen (claves alineadas con la API). */
+const SUMMARY_META_STYLE: Record<string, { border: string; valueClass?: string }> = {
+  total: { border: 'border-l-slate-500' },
+  paid: { border: 'border-l-emerald-500' },
+  pending: { border: 'border-l-amber-500' },
+  active: { border: 'border-l-sky-500' },
+  totalPaid: { border: 'border-l-emerald-500' },
+  totalPending: { border: 'border-l-amber-500' },
+  totalActive: { border: 'border-l-sky-500' },
+  totalDebt: { border: 'border-l-rose-500' },
+  totalLimit: { border: 'border-l-violet-500' },
+  totalBalance: { border: 'border-l-primary-500' },
+  totalBalanceDop: { border: 'border-l-emerald-500' },
+  totalBalanceUsd: { border: 'border-l-blue-500' },
+  savings: { border: 'border-l-teal-500' },
+  checking: { border: 'border-l-cyan-500' },
+  totalCardDebt: { border: 'border-l-rose-500', valueClass: 'text-rose-400' },
+  totalLoanDebt: { border: 'border-l-rose-500', valueClass: 'text-rose-400' },
+  netWorth: { border: 'border-l-emerald-500', valueClass: 'text-emerald-400' },
 };
 
 const SUMMARY_KEY_PRIORITY = [
@@ -126,17 +75,6 @@ const SUMMARY_KEY_PRIORITY = [
   'checking',
 ];
 
-function formatYmdToLong(ymd: string): string {
-  if (!ymd) return '';
-  const [y, m, d] = ymd.split('-').map(Number);
-  if (!y || !m || !d) return ymd;
-  return new Date(y, m - 1, d).toLocaleDateString('es-DO', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
 function sortSummaryKeys(keys: string[]): string[] {
   const order = new Map(SUMMARY_KEY_PRIORITY.map((k, i) => [k, i]));
   return [...keys].sort((a, b) => {
@@ -157,15 +95,98 @@ const SUMMARY_COUNT_KEYS = new Set([
   'checking',
 ]);
 
-function formatSummaryMetric(key: string, value: unknown): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return String(value ?? '');
-  if (SUMMARY_COUNT_KEYS.has(key)) {
-    return value.toLocaleString('es-DO', { maximumFractionDigits: 0 });
-  }
-  return value.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' });
-}
-
 const Reports: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatCurrency: fc, formatInt: fi, formatYmdShortLocalized, primaryCurrency, secondaryCurrency } =
+    useIntlFormatting();
+
+  const formatSummaryMetric = useCallback(
+    (key: string, value: unknown): string => {
+      if (typeof value !== 'number' || Number.isNaN(value)) return String(value ?? '');
+      if (SUMMARY_COUNT_KEYS.has(key)) return fi(value);
+      if (key === 'totalBalanceUsd') return fc(value, secondaryCurrency);
+      return fc(value, primaryCurrency);
+    },
+    [fc, fi, primaryCurrency, secondaryCurrency]
+  );
+
+  const reportTypes = useMemo(
+    () =>
+      [
+        {
+          id: 'expenses' as const,
+          title: t('reports.types.expenses.title'),
+          description: t('reports.types.expenses.description'),
+          icon: Receipt,
+          accent: 'text-amber-400',
+          selectedRing: 'ring-2 ring-amber-500/50 border-amber-500/40 bg-amber-500/5',
+        },
+        {
+          id: 'loans' as const,
+          title: t('reports.types.loans.title'),
+          description: t('reports.types.loans.description'),
+          icon: Landmark,
+          accent: 'text-sky-400',
+          selectedRing: 'ring-2 ring-sky-500/50 border-sky-500/40 bg-sky-500/5',
+        },
+        {
+          id: 'cards' as const,
+          title: t('reports.types.cards.title'),
+          description: t('reports.types.cards.description'),
+          icon: CreditCard,
+          accent: 'text-violet-400',
+          selectedRing: 'ring-2 ring-violet-500/50 border-violet-500/40 bg-violet-500/5',
+        },
+        {
+          id: 'accounts' as const,
+          title: t('reports.types.accounts.title'),
+          description: t('reports.types.accounts.description'),
+          icon: Building2,
+          accent: 'text-emerald-400',
+          selectedRing: 'ring-2 ring-emerald-500/50 border-emerald-500/40 bg-emerald-500/5',
+        },
+        {
+          id: 'comprehensive' as const,
+          title: t('reports.types.comprehensive.title'),
+          description: t('reports.types.comprehensive.description'),
+          icon: LayoutGrid,
+          accent: 'text-primary-400',
+          selectedRing: 'ring-2 ring-primary-500/50 border-primary-500/40 bg-primary-500/5',
+        },
+      ] as const,
+    [t]
+  );
+
+  const periodOptions = useMemo(
+    () =>
+      REPORT_PERIOD_KEYS.map((value) => ({
+        value,
+        label: t(`reports.periodPreset.${value}`),
+      })),
+    [t]
+  );
+
+  const getSummaryMeta = useCallback(
+    (key: string) => {
+      const style = SUMMARY_META_STYLE[key] ?? { border: 'border-l-slate-500' };
+      return {
+        ...style,
+        label: t(`reports.summary.${key}`, { defaultValue: key }),
+      };
+    },
+    [t]
+  );
+
+  const loanStatusLabel = useCallback(
+    (status: string) =>
+      status === 'PAID'
+        ? t('reports.loanStatus.paid')
+        : status === 'ACTIVE'
+          ? t('reports.loanStatus.active')
+          : t('reports.loanStatus.delinquent'),
+    [t]
+  );
+
   const { pageSize: reportTablePageSize, setPageSize: setReportTablePageSize, pageSizeOptions: reportTablePageSizeOptions } =
     usePersistedTablePageSize('pf:pageSize:reports', TABLE_PAGE_SIZE);
   const [reportType, setReportType] = useState<ReportTypeId>('expenses');
@@ -271,16 +292,16 @@ const Reports: React.FC = () => {
   const validateDatesForRequest = useCallback((): boolean => {
     if (periodKey === 'custom') {
       if (!customFrom || !customTo) {
-        toast.error('Indica la fecha desde y la fecha hasta.');
+        toast.error(t('toast.reports.needDateRange'));
         return false;
       }
       if (customFrom > customTo) {
-        toast.error('La fecha desde no puede ser posterior a la fecha hasta.');
+        toast.error(t('toast.reports.dateRangeInvalid'));
         return false;
       }
     }
     return true;
-  }, [periodKey, customFrom, customTo]);
+  }, [periodKey, customFrom, customTo, t]);
 
   const onPeriodChange = (next: ReportPeriodKey) => {
     setPeriodKey(next);
@@ -293,15 +314,20 @@ const Reports: React.FC = () => {
 
   const periodLabel = useMemo(() => {
     if (!fromDate || !toDate) return '';
-    const a = formatYmdToLong(fromDate);
-    const b = formatYmdToLong(toDate);
+    const a = formatYmdShortLocalized(fromDate);
+    const b = formatYmdShortLocalized(toDate);
     return a === b ? a : `${a} — ${b}`;
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, formatYmdShortLocalized]);
 
   const selectedTypeConfig = useMemo(
-    () => REPORT_TYPES.find((r) => r.id === reportType) ?? REPORT_TYPES[0],
-    [reportType]
+    () => reportTypes.find((r) => r.id === reportType) ?? reportTypes[0],
+    [reportType, reportTypes]
   );
+
+  const reportResultTitle =
+    reportType === 'comprehensive'
+      ? t('reports.reportResultTitle.comprehensive')
+      : t('reports.reportResultTitle.typed', { type: selectedTypeConfig.title });
 
   const handleGenerateReport = async (exportPDF: boolean = false) => {
     if (!validateDatesForRequest()) return;
@@ -350,37 +376,32 @@ const Reports: React.FC = () => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `reporte-${REPORT_PDF_FILENAME_ES[reportType]}-${Date.now()}.pdf`;
+        link.download = `${t('reports.pdfFilenamePrefix')}-${t(`reports.pdfSlug.${reportType}`)}-${Date.now()}.pdf`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
 
-        toast.success('Reporte PDF descargado exitosamente');
+        toast.success(t('toast.reports.pdfDownloaded'));
       } else {
         // For JSON, show data
         const response = await api.get(endpoint, { params });
         setReportData(response.data);
-        toast.success('Reporte generado exitosamente');
+        toast.success(t('toast.reports.generated'));
       }
     } catch (error: any) {
-      toast.error('Error al generar reporte');
+      toast.error(t('toast.reports.generateError'));
       console.error('Report error:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const reportResultTitle =
-    reportType === 'comprehensive'
-      ? 'Reporte completo — visión global'
-      : `Reporte de ${selectedTypeConfig.title.toLowerCase()}`;
-
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Reportes"
-        subtitle="Elige el tipo de análisis, ajusta el período y genera o exporta en PDF"
+        title={t('pages.reports.title')}
+        subtitle={t('pages.reports.subtitle')}
       />
 
       <motion.div
@@ -389,9 +410,11 @@ const Reports: React.FC = () => {
         className="grid gap-6 lg:grid-cols-12"
       >
         <div className="lg:col-span-7 space-y-3">
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Tipo de reporte</h2>
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+            {t('reports.ui.reportTypeSection')}
+          </h2>
           <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
-            {REPORT_TYPES.map((rt) => {
+            {reportTypes.map((rt) => {
               const Icon = rt.icon;
               const active = reportType === rt.id;
               return (
@@ -424,15 +447,17 @@ const Reports: React.FC = () => {
 
         <div className="lg:col-span-5">
           <div className="rounded-2xl border border-dark-600/60 bg-dark-800/30 p-5 space-y-5 h-full">
-            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Filtros</h2>
+            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+              {t('reports.ui.filtersSection')}
+            </h2>
             <div>
-              <label className="label">Período</label>
+              <label className="label">{t('reports.ui.periodLabel')}</label>
               <select
                 value={periodKey}
                 onChange={(e) => onPeriodChange(e.target.value as ReportPeriodKey)}
                 className="input w-full"
               >
-                {REPORT_PERIOD_OPTIONS.map((o) => (
+                {periodOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
@@ -443,7 +468,7 @@ const Reports: React.FC = () => {
             {periodKey === 'custom' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Fecha desde</label>
+                  <label className="label">{t('reports.ui.dateFrom')}</label>
                   <input
                     type="date"
                     value={customFrom}
@@ -452,7 +477,7 @@ const Reports: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="label">Fecha hasta</label>
+                  <label className="label">{t('reports.ui.dateTo')}</label>
                   <input
                     type="date"
                     value={customTo}
@@ -465,16 +490,18 @@ const Reports: React.FC = () => {
 
             {(reportType === 'expenses' || reportType === 'loans') && (
               <div>
-                <label className="label">Estado</label>
+                <label className="label">{t('reports.ui.statusLabel')}</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as 'all' | 'paid' | 'pending')}
                   className="input w-full"
                 >
-                  <option value="all">Todos</option>
-                  <option value="paid">Pagados</option>
+                  <option value="all">{t('reports.statusFilter.all')}</option>
+                  <option value="paid">{t('reports.statusFilter.paid')}</option>
                   <option value="pending">
-                    {reportType === 'expenses' ? 'Pendientes' : 'Activos (no pagados)'}
+                    {reportType === 'expenses'
+                      ? t('reports.ui.statusPendingExpenses')
+                      : t('reports.ui.statusPendingLoans')}
                   </option>
                 </select>
               </div>
@@ -489,12 +516,12 @@ const Reports: React.FC = () => {
                 {loading ? (
                   <>
                     <span className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white" />
-                    <span>Generando…</span>
+                    <span>{t('reports.ui.loading')}</span>
                   </>
                 ) : (
                   <>
                     <Filter size={20} />
-                    <span>Generar reporte</span>
+                    <span>{t('reports.actions.generate')}</span>
                   </>
                 )}
               </button>
@@ -504,7 +531,7 @@ const Reports: React.FC = () => {
                 className="btn-secondary w-full flex items-center justify-center gap-2"
               >
                 <Download size={20} />
-                <span>Exportar PDF</span>
+                <span>{t('reports.actions.exportPdf')}</span>
               </button>
             </div>
           </div>
@@ -521,13 +548,13 @@ const Reports: React.FC = () => {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6 gap-y-2">
             <div className="min-w-[min(100%,12rem)]">
               <p className="text-xs font-medium uppercase tracking-wider text-primary-400/90 mb-1">
-                Resultado
+                {t('reports.ui.resultSection')}
               </p>
               <h2 className="text-xl sm:text-2xl font-bold text-white break-words">{reportResultTitle}</h2>
               {periodLabel && (
                 <p className="mt-2 flex items-start gap-2 text-sm text-dark-300">
                   <CalendarRange className="w-4 h-4 shrink-0 text-primary-400/80 mt-0.5" />
-                  <span>Período: {periodLabel}</span>
+                  <span>{t('reports.ui.periodLine', { range: periodLabel })}</span>
                 </p>
               )}
             </div>
@@ -537,7 +564,7 @@ const Reports: React.FC = () => {
               className="btn-secondary flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
             >
               <Download size={18} />
-              <span>Exportar PDF</span>
+              <span>{t('reports.actions.exportPdf')}</span>
             </button>
           </div>
 
@@ -545,10 +572,7 @@ const Reports: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">
               {sortSummaryKeys(Object.keys(reportData.summary)).map((key) => {
                 const value = (reportData.summary as Record<string, unknown>)[key];
-                const meta = SUMMARY_KEY_META[key] ?? {
-                  label: key,
-                  border: 'border-l-slate-500',
-                };
+                const meta = getSummaryMeta(key);
                 return (
                   <div
                     key={key}
@@ -570,7 +594,7 @@ const Reports: React.FC = () => {
           <div className="table-responsive table-stack -mx-1 px-1 sm:mx-0 sm:px-0">
             {reportType === 'expenses' && reportData.expenses && detailRows.length === 0 && (
               <p className="text-center text-dark-400 py-10 rounded-xl border border-dashed border-dark-600/60">
-                No hay gastos en el período seleccionado.
+                {t('reports.tables.expenses.emptyPeriod')}
               </p>
             )}
 
@@ -579,30 +603,33 @@ const Reports: React.FC = () => {
                 <table className="report-data-table">
                   <thead>
                     <tr>
-                      <th>Descripción</th>
-                      <th>Monto</th>
-                      <th>Categoría</th>
-                      <th>Estado</th>
+                      <th>{t('reports.tables.common.description')}</th>
+                      <th>{t('reports.tables.common.amount')}</th>
+                      <th>{t('reports.tables.common.category')}</th>
+                      <th>{t('reports.tables.common.status')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detailSlice.map((expense: any) => (
                       <tr key={expense.id} className="max-md:border-0">
-                        <td data-label="Descripción" data-stack="hero" className="py-3 px-4 text-white">
+                        <td
+                          data-label={t('reports.tables.common.description')}
+                          data-stack="hero"
+                          className="py-3 px-4 text-white"
+                        >
                           {expense.description}
                         </td>
-                        <td data-label="Monto" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.amount')} className="py-3 px-4">
                           <span className="table-stack-value">
-                            {expense.amount.toLocaleString('es-DO', {
-                              style: 'currency',
-                              currency: expense.currency,
-                            })}
+                            {fc(expense.amount, expense.currency || primaryCurrency)}
                           </span>
                         </td>
-                        <td data-label="Categoría" className="py-3 px-4">
-                          <span className="table-stack-value text-dark-300">{expense.category || 'N/A'}</span>
+                        <td data-label={t('reports.tables.common.category')} className="py-3 px-4">
+                          <span className="table-stack-value text-dark-300">
+                            {expense.category || t('reports.tables.common.na')}
+                          </span>
                         </td>
-                        <td data-label="Estado" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.status')} className="py-3 px-4">
                           <span className="table-stack-value">
                             <span
                               className={`px-2 py-1 rounded text-xs ${expense.isPaid
@@ -610,7 +637,9 @@ const Reports: React.FC = () => {
                                 : 'bg-yellow-500/20 text-yellow-400'
                                 }`}
                             >
-                              {expense.isPaid ? 'Pagado' : 'Pendiente'}
+                              {expense.isPaid
+                                ? t('reports.expenseStatus.paid')
+                                : t('reports.expenseStatus.pending')}
                             </span>
                           </span>
                         </td>
@@ -623,7 +652,7 @@ const Reports: React.FC = () => {
 
             {reportType === 'loans' && reportData.loans && detailRows.length === 0 && (
               <p className="text-center text-dark-400 py-10 rounded-xl border border-dashed border-dark-600/60">
-                No hay préstamos en el período seleccionado.
+                {t('reports.tables.loans.emptyPeriod')}
               </p>
             )}
 
@@ -632,34 +661,43 @@ const Reports: React.FC = () => {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-dark-700">
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Préstamo</th>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Banco</th>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Monto Total</th>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Progreso</th>
-                      <th className="text-left py-3 px-4 text-dark-400 font-medium">Estado</th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">
+                        {t('reports.tables.common.loan')}
+                      </th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">
+                        {t('reports.tables.common.bank')}
+                      </th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">
+                        {t('reports.tables.common.totalAmount')}
+                      </th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">
+                        {t('reports.tables.common.progress')}
+                      </th>
+                      <th className="text-left py-3 px-4 text-dark-400 font-medium">
+                        {t('reports.tables.common.status')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {detailSlice.map((loan: any) => (
                       <tr key={loan.id} className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0">
-                        <td data-label="Préstamo" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.loan')} className="py-3 px-4">
                           <span className="table-stack-value">{loan.loanName}</span>
                         </td>
-                        <td data-label="Banco" className="py-3 px-4">
-                          <span className="table-stack-value text-dark-300">{loan.bankName || 'N/A'}</span>
-                        </td>
-                        <td data-label="Monto total" className="py-3 px-4">
-                          <span className="table-stack-value">
-                            {loan.totalAmount.toLocaleString('es-DO', {
-                              style: 'currency',
-                              currency: loan.currency,
-                            })}
+                        <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
+                          <span className="table-stack-value text-dark-300">
+                            {loan.bankName || t('reports.tables.common.na')}
                           </span>
                         </td>
-                        <td data-label="Progreso" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.totalAmount')} className="py-3 px-4">
+                          <span className="table-stack-value">
+                            {fc(loan.totalAmount, loan.currency)}
+                          </span>
+                        </td>
+                        <td data-label={t('reports.tables.common.progress')} className="py-3 px-4">
                           <span className="table-stack-value text-dark-300">{loan.progress?.toFixed(1) || 0}%</span>
                         </td>
-                        <td data-label="Estado" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.status')} className="py-3 px-4">
                           <span className="table-stack-value">
                             <span
                               className={`px-2 py-1 rounded text-xs ${loan.status === 'PAID'
@@ -669,7 +707,7 @@ const Reports: React.FC = () => {
                                   : 'bg-red-500/20 text-red-400'
                                 }`}
                             >
-                              {loan.status === 'PAID' ? 'Pagado' : loan.status === 'ACTIVE' ? 'Activo' : 'En Mora'}
+                              {loanStatusLabel(loan.status)}
                             </span>
                           </span>
                         </td>
@@ -682,7 +720,7 @@ const Reports: React.FC = () => {
 
             {reportType === 'cards' && reportData.cards && detailRows.length === 0 && (
               <p className="text-center text-dark-400 py-10 rounded-xl border border-dashed border-dark-600/60">
-                No hay tarjetas que coincidan con el criterio.
+                {t('reports.tables.cards.empty')}
               </p>
             )}
 
@@ -691,41 +729,41 @@ const Reports: React.FC = () => {
                 <table className="report-data-table report-data-table--card-currency">
                   <thead>
                     <tr>
-                      <th>Tarjeta</th>
-                      <th>Banco</th>
-                      <th>Límite</th>
-                      <th>Deuda</th>
-                      <th>Disponible</th>
+                      <th>{t('reports.tables.common.card')}</th>
+                      <th>{t('reports.tables.common.bank')}</th>
+                      <th>{t('reports.tables.common.limit')}</th>
+                      <th>{t('reports.tables.common.debt')}</th>
+                      <th>{t('reports.tables.common.available')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detailSlice.map((card: any) => (
                       <tr key={card.id} className="max-md:border-0">
-                        <td data-label="Tarjeta" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.card')} className="py-3 px-4">
                           <span className="table-stack-value">{card.cardName}</span>
                         </td>
-                        <td data-label="Banco" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
                           <span className="table-stack-value text-dark-300">{card.bankName}</span>
                         </td>
-                        <td data-label="Límite" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.limit')} className="py-3 px-4">
                           <span className="table-stack-value">
-                            {card.currencyType === 'DOP' && card.creditLimitDop.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
-                            {card.currencyType === 'USD' && card.creditLimitUsd.toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
-                            {card.currencyType === 'DUAL' && `${card.creditLimitDop.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}\u00A0·\u00A0${card.creditLimitUsd.toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                            {card.currencyType === 'DOP' && fc(card.creditLimitDop, primaryCurrency)}
+                            {card.currencyType === 'USD' && fc(card.creditLimitUsd, secondaryCurrency)}
+                            {card.currencyType === 'DUAL' && `${fc(card.creditLimitDop, primaryCurrency)}\u00A0·\u00A0${fc(card.creditLimitUsd, secondaryCurrency)}`}
                           </span>
                         </td>
-                        <td data-label="Deuda" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.debt')} className="py-3 px-4">
                           <span className="table-stack-value text-red-400">
-                            {card.currencyType === 'DOP' && card.currentDebtDop.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
-                            {card.currencyType === 'USD' && card.currentDebtUsd.toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
-                            {card.currencyType === 'DUAL' && `${card.currentDebtDop.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })} / ${card.currentDebtUsd.toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                            {card.currencyType === 'DOP' && fc(card.currentDebtDop, primaryCurrency)}
+                            {card.currencyType === 'USD' && fc(card.currentDebtUsd, secondaryCurrency)}
+                            {card.currencyType === 'DUAL' && `${fc(card.currentDebtDop, primaryCurrency)} / ${fc(card.currentDebtUsd, secondaryCurrency)}`}
                           </span>
                         </td>
-                        <td data-label="Disponible" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.available')} className="py-3 px-4">
                           <span className="table-stack-value text-green-400">
-                            {card.currencyType === 'DOP' && (card.creditLimitDop - card.currentDebtDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
-                            {card.currencyType === 'USD' && (card.creditLimitUsd - card.currentDebtUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
-                            {card.currencyType === 'DUAL' && `${(card.creditLimitDop - card.currentDebtDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}\u00A0·\u00A0${(card.creditLimitUsd - card.currentDebtUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                            {card.currencyType === 'DOP' && fc(card.creditLimitDop - card.currentDebtDop, primaryCurrency)}
+                            {card.currencyType === 'USD' && fc(card.creditLimitUsd - card.currentDebtUsd, secondaryCurrency)}
+                            {card.currencyType === 'DUAL' && `${fc(card.creditLimitDop - card.currentDebtDop, primaryCurrency)}\u00A0·\u00A0${fc(card.creditLimitUsd - card.currentDebtUsd, secondaryCurrency)}`}
                           </span>
                         </td>
                       </tr>
@@ -737,7 +775,7 @@ const Reports: React.FC = () => {
 
             {reportType === 'accounts' && reportData.accounts && detailRows.length === 0 && (
               <p className="text-center text-dark-400 py-10 rounded-xl border border-dashed border-dark-600/60">
-                No hay cuentas registradas.
+                {t('reports.tables.accounts.empty')}
               </p>
             )}
 
@@ -746,38 +784,42 @@ const Reports: React.FC = () => {
                 <table className="report-data-table">
                   <thead>
                     <tr>
-                      <th>Banco</th>
-                      <th>Tipo</th>
-                      <th>Número</th>
-                      <th>Balance DOP</th>
-                      <th>Balance USD</th>
+                      <th>{t('reports.tables.common.bank')}</th>
+                      <th>{t('reports.tables.common.type')}</th>
+                      <th>{t('reports.tables.common.number')}</th>
+                      <th>{t('reports.tables.common.balanceDop')}</th>
+                      <th>{t('reports.tables.common.balanceUsd')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {detailSlice.map((account: any) => (
                       <tr key={account.id} className="max-md:border-0">
-                        <td data-label="Banco" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
                           <span className="table-stack-value">{account.bankName}</span>
                         </td>
-                        <td data-label="Tipo" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.type')} className="py-3 px-4">
                           <span className="table-stack-value text-dark-300">
-                            {account.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente'}
+                            {account.accountType === 'SAVINGS'
+                              ? t('reports.accountType.savings')
+                              : t('reports.accountType.checking')}
                           </span>
                         </td>
-                        <td data-label="Número" className="py-3 px-4">
-                          <span className="table-stack-value text-dark-300">{account.accountNumber || 'N/A'}</span>
+                        <td data-label={t('reports.tables.common.number')} className="py-3 px-4">
+                          <span className="table-stack-value text-dark-300">
+                            {account.accountNumber || t('reports.tables.common.na')}
+                          </span>
                         </td>
-                        <td data-label="Balance DOP" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.balanceDop')} className="py-3 px-4">
                           <span className="table-stack-value">
                             {(account.currencyType === 'DOP' || account.currencyType === 'DUAL') &&
-                              account.balanceDop.toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
+                              fc(account.balanceDop, primaryCurrency)}
                             {account.currencyType === 'USD' && '-'}
                           </span>
                         </td>
-                        <td data-label="Balance USD" className="py-3 px-4">
+                        <td data-label={t('reports.tables.common.balanceUsd')} className="py-3 px-4">
                           <span className="table-stack-value">
                             {(account.currencyType === 'USD' || account.currencyType === 'DUAL') &&
-                              account.balanceUsd.toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
+                              fc(account.balanceUsd, secondaryCurrency)}
                             {account.currencyType === 'DOP' && '-'}
                           </span>
                         </td>
@@ -793,43 +835,31 @@ const Reports: React.FC = () => {
                 <div className="rounded-2xl border border-dark-600/50 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-3 bg-dark-800/80 border-b border-dark-600/50">
                     <LayoutGrid className="w-5 h-5 text-primary-400" />
-                    <h3 className="text-base font-semibold text-white">Resumen general</h3>
+                    <h3 className="text-base font-semibold text-white">{t('reports.comprehensive.overviewTitle')}</h3>
                   </div>
                   <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="rounded-xl border border-l-4 border-l-primary-500/70 border-dark-600/50 bg-dark-800/30 pl-4 pr-3 py-3">
-                      <p className="text-dark-400 text-xs font-medium mb-1">Balance total</p>
+                      <p className="text-dark-400 text-xs font-medium mb-1">{t('reports.comprehensive.balanceTotal')}</p>
                       <p className="text-white font-bold text-lg">
-                        {reportData.summary?.totalBalance?.toLocaleString('es-DO', {
-                          style: 'currency',
-                          currency: 'DOP',
-                        })}
+                        {fc(reportData.summary?.totalBalance ?? 0, primaryCurrency)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-l-4 border-l-rose-500/80 border-dark-600/50 bg-dark-800/30 pl-4 pr-3 py-3">
-                      <p className="text-dark-400 text-xs font-medium mb-1">Deuda en tarjetas</p>
+                      <p className="text-dark-400 text-xs font-medium mb-1">{t('reports.summary.totalCardDebt')}</p>
                       <p className="text-rose-400 font-bold text-lg">
-                        {reportData.summary?.totalCardDebt?.toLocaleString('es-DO', {
-                          style: 'currency',
-                          currency: 'DOP',
-                        })}
+                        {fc(reportData.summary?.totalCardDebt ?? 0, primaryCurrency)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-l-4 border-l-rose-500/80 border-dark-600/50 bg-dark-800/30 pl-4 pr-3 py-3">
-                      <p className="text-dark-400 text-xs font-medium mb-1">Deuda en préstamos</p>
+                      <p className="text-dark-400 text-xs font-medium mb-1">{t('reports.summary.totalLoanDebt')}</p>
                       <p className="text-rose-400 font-bold text-lg">
-                        {reportData.summary?.totalLoanDebt?.toLocaleString('es-DO', {
-                          style: 'currency',
-                          currency: 'DOP',
-                        })}
+                        {fc(reportData.summary?.totalLoanDebt ?? 0, primaryCurrency)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-l-4 border-l-emerald-500/80 border-dark-600/50 bg-dark-800/30 pl-4 pr-3 py-3">
-                      <p className="text-dark-400 text-xs font-medium mb-1">Patrimonio neto</p>
+                      <p className="text-dark-400 text-xs font-medium mb-1">{t('reports.summary.netWorth')}</p>
                       <p className="text-emerald-400 font-bold text-lg">
-                        {(reportData.summary?.netWorth ?? 0).toLocaleString('es-DO', {
-                          style: 'currency',
-                          currency: 'DOP',
-                        })}
+                        {fc(reportData.summary?.netWorth ?? 0, primaryCurrency)}
                       </p>
                     </div>
                   </div>
@@ -838,41 +868,46 @@ const Reports: React.FC = () => {
                 <div className="rounded-2xl border border-dark-600/50 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-3 bg-dark-800/80 border-b border-dark-600/50">
                     <Receipt className="w-5 h-5 text-amber-400" />
-                    <h3 className="text-base font-semibold text-white">Gastos</h3>
+                    <h3 className="text-base font-semibold text-white">{t('reports.comprehensive.expensesSection')}</h3>
                   </div>
                   <div className="table-responsive table-stack -mx-1 px-1 sm:mx-0 sm:px-0">
                     <table className="report-data-table">
                       <thead>
                         <tr>
-                          <th>Descripción</th>
-                          <th>Monto</th>
-                          <th>Categoría</th>
-                          <th>Estado</th>
+                          <th>{t('reports.tables.common.description')}</th>
+                          <th>{t('reports.tables.common.amount')}</th>
+                          <th>{t('reports.tables.common.category')}</th>
+                          <th>{t('reports.tables.common.status')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {compExpenseSlice.map((expense: any) => (
                           <tr key={expense.id} className="max-md:border-0">
-                            <td data-label="Descripción" data-stack="hero" className="py-3 px-4 text-white">
+                            <td
+                              data-label={t('reports.tables.common.description')}
+                              data-stack="hero"
+                              className="py-3 px-4 text-white"
+                            >
                               {expense.description}
                             </td>
-                            <td data-label="Monto" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.amount')} className="py-3 px-4">
                               <span className="table-stack-value">
-                                {Number(expense.amount).toLocaleString('es-DO', {
-                                  style: 'currency',
-                                  currency: expense.currency || 'DOP',
-                                })}
+                                {fc(Number(expense.amount), expense.currency || primaryCurrency)}
                               </span>
                             </td>
-                            <td data-label="Categoría" className="py-3 px-4">
-                              <span className="table-stack-value text-dark-300">{expense.category || 'N/A'}</span>
+                            <td data-label={t('reports.tables.common.category')} className="py-3 px-4">
+                              <span className="table-stack-value text-dark-300">
+                                {expense.category || t('reports.tables.common.na')}
+                              </span>
                             </td>
-                            <td data-label="Estado" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.status')} className="py-3 px-4">
                               <span
                                 className={`px-2 py-1 rounded text-xs ${expense.isPaid ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
                                   }`}
                               >
-                                {expense.isPaid ? 'Pagado' : 'Pendiente'}
+                                {expense.isPaid
+                                  ? t('reports.expenseStatus.paid')
+                                  : t('reports.expenseStatus.pending')}
                               </span>
                             </td>
                           </tr>
@@ -887,7 +922,7 @@ const Reports: React.FC = () => {
                       totalItems={compExpenseRows.length}
                       itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, expenses: p }))}
-                      itemLabel="gastos"
+                      itemLabel={t('reports.pagination.expenses')}
                       disabled={loading}
                       variant="card"
                       pageSizeOptions={reportTablePageSizeOptions}
@@ -899,42 +934,41 @@ const Reports: React.FC = () => {
                 <div className="rounded-2xl border border-dark-600/50 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-3 bg-dark-800/80 border-b border-dark-600/50">
                     <Landmark className="w-5 h-5 text-sky-400" />
-                    <h3 className="text-base font-semibold text-white">Préstamos</h3>
+                    <h3 className="text-base font-semibold text-white">{t('reports.comprehensive.loansSection')}</h3>
                   </div>
                   <div className="table-responsive table-stack -mx-1 px-1 sm:mx-0 sm:px-0">
                     <table className="report-data-table">
                       <thead>
                         <tr>
-                          <th>Préstamo</th>
-                          <th>Banco</th>
-                          <th>Monto total</th>
-                          <th>Progreso</th>
-                          <th>Estado</th>
+                          <th>{t('reports.tables.common.loan')}</th>
+                          <th>{t('reports.tables.common.bank')}</th>
+                          <th>{t('reports.tables.common.totalAmount')}</th>
+                          <th>{t('reports.tables.common.progress')}</th>
+                          <th>{t('reports.tables.common.status')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {compLoanSlice.map((loan: any) => (
                           <tr key={loan.id} className="max-md:border-0">
-                            <td data-label="Préstamo" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.loan')} className="py-3 px-4">
                               <span className="table-stack-value">{loan.loanName}</span>
                             </td>
-                            <td data-label="Banco" className="py-3 px-4">
-                              <span className="table-stack-value text-dark-300">{loan.bankName || 'N/A'}</span>
-                            </td>
-                            <td data-label="Monto total" className="py-3 px-4">
-                              <span className="table-stack-value">
-                                {Number(loan.totalAmount).toLocaleString('es-DO', {
-                                  style: 'currency',
-                                  currency: loan.currency || 'DOP',
-                                })}
+                            <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
+                              <span className="table-stack-value text-dark-300">
+                                {loan.bankName || t('reports.tables.common.na')}
                               </span>
                             </td>
-                            <td data-label="Progreso" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.totalAmount')} className="py-3 px-4">
+                              <span className="table-stack-value">
+                                {fc(Number(loan.totalAmount), loan.currency)}
+                              </span>
+                            </td>
+                            <td data-label={t('reports.tables.common.progress')} className="py-3 px-4">
                               <span className="table-stack-value text-dark-300">
                                 {(loan.progress ?? 0).toFixed(1)}%
                               </span>
                             </td>
-                            <td data-label="Estado" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.status')} className="py-3 px-4">
                               <span
                                 className={`px-2 py-1 rounded text-xs ${loan.status === 'PAID'
                                   ? 'bg-green-500/20 text-green-400'
@@ -943,7 +977,7 @@ const Reports: React.FC = () => {
                                     : 'bg-red-500/20 text-red-400'
                                   }`}
                               >
-                                {loan.status === 'PAID' ? 'Pagado' : loan.status === 'ACTIVE' ? 'Activo' : 'En mora'}
+                                {loanStatusLabel(loan.status)}
                               </span>
                             </td>
                           </tr>
@@ -958,7 +992,7 @@ const Reports: React.FC = () => {
                       totalItems={compLoanRows.length}
                       itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, loans: p }))}
-                      itemLabel="préstamos"
+                      itemLabel={t('reports.pagination.loans')}
                       disabled={loading}
                       variant="card"
                       pageSizeOptions={reportTablePageSizeOptions}
@@ -970,62 +1004,52 @@ const Reports: React.FC = () => {
                 <div className="rounded-2xl border border-dark-600/50 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-3 bg-dark-800/80 border-b border-dark-600/50">
                     <CreditCard className="w-5 h-5 text-violet-400" />
-                    <h3 className="text-base font-semibold text-white">Tarjetas de crédito</h3>
+                    <h3 className="text-base font-semibold text-white">{t('reports.comprehensive.cardsSection')}</h3>
                   </div>
                   <div className="table-responsive table-stack -mx-1 px-1 sm:mx-0 sm:px-0">
                     <table className="report-data-table report-data-table--card-currency">
                       <thead>
                         <tr>
-                          <th>Tarjeta</th>
-                          <th>Banco</th>
-                          <th>Límite</th>
-                          <th>Deuda</th>
-                          <th>Disponible</th>
+                          <th>{t('reports.tables.common.card')}</th>
+                          <th>{t('reports.tables.common.bank')}</th>
+                          <th>{t('reports.tables.common.limit')}</th>
+                          <th>{t('reports.tables.common.debt')}</th>
+                          <th>{t('reports.tables.common.available')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {compCardSlice.map((card: any) => (
                           <tr key={card.id} className="max-md:border-0">
-                            <td data-label="Tarjeta" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.card')} className="py-3 px-4">
                               <span className="table-stack-value">{card.cardName}</span>
                             </td>
-                            <td data-label="Banco" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
                               <span className="table-stack-value text-dark-300">{card.bankName}</span>
                             </td>
-                            <td data-label="Límite" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.limit')} className="py-3 px-4">
                               <span className="table-stack-value">
-                                {card.currencyType === 'DOP' &&
-                                  Number(card.creditLimitDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
-                                {card.currencyType === 'USD' &&
-                                  Number(card.creditLimitUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
+                                {card.currencyType === 'DOP' && fc(Number(card.creditLimitDop), primaryCurrency)}
+                                {card.currencyType === 'USD' && fc(Number(card.creditLimitUsd), secondaryCurrency)}
                                 {card.currencyType === 'DUAL' &&
-                                  `${Number(card.creditLimitDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}\u00A0·\u00A0${Number(card.creditLimitUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                                  `${fc(Number(card.creditLimitDop), primaryCurrency)}\u00A0·\u00A0${fc(Number(card.creditLimitUsd), secondaryCurrency)}`}
                               </span>
                             </td>
-                            <td data-label="Deuda" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.debt')} className="py-3 px-4">
                               <span className="table-stack-value text-red-400">
-                                {card.currencyType === 'DOP' &&
-                                  Number(card.currentDebtDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
-                                {card.currencyType === 'USD' &&
-                                  Number(card.currentDebtUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
+                                {card.currencyType === 'DOP' && fc(Number(card.currentDebtDop), primaryCurrency)}
+                                {card.currencyType === 'USD' && fc(Number(card.currentDebtUsd), secondaryCurrency)}
                                 {card.currencyType === 'DUAL' &&
-                                  `${Number(card.currentDebtDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}\u00A0·\u00A0${Number(card.currentDebtUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                                  `${fc(Number(card.currentDebtDop), primaryCurrency)}\u00A0·\u00A0${fc(Number(card.currentDebtUsd), secondaryCurrency)}`}
                               </span>
                             </td>
-                            <td data-label="Disponible" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.available')} className="py-3 px-4">
                               <span className="table-stack-value text-green-400">
                                 {card.currencyType === 'DOP' &&
-                                  (Number(card.creditLimitDop) - Number(card.currentDebtDop)).toLocaleString('es-DO', {
-                                    style: 'currency',
-                                    currency: 'DOP',
-                                  })}
+                                  fc(Number(card.creditLimitDop) - Number(card.currentDebtDop), primaryCurrency)}
                                 {card.currencyType === 'USD' &&
-                                  (Number(card.creditLimitUsd) - Number(card.currentDebtUsd)).toLocaleString('es-DO', {
-                                    style: 'currency',
-                                    currency: 'USD',
-                                  })}
+                                  fc(Number(card.creditLimitUsd) - Number(card.currentDebtUsd), secondaryCurrency)}
                                 {card.currencyType === 'DUAL' &&
-                                  `${(Number(card.creditLimitDop) - Number(card.currentDebtDop)).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}\u00A0·\u00A0${(Number(card.creditLimitUsd) - Number(card.currentDebtUsd)).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}`}
+                                  `${fc(Number(card.creditLimitDop) - Number(card.currentDebtDop), primaryCurrency)}\u00A0·\u00A0${fc(Number(card.creditLimitUsd) - Number(card.currentDebtUsd), secondaryCurrency)}`}
                               </span>
                             </td>
                           </tr>
@@ -1040,7 +1064,7 @@ const Reports: React.FC = () => {
                       totalItems={compCardRows.length}
                       itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, cards: p }))}
-                      itemLabel="tarjetas"
+                      itemLabel={t('reports.pagination.cards')}
                       disabled={loading}
                       variant="card"
                       pageSizeOptions={reportTablePageSizeOptions}
@@ -1052,44 +1076,48 @@ const Reports: React.FC = () => {
                 <div className="rounded-2xl border border-dark-600/50 overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-3 bg-dark-800/80 border-b border-dark-600/50">
                     <Building2 className="w-5 h-5 text-emerald-400" />
-                    <h3 className="text-base font-semibold text-white">Cuentas bancarias</h3>
+                    <h3 className="text-base font-semibold text-white">{t('reports.comprehensive.accountsSection')}</h3>
                   </div>
                   <div className="table-responsive table-stack -mx-1 px-1 sm:mx-0 sm:px-0">
                     <table className="report-data-table">
                       <thead>
                         <tr>
-                          <th>Banco</th>
-                          <th>Tipo</th>
-                          <th>Número</th>
-                          <th>Balance DOP</th>
-                          <th>Balance USD</th>
+                          <th>{t('reports.tables.common.bank')}</th>
+                          <th>{t('reports.tables.common.type')}</th>
+                          <th>{t('reports.tables.common.number')}</th>
+                          <th>{t('reports.tables.common.balanceDop')}</th>
+                          <th>{t('reports.tables.common.balanceUsd')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {compAccountSlice.map((account: any) => (
                           <tr key={account.id} className="max-md:border-0">
-                            <td data-label="Banco" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.bank')} className="py-3 px-4">
                               <span className="table-stack-value">{account.bankName}</span>
                             </td>
-                            <td data-label="Tipo" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.type')} className="py-3 px-4">
                               <span className="table-stack-value text-dark-300">
-                                {account.accountType === 'SAVINGS' ? 'Ahorro' : 'Corriente'}
+                                {account.accountType === 'SAVINGS'
+                                  ? t('reports.accountType.savings')
+                                  : t('reports.accountType.checking')}
                               </span>
                             </td>
-                            <td data-label="Número" className="py-3 px-4">
-                              <span className="table-stack-value text-dark-300">{account.accountNumber || 'N/A'}</span>
+                            <td data-label={t('reports.tables.common.number')} className="py-3 px-4">
+                              <span className="table-stack-value text-dark-300">
+                                {account.accountNumber || t('reports.tables.common.na')}
+                              </span>
                             </td>
-                            <td data-label="Balance DOP" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.balanceDop')} className="py-3 px-4">
                               <span className="table-stack-value">
                                 {(account.currencyType === 'DOP' || account.currencyType === 'DUAL') &&
-                                  Number(account.balanceDop).toLocaleString('es-DO', { style: 'currency', currency: 'DOP' })}
+                                  fc(Number(account.balanceDop), primaryCurrency)}
                                 {account.currencyType === 'USD' && '-'}
                               </span>
                             </td>
-                            <td data-label="Balance USD" className="py-3 px-4">
+                            <td data-label={t('reports.tables.common.balanceUsd')} className="py-3 px-4">
                               <span className="table-stack-value">
                                 {(account.currencyType === 'USD' || account.currencyType === 'DUAL') &&
-                                  Number(account.balanceUsd).toLocaleString('es-DO', { style: 'currency', currency: 'USD' })}
+                                  fc(Number(account.balanceUsd), secondaryCurrency)}
                                 {account.currencyType === 'DOP' && '-'}
                               </span>
                             </td>
@@ -1105,7 +1133,7 @@ const Reports: React.FC = () => {
                       totalItems={compAccountRows.length}
                       itemsPerPage={reportTablePageSize}
                       onPageChange={(p) => setCompPages((s) => ({ ...s, accounts: p }))}
-                      itemLabel="cuentas"
+                      itemLabel={t('reports.pagination.accounts')}
                       disabled={loading}
                       variant="card"
                       pageSizeOptions={reportTablePageSizeOptions}
@@ -1123,7 +1151,7 @@ const Reports: React.FC = () => {
                 totalItems={detailRows.length}
                 itemsPerPage={reportTablePageSize}
                 onPageChange={setReportDetailPage}
-                itemLabel="filas"
+                itemLabel={t('reports.pagination.rows')}
                 disabled={loading}
                 variant="card"
                 pageSizeOptions={reportTablePageSizeOptions}

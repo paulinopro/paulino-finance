@@ -1,0 +1,3 @@
+/*! For license information please see 74833.fde4ed2b.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[74833],{74833(e,n,a){a.r(n),a.d(n,{default:()=>c});const c=(0,a(21639).A)("CircleDollarSign",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8",key:"1h4pet"}],["path",{d:"M12 18V6",key:"zqpxq5"}]])}}]);
+//# sourceMappingURL=74833.fde4ed2b.chunk.js.map

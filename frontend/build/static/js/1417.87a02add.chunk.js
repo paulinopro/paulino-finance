@@ -1,0 +1,3 @@
+/*! For license information please see 1417.87a02add.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[1417],{1417(e,n,a){a.r(n),a.d(n,{default:()=>t});const t=(0,a(21639).A)("RailSymbol",[["path",{d:"M5 15h14",key:"m0yey3"}],["path",{d:"M5 9h14",key:"7tsvo6"}],["path",{d:"m14 20-5-5 6-6-5-5",key:"1jo42i"}]])}}]);
+//# sourceMappingURL=1417.87a02add.chunk.js.map

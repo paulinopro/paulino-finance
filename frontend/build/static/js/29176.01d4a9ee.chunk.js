@@ -1,0 +1,3 @@
+/*! For license information please see 29176.01d4a9ee.chunk.js.LICENSE.txt */
+"use strict";(self.webpackChunkpaulino_finance_frontend=self.webpackChunkpaulino_finance_frontend||[]).push([[29176],{29176(n,e,a){a.r(e),a.d(e,{default:()=>o});const o=(0,a(21639).A)("StepBack",[["line",{x1:"18",x2:"18",y1:"20",y2:"4",key:"cun8e5"}],["polygon",{points:"14,20 4,12 14,4",key:"ypakod"}]])}}]);
+//# sourceMappingURL=29176.01d4a9ee.chunk.js.map

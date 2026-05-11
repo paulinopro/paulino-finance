@@ -134,7 +134,7 @@ const addGoalMovement = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
-        const goalResult = await client.query(`SELECT target_amount, current_amount, status, currency, bank_account_id
+        const goalResult = await client.query(`SELECT target_amount, current_amount, status, currency, bank_account_id, name
        FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`, [goalId, userId]);
         if (goalResult.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -150,6 +150,7 @@ const addGoalMovement = async (req, res) => {
         const remaining = roundMoney(target - current);
         const currency = String(g.currency);
         const snapBankId = g.bank_account_id ?? null;
+        const goalNmAdd = String(g.name ?? '').trim() || `Meta #${goalId}`;
         if (remaining <= 0) {
             await client.query('ROLLBACK');
             return res.status(400).json({ message: 'La meta ya no tiene saldo pendiente' });
@@ -175,7 +176,9 @@ const addGoalMovement = async (req, res) => {
         }
         if (sourceBankId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, sourceBankId, currency, -numericAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, sourceBankId, currency, -numericAmount, client, {
+                    description: `[Meta financiera · ${goalNmAdd}] Aporte a la meta desde esta cuenta`,
+                });
             }
             catch (e) {
                 await client.query('ROLLBACK');
@@ -190,7 +193,9 @@ const addGoalMovement = async (req, res) => {
         }
         if (snapBankId) {
             try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, snapBankId, currency, numericAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, snapBankId, currency, numericAmount, client, {
+                    description: `[Meta financiera · ${goalNmAdd}] Abono acreditado en cuenta de la meta`,
+                });
             }
             catch (e) {
                 await client.query('ROLLBACK');
@@ -270,7 +275,7 @@ const updateGoalMovement = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
-        const goalResult = await client.query(`SELECT target_amount, current_amount, status, currency FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`, [goalId, userId]);
+        const goalResult = await client.query(`SELECT target_amount, current_amount, status, currency, name FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`, [goalId, userId]);
         if (goalResult.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ message: 'Financial goal not found' });
@@ -281,6 +286,7 @@ const updateGoalMovement = async (req, res) => {
             return res.status(400).json({ message: 'No se puede editar el abono en el estado actual de la meta' });
         }
         const currency = String(goalRow.currency);
+        const goalNmEdit = String(goalRow.name ?? '').trim() || `Meta #${goalId}`;
         const existingResult = await client.query(`SELECT amount, note, bank_account_id, source_bank_account_id
        FROM financial_goal_movements
        WHERE id = $1 AND goal_id = $2 AND user_id = $3`, [movementId, goalId, userId]);
@@ -319,16 +325,24 @@ const updateGoalMovement = async (req, res) => {
         }
         try {
             if (prevSrcId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, prevSrcId, currency, existingAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, prevSrcId, currency, existingAmount, client, {
+                    description: `[Meta financiera · ${goalNmEdit}] Edición de abono — devolución a origen anterior`,
+                });
             }
             if (movBankId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, -existingAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, -existingAmount, client, {
+                    description: `[Meta financiera · ${goalNmEdit}] Edición de abono — retiro de cuenta meta (monto anterior)`,
+                });
             }
             if (newSrcId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, newSrcId, currency, -numericAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, newSrcId, currency, -numericAmount, client, {
+                    description: `[Meta financiera · ${goalNmEdit}] Edición de abono — nuevo débito en cuenta origen`,
+                });
             }
             if (movBankId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, numericAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, numericAmount, client, {
+                    description: `[Meta financiera · ${goalNmEdit}] Edición de abono — nuevo abono en cuenta meta`,
+                });
             }
         }
         catch (e) {
@@ -389,12 +403,13 @@ const deleteGoalMovement = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
-        const goalResult = await client.query(`SELECT currency FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`, [goalId, userId]);
+        const goalResult = await client.query(`SELECT currency, name FROM financial_goals WHERE id = $1 AND user_id = $2 FOR UPDATE`, [goalId, userId]);
         if (goalResult.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ message: 'Financial goal not found' });
         }
         const currency = String(goalResult.rows[0].currency);
+        const goalNmDel = String(goalResult.rows[0].name ?? '').trim() || `Meta #${goalId}`;
         const existingResult = await client.query(`SELECT amount, bank_account_id, source_bank_account_id
        FROM financial_goal_movements
        WHERE id = $1 AND goal_id = $2 AND user_id = $3`, [movementId, goalId, userId]);
@@ -407,10 +422,14 @@ const deleteGoalMovement = async (req, res) => {
         const srcId = existingResult.rows[0].source_bank_account_id;
         try {
             if (srcId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, srcId, currency, existingAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, srcId, currency, existingAmount, client, {
+                    description: `[Meta financiera · ${goalNmDel}] Eliminación de abono — devolución a cuenta origen`,
+                });
             }
             if (movBankId) {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, -existingAmount, client);
+                await (0, accountBalance_1.applyBalanceDelta)(userId, movBankId, currency, -existingAmount, client, {
+                    description: `[Meta financiera · ${goalNmDel}] Eliminación de abono — retiro de cuenta meta`,
+                });
             }
         }
         catch (e) {
