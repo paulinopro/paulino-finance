@@ -33,6 +33,12 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useIntlFormatting } from '../context/IntlFormattingContext';
 import { useTranslation } from 'react-i18next';
 import { CalendarEvent, FinancialSummary } from '../types';
+import CalendarPeriodDetailTable from '../components/CalendarPeriodDetailTable';
+import {
+  CALENDAR_DETAIL_EXPENSE_TYPES,
+  PERIOD_ROW_BORDER_COLOR,
+  compareCalendarEventsForPeriod,
+} from '../utils/calendarPeriodEffective';
 
 function capitalizeUi(s: string, localeTag: string): string {
   if (!s) return s;
@@ -187,6 +193,26 @@ const Calendar: React.FC = () => {
     });
   };
 
+  const [showPeriodDetailTables, setShowPeriodDetailTables] = useState(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('pf:calendar:showPeriodDetail') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const togglePeriodDetailTables = () => {
+    setShowPeriodDetailTables((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('pf:calendar:showPeriodDetail', next ? 'true' : 'false');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   /**
    * Las vistas list usan `buttonTextKey: 'list'`. El locale `es` define `list: 'Agenda'`, que gana
    * sobre `listMonth`/`listWeek`/`listDay` y dejaba los tres botones como "Agenda". Omitimos `list`
@@ -213,6 +239,16 @@ const Calendar: React.FC = () => {
     }),
     [t]
   );
+
+  const periodTableToday = dateToYmdLocal(new Date());
+  const { periodIncomeSorted, periodExpenseSorted } = useMemo(() => {
+    const parsed = events.map((e) => e.extendedProps as CalendarEvent).filter(Boolean);
+    const income = parsed.filter((ev) => ev.eventType === 'INCOME').sort(compareCalendarEventsForPeriod);
+    const expense = parsed
+      .filter((ev) => CALENDAR_DETAIL_EXPENSE_TYPES.has(ev.eventType))
+      .sort(compareCalendarEventsForPeriod);
+    return { periodIncomeSorted: income, periodExpenseSorted: expense };
+  }, [events]);
 
   const calendarLocale = useMemo<LocaleInput>(() => {
     const agenda = t('pages.calendar.fcAgenda');
@@ -452,6 +488,25 @@ const Calendar: React.FC = () => {
                 {showSummaryWidgets ? t('pages.calendar.hideSummaryShort') : t('pages.calendar.showSummaryShort')}
               </span>
               <span className="xs:hidden">{t('pages.calendar.summaryMobile')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={togglePeriodDetailTables}
+              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              aria-pressed={showPeriodDetailTables}
+              title={
+                showPeriodDetailTables
+                  ? t('pages.calendar.hidePeriodDetailCards')
+                  : t('pages.calendar.showPeriodDetailCards')
+              }
+            >
+              {showPeriodDetailTables ? <EyeOff size={18} /> : <Eye size={18} />}
+              <span className="hidden xs:inline">
+                {showPeriodDetailTables
+                  ? t('pages.calendar.hidePeriodDetailShort')
+                  : t('pages.calendar.showPeriodDetailShort')}
+              </span>
+              <span className="xs:hidden">{t('pages.calendar.periodDetailMobile')}</span>
             </button>
             <button
               type="button"
@@ -745,6 +800,69 @@ const Calendar: React.FC = () => {
           />
         </div>
       </motion.div>
+
+      {showPeriodDetailTables && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6 space-y-4 w-full"
+        >
+          <p className="text-dark-500 text-xs px-0.5">{t('pages.calendar.periodDetailHint')}</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-dark-600 bg-dark-800/60 px-3 py-2.5">
+            <span className="text-xs font-medium text-dark-300">{t('pages.calendar.periodDetailLegendTitle')}</span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-dark-400">
+              <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: PERIOD_ROW_BORDER_COLOR.paid }} aria-hidden />
+              {t('pages.calendar.periodDetailLegendSettled')}
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-dark-400">
+              <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: PERIOD_ROW_BORDER_COLOR.overdue }} aria-hidden />
+              {t('pages.calendar.periodDetailLegendOverdue')}
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-dark-400">
+              <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: PERIOD_ROW_BORDER_COLOR.pending }} aria-hidden />
+              {t('pages.calendar.periodDetailLegendPending')}
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-xs text-dark-400">
+              <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: PERIOD_ROW_BORDER_COLOR.cancelled }} aria-hidden />
+              {t('pages.calendar.periodDetailLegendCancelled')}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-6 w-full">
+            <CalendarPeriodDetailTable
+              persistenceKeySuffix="income"
+              variant="income"
+              heading={
+                <>
+                  <TrendingUp className="text-green-400 shrink-0" size={22} aria-hidden />
+                  <span className="text-xl font-semibold text-white">{t('pages.calendar.periodIncomeListTitle')}</span>
+                </>
+              }
+              sourceEvents={periodIncomeSorted}
+              todayYmd={periodTableToday}
+              emptyLabel={t('pages.calendar.periodDetailEmptyIncome')}
+              eventTypeLabels={eventTypeLabels}
+            />
+
+            <CalendarPeriodDetailTable
+              persistenceKeySuffix="expense"
+              variant="expense"
+              heading={
+                <>
+                  <TrendingDown className="text-red-400 shrink-0" size={22} aria-hidden />
+                  <span className="text-xl font-semibold text-white">
+                    {t('pages.calendar.periodExpenseListTitle')}
+                  </span>
+                </>
+              }
+              sourceEvents={periodExpenseSorted}
+              todayYmd={periodTableToday}
+              emptyLabel={t('pages.calendar.periodDetailEmptyExpense')}
+              eventTypeLabels={eventTypeLabels}
+            />
+          </div>
+        </motion.div>
+      )}
 
       {/* Event Detail Modal */}
       {selectedEvent && (
