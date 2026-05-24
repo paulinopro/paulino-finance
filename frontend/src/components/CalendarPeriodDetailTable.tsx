@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react';
 import type { CalendarEvent } from '../types';
 import { useIntlFormatting } from '../context/IntlFormattingContext';
 import { formatCalendarDateLongEs } from '../utils/dateUtils';
@@ -89,6 +89,12 @@ const CalendarPeriodDetailTable: React.FC<CalendarPeriodDetailTableProps> = ({
   const [typeFilterExpense, setTypeFilterExpense] = useState<'all' | CalendarEvent['eventType']>('all');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [sortKey, setSortKey] = useState<SortKey>(() => readPersistedSortColumn(persistenceKeySuffix, 'date'));
+
+  const lblDate = t('pages.calendar.fieldDate');
+  const lblType = t('pages.calendar.fieldType');
+  const lblTitle = t('pages.calendar.fieldTitle');
+  const lblAmount = t('pages.calendar.fieldAmount');
+  const lblStatus = t('pages.calendar.fieldStatus');
 
   const statusLabels = useMemo(
     () => ({
@@ -210,34 +216,48 @@ const CalendarPeriodDetailTable: React.FC<CalendarPeriodDetailTableProps> = ({
     }
   };
 
-  const sortSuffix = (key: SortKey) => {
-    if (sortKey !== key) return '';
-    return sortDir === 'asc' ? ' ▲' : ' ▼';
+  const ThBtn: React.FC<{ column: SortKey; align?: 'left' | 'right'; children: React.ReactNode }> = ({
+    column,
+    align = 'left',
+    children,
+  }) => {
+    const active = sortKey === column;
+    const ArrowIcon =
+      column === sortKey ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+
+    return (
+      <th
+        className={`py-3 px-4 text-dark-400 font-medium select-none ${
+          align === 'right' ? 'text-right' : 'text-left'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => toggleSort(column)}
+          aria-sort={
+            sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined
+          }
+          className={`flex w-full items-center gap-2 cursor-pointer hover:text-white ${align === 'right' ? 'justify-end text-right' : ''}`}
+        >
+          <span>{children}</span>
+          <ArrowIcon size={16} className={active ? 'shrink-0' : 'shrink-0 opacity-50'} aria-hidden />
+        </button>
+      </th>
+    );
   };
 
-  const ThBtn: React.FC<{
-    column: SortKey;
-    children: React.ReactNode;
-    headerClass?: string;
-    btnClass?: string;
-  }> = ({ column, children, headerClass = '', btnClass = '' }) => (
-    <th className={`py-2.5 px-3 font-medium text-xs uppercase tracking-wide text-dark-400 ${headerClass}`.trim()}>
-      <button
-        type="button"
-        onClick={() => toggleSort(column)}
-        aria-sort={sortKey === column ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-        className={`inline-flex w-full items-center gap-1 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/70 rounded-sm ${btnClass}`.trim()}
-      >
-        {children}
-        <span className="font-normal opacity-70 tabular-nums" aria-hidden>
-          {sortSuffix(column)}
+  const totalBlock = (
+    <div className="flex flex-col items-end gap-0.5 tabular-nums w-full md:w-auto">
+      {totalsByCurrency.map(([cur, amt]) => (
+        <span key={cur} className="text-white font-semibold">
+          {fc(amt, cur)}
         </span>
-      </button>
-    </th>
+      ))}
+    </div>
   );
 
   return (
-    <div className="card w-full">
+    <div className="card w-full overflow-hidden">
       <div className="mb-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-center gap-2 min-h-[42px]">{heading}</div>
 
@@ -298,75 +318,88 @@ const CalendarPeriodDetailTable: React.FC<CalendarPeriodDetailTableProps> = ({
       ) : processedRows.length === 0 ? (
         <p className="text-dark-500 text-sm">{t('pages.calendar.periodDetailNoMatches')}</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-dark-600 max-h-[min(28rem,55vh)] overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-[2] border-b border-dark-600 bg-dark-800 shadow-[0_1px_0_rgba(0,0,0,0.4)]">
-              <tr>
-                <ThBtn column="date">{t('pages.calendar.fieldDate')}</ThBtn>
-                <ThBtn column="type">{t('pages.calendar.fieldType')}</ThBtn>
-                <ThBtn column="title">{t('pages.calendar.fieldTitle')}</ThBtn>
-                <ThBtn column="amount" headerClass="text-right whitespace-nowrap" btnClass="justify-end">
-                  {t('pages.calendar.fieldAmount')}
-                </ThBtn>
-                <ThBtn column="status" headerClass="whitespace-nowrap">
-                  {t('pages.calendar.fieldStatus')}
-                </ThBtn>
-              </tr>
-            </thead>
-            <tbody>
-              {processedRows.map((ev) => {
-                const bucket = getEffectiveCalendarPeriodBucket(ev, todayYmd);
-                const typeLabel =
-                  variant === 'income' ? incomeTypeLabel : eventTypeLabels[ev.eventType] ?? ev.eventType;
-
-                return (
-                  <tr
-                    key={ev.id}
-                    className="border-b border-dark-700 bg-dark-700/35"
-                    style={{
-                      borderLeftWidth: 4,
-                      borderLeftStyle: 'solid',
-                      borderLeftColor: PERIOD_ROW_BORDER_COLOR[bucket],
-                    }}
-                  >
-                    <td className="py-2 px-3 text-dark-200 whitespace-nowrap align-top">
-                      {formatCalendarDateLongEs(ev.eventDate, localeTag)}
-                    </td>
-                    <td className="py-2 px-3 text-dark-300 whitespace-nowrap align-top">{typeLabel}</td>
-                    <td className="py-2 px-3 text-white align-top">{ev.title}</td>
-                    <td className="py-2 px-3 text-right text-white tabular-nums whitespace-nowrap align-top">
-                      {fc(ev.amount, ev.currency)}
-                    </td>
-                    <td className="py-2 px-3 align-top">
-                      <span
-                        className="font-medium whitespace-nowrap"
-                        style={{ color: PERIOD_ROW_BORDER_COLOR[bucket] }}
-                      >
-                        {periodDetailStatusDisplay(ev, bucket, statusLabels)}
-                      </span>
-                    </td>
+        <div className="max-md:max-h-none max-md:border-0 max-md:rounded-none rounded-xl border border-dark-700 max-md:bg-transparent md:max-h-[min(28rem,55vh)] flex flex-col min-h-0 overflow-hidden md:rounded-xl">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain md:min-h-[8rem]">
+            <div className="table-responsive table-stack pb-px">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 z-[2] bg-dark-800 shadow-[inset_0_-1px_0_0_rgba(51,65,85,0.9)]">
+                  <tr className="border-b border-dark-700">
+                    <ThBtn column="date">{lblDate}</ThBtn>
+                    <ThBtn column="type">{lblType}</ThBtn>
+                    <ThBtn column="title">{lblTitle}</ThBtn>
+                    <ThBtn column="amount" align="right">
+                      {lblAmount}
+                    </ThBtn>
+                    <ThBtn column="status">{lblStatus}</ThBtn>
                   </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="bg-dark-800/95 border-t-2 border-dark-600">
-                <td colSpan={3} className="py-2.5 px-3 text-dark-300 font-semibold text-left align-middle">
-                  {t('pages.calendar.periodDetailTotal')}
-                </td>
-                <td className="py-2.5 px-3 text-right align-middle">
-                  <div className="flex flex-col items-end gap-0.5 tabular-nums">
-                    {totalsByCurrency.map(([cur, amt]) => (
-                      <span key={cur} className="text-white font-semibold">
-                        {fc(amt, cur)}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="align-middle" />
-              </tr>
-            </tfoot>
-          </table>
+                </thead>
+                <tbody>
+                  {processedRows.map((ev) => {
+                    const bucket = getEffectiveCalendarPeriodBucket(ev, todayYmd);
+                    const typeLabel =
+                      variant === 'income'
+                        ? incomeTypeLabel
+                        : eventTypeLabels[ev.eventType] ?? ev.eventType;
+
+                    return (
+                      <tr
+                        key={ev.id}
+                        className="border-b border-dark-700 hover:bg-dark-700 max-md:border-0"
+                        style={{
+                          borderLeftWidth: 4,
+                          borderLeftStyle: 'solid',
+                          borderLeftColor: PERIOD_ROW_BORDER_COLOR[bucket],
+                        }}
+                      >
+                        <td data-label={lblDate} className="py-3 px-4">
+                          <span className="table-stack-value whitespace-nowrap text-dark-300">
+                            {formatCalendarDateLongEs(ev.eventDate, localeTag)}
+                          </span>
+                        </td>
+                        <td data-label={lblType} className="py-3 px-4">
+                          <span className="table-stack-value text-dark-300">{typeLabel}</span>
+                        </td>
+                        <td
+                          data-label={lblTitle}
+                          data-stack="hero"
+                          className="py-3 px-4 text-white min-w-0"
+                        >
+                          <span className="break-words">{ev.title}</span>
+                        </td>
+                        <td data-label={lblAmount} className="py-3 px-4 md:text-right">
+                          <span className="table-stack-value">{fc(ev.amount, ev.currency)}</span>
+                        </td>
+                        <td data-label={lblStatus} className="py-3 px-4">
+                          <span
+                            className="table-stack-value whitespace-nowrap"
+                            style={{ color: PERIOD_ROW_BORDER_COLOR[bucket] }}
+                          >
+                            {periodDetailStatusDisplay(ev, bucket, statusLabels)}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="max-md:hidden">
+                  <tr className="border-t-2 border-dark-600 bg-dark-800 shadow-[inset_0_1px_0_0_rgba(51,65,85,0.5)]">
+                    <td colSpan={3} className="py-3 px-4 text-dark-300 font-semibold text-left align-middle">
+                      {t('pages.calendar.periodDetailTotal')}
+                    </td>
+                    <td className="py-3 px-4 text-right align-middle">{totalBlock}</td>
+                    <td className="align-middle" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          <div className="md:hidden border-t-2 border-dark-600 bg-dark-800 px-4 py-3 space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-dark-400">
+              {t('pages.calendar.periodDetailTotal')}
+            </p>
+            {totalBlock}
+          </div>
         </div>
       )}
     </div>

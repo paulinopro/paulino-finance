@@ -11,6 +11,7 @@ import deLocale from '@fullcalendar/core/locales/de';
 import type { LocaleInput } from '@fullcalendar/core';
 import {
   Calendar as CalendarIcon,
+  CalendarRange,
   Filter,
   DollarSign,
   TrendingUp,
@@ -26,7 +27,15 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
-import { dateToYmdLocal, formatCalendarDateLongEs } from '../utils/dateUtils';
+import {
+  dateToYmdLocal,
+  formatCalendarDateLongEs,
+  formatDateForInput,
+  getCalendarMonthBoundsYmd,
+  inclusiveCalendarDaysBetween,
+  todayYmdLocal,
+  calendarDateToSortableMs,
+} from '../utils/dateUtils';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -149,6 +158,38 @@ const CALENDAR_STATUS_COLORS: Record<string, string> = {
   CANCELLED: '#6b7280',
 };
 
+const MAX_CUSTOM_PERIOD_DAYS = 731;
+
+type CalendarPeriodPreset = 'month' | 'week' | 'day' | 'custom';
+
+type PresentationMode = 'calendar' | 'agenda';
+
+/** Rango lógico del FullCalendar (`current*`); `currentEnd` es exclusivo → último día inclusivo para API. */
+function fullCalendarLogicRangeToInclusiveYmd(view: { currentStart: Date; currentEnd: Date }) {
+  const startYmd = dateToYmdLocal(view.currentStart);
+  const endExclusiveCopy = new Date(view.currentEnd);
+  endExclusiveCopy.setDate(endExclusiveCopy.getDate() - 1);
+  const endYmd = dateToYmdLocal(endExclusiveCopy);
+  return { startYmd, endYmd };
+}
+
+function presetToFcViewName(
+  preset: Exclude<CalendarPeriodPreset, 'custom'>,
+  presentation: PresentationMode
+): string {
+  if (presentation === 'calendar') {
+    if (preset === 'month') return 'dayGridMonth';
+    if (preset === 'week') return 'timeGridWeek';
+    return 'timeGridDay';
+  }
+  if (preset === 'month') return 'listMonth';
+  if (preset === 'week') return 'listWeek';
+  return 'listDay';
+}
+
+const CALENDAR_PERIOD_PRESETS: CalendarPeriodPreset[] = ['month', 'week', 'day', 'custom'];
+const PERIOD_PRESETS_NO_CUSTOM: Exclude<CalendarPeriodPreset, 'custom'>[] = ['month', 'week', 'day'];
+
 const Calendar: React.FC = () => {
   const { t } = useTranslation();
   const { formatCurrency: fc, localeTag, primaryCurrency } = useIntlFormatting();
@@ -172,6 +213,11 @@ const Calendar: React.FC = () => {
   } | null>(null);
   const [periodAmountInput, setPeriodAmountInput] = useState('');
   const isMobileCalendar = useMediaQuery('(max-width: 767px)');
+  const [periodPreset, setPeriodPreset] = useState<CalendarPeriodPreset>('month');
+  const [customApplied, setCustomApplied] = useState<{ startYmd: string; endYmd: string } | null>(null);
+  const [customDraftStart, setCustomDraftStart] = useState('');
+  const [customDraftEnd, setCustomDraftEnd] = useState('');
+  const [presentationMode, setPresentationMode] = useState<PresentationMode>('calendar');
 
   const [showSummaryWidgets, setShowSummaryWidgets] = useState(() => {
     try {
@@ -213,11 +259,6 @@ const Calendar: React.FC = () => {
     });
   };
 
-  /**
-   * Las vistas list usan `buttonTextKey: 'list'`. El locale `es` define `list: 'Agenda'`, que gana
-   * sobre `listMonth`/`listWeek`/`listDay` y dejaba los tres botones como "Agenda". Omitimos `list`
-   * y fijamos etiquetas por nombre de vista; en escritorio el cuarto botón (listWeek) sigue siendo "Agenda".
-   */
   const eventTypeLabels = useMemo(
     () => ({
       CARD_PAYMENT: t('pages.calendarEventTypes.CARD_PAYMENT'),
@@ -250,52 +291,106 @@ const Calendar: React.FC = () => {
     return { periodIncomeSorted: income, periodExpenseSorted: expense };
   }, [events]);
 
+  /** Locale FC: navegación + etiquetas de vista según Calendario (rejilla/tiempo) o Agenda (lista). */
   const calendarLocale = useMemo<LocaleInput>(() => {
-    const agenda = t('pages.calendar.fcAgenda');
-    const listMonth = t('pages.calendar.fcListMonth');
-    const listWeek = t('pages.calendar.fcListWeek');
-    const listDay = t('pages.calendar.fcListDay');
+    const fcToday = t('pages.calendar.fcToday');
     const prev = t('pages.calendar.fcPrev');
     const next = t('pages.calendar.fcNext');
+    const lbl = (presetK: Exclude<CalendarPeriodPreset, 'custom'>) =>
+      t(`pages.calendar.periodPreset.${presetK}` as const);
 
-    if (localeTag.startsWith('de')) {
-      const deButtons = { ...(deLocale.buttonText ?? {}) } as Record<string, string>;
-      delete deButtons.list;
+    const stripListAndPatch = (base: LocaleInput) => {
+      const bt = { ...(base.buttonText ?? {}) } as Record<string, string>;
+      delete bt.list;
       return {
-        ...deLocale,
+        ...base,
         buttonText: {
-          ...deButtons,
+          ...bt,
           prev,
           next,
-          ...(isMobileCalendar ? { listMonth, listWeek, listDay } : { listWeek: agenda }),
+          today: fcToday,
+          ...(presentationMode === 'calendar'
+            ? {
+                dayGridMonth: lbl('month'),
+                timeGridWeek: lbl('week'),
+                timeGridDay: lbl('day'),
+              }
+            : {
+                listMonth: t('pages.calendar.fcListMonth'),
+                listWeek: t('pages.calendar.fcListWeek'),
+                listDay: t('pages.calendar.fcListDay'),
+              }),
         },
       };
-    }
-    if (localeTag.startsWith('en')) {
-      const enButtons = { ...(enLocale.buttonText ?? {}) } as Record<string, string>;
-      delete enButtons.list;
-      return {
-        ...enLocale,
-        buttonText: {
-          ...enButtons,
-          prev,
-          next,
-          ...(isMobileCalendar ? { listMonth, listWeek, listDay } : { listWeek: agenda }),
+    };
+    if (localeTag.startsWith('de')) return stripListAndPatch(deLocale);
+    if (localeTag.startsWith('en')) return stripListAndPatch(enLocale);
+    return stripListAndPatch(esLocale);
+  }, [localeTag, presentationMode, t]);
+
+  const fcViews = useMemo(() => {
+    const formatListWeekDay = (arg: VerboseDateArg) =>
+      formatVerboseUiDate(arg, { weekday: 'long' }, localeTag);
+    const formatListSideFull = (arg: VerboseDateArg) =>
+      formatVerboseUiDate(
+        arg,
+        {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
         },
-      };
-    }
-    const esButtons = { ...(esLocale.buttonText ?? {}) } as Record<string, string>;
-    delete esButtons.list;
-    return {
-      ...esLocale,
-      buttonText: {
-        ...esButtons,
-        prev,
-        next,
-        ...(isMobileCalendar ? { listMonth, listWeek, listDay } : { listWeek: agenda }),
+        localeTag
+      );
+    const formatListDayHeader = (arg: VerboseDateArg) =>
+      formatVerboseUiDate(
+        arg,
+        {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        },
+        localeTag
+      );
+
+    const base = {
+      listWeek: {
+        listDayFormat: formatListWeekDay,
+        listDaySideFormat: formatListSideFull,
+      },
+      listMonth: {
+        listDayFormat: formatListWeekDay,
+        listDaySideFormat: formatListSideFull,
+      },
+      listDay: {
+        listDayFormat: formatListDayHeader,
+        listDaySideFormat: undefined,
       },
     };
-  }, [isMobileCalendar, localeTag, t]);
+
+    const hasCustomAgendaRange =
+      presentationMode === 'agenda' &&
+      periodPreset === 'custom' &&
+      customApplied &&
+      inclusiveCalendarDaysBetween(customApplied.startYmd, customApplied.endYmd) >= 1;
+
+    if (!hasCustomAgendaRange) return base;
+
+    const spanDays = Math.min(
+      MAX_CUSTOM_PERIOD_DAYS,
+      inclusiveCalendarDaysBetween(customApplied!.startYmd, customApplied!.endYmd)
+    );
+
+    return {
+      ...base,
+      customAgendaRange: {
+        type: 'list' as const,
+        duration: { days: spanDays },
+        listDayFormat: formatListWeekDay,
+        listDaySideFormat: formatListSideFull,
+      },
+    };
+  }, [customApplied, localeTag, periodPreset, presentationMode]);
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -303,8 +398,7 @@ const Calendar: React.FC = () => {
       if (!calendarApi) return;
 
       const view = calendarApi.view;
-      const start = dateToYmdLocal(view.activeStart);
-      const end = dateToYmdLocal(view.activeEnd);
+      const { startYmd: start, endYmd: end } = fullCalendarLogicRangeToInclusiveYmd(view);
 
       const params = new URLSearchParams({
         start,
@@ -358,12 +452,27 @@ const Calendar: React.FC = () => {
   useEffect(() => {
     const api = calendarRef.current?.getApi();
     if (!api) return;
-    const target = isMobileCalendar ? 'listWeek' : 'dayGridMonth';
-    if (api.view.type !== target) {
-      api.changeView(target);
-    }
-  }, [isMobileCalendar]);
 
+    if (presentationMode === 'agenda' && periodPreset === 'custom' && customApplied) {
+      if (api.view.type !== 'customAgendaRange') {
+        api.changeView('customAgendaRange', customApplied.startYmd);
+      }
+      return;
+    }
+
+    if (periodPreset === 'custom') return;
+
+    const want = presetToFcViewName(periodPreset, presentationMode);
+    if (api.view.type !== want) api.changeView(want);
+  }, [presentationMode, periodPreset, customApplied]);
+
+  const handlePresentationSelect = (mode: PresentationMode) => {
+    setPresentationMode(mode);
+    if (mode === 'calendar' && periodPreset === 'custom') {
+      setPeriodPreset('month');
+      setCustomApplied(null);
+    }
+  };
   const handleDateClick = (arg: any) => {
     const dayEvents = events.filter(
       (e) => e.start === arg.dateStr || e.start.split('T')[0] === arg.dateStr
@@ -423,14 +532,30 @@ const Calendar: React.FC = () => {
     await submitCalendarStatusUpdate(selectedEvent, status);
   };
 
+  const seedCustomRangeFromAnchor = useCallback((): { startYmd: string; endYmd: string } => {
+    const api = calendarRef.current?.getApi();
+    return api != null
+      ? fullCalendarLogicRangeToInclusiveYmd(api.view)
+      : getCalendarMonthBoundsYmd(todayYmdLocal());
+  }, []);
+
+  /** Agenda + período libre sin depender del estado asíncrono de `presentationMode`. */
+  const openAgendaCustomPeriod = useCallback(() => {
+    const seed = seedCustomRangeFromAnchor();
+    setPresentationMode('agenda');
+    setPeriodPreset('custom');
+    setCustomDraftStart(seed.startYmd);
+    setCustomDraftEnd(seed.endYmd);
+    setCustomApplied(seed);
+  }, [seedCustomRangeFromAnchor]);
+
   const handleRefresh = async () => {
     try {
       const calendarApi = calendarRef.current?.getApi();
       if (!calendarApi) return;
 
       const view = calendarApi.view;
-      const start = dateToYmdLocal(view.activeStart);
-      const end = dateToYmdLocal(view.activeEnd);
+      const { startYmd: start, endYmd: end } = fullCalendarLogicRangeToInclusiveYmd(view);
 
       const res = await api.post(`/calendar/refresh?start=${start}&end=${end}`);
       const n = Number(res.data?.orphansHidden ?? res.data?.orphansPurged ?? 0);
@@ -445,6 +570,72 @@ const Calendar: React.FC = () => {
       toast.error(t('toast.calendar.refreshError'));
     }
   };
+
+  const handlePresetSelect = (preset: CalendarPeriodPreset) => {
+    if (preset === 'custom') {
+      if (presentationMode !== 'agenda') return;
+      setPeriodPreset('custom');
+      const seed = seedCustomRangeFromAnchor();
+      setCustomDraftStart(seed.startYmd);
+      setCustomDraftEnd(seed.endYmd);
+      setCustomApplied(seed);
+      return;
+    }
+    setPeriodPreset(preset);
+    setCustomApplied(null);
+  };
+
+  const handleApplyCustomRange = () => {
+    if (presentationMode !== 'agenda') return;
+    const s = formatDateForInput(customDraftStart);
+    const e = formatDateForInput(customDraftEnd);
+    if (!s || !e) {
+      toast.error(t('toast.calendar.customRangeInvalid'));
+      return;
+    }
+    if (calendarDateToSortableMs(e) < calendarDateToSortableMs(s)) {
+      toast.error(t('toast.calendar.customRangeInvalid'));
+      return;
+    }
+    const days = inclusiveCalendarDaysBetween(s, e);
+    if (days <= 0) {
+      toast.error(t('toast.calendar.customRangeInvalid'));
+      return;
+    }
+    if (days > MAX_CUSTOM_PERIOD_DAYS) {
+      toast.error(t('toast.calendar.customRangeTooLong', { max: MAX_CUSTOM_PERIOD_DAYS }));
+      return;
+    }
+    setCustomApplied({ startYmd: s, endYmd: e });
+    setPeriodPreset('custom');
+  };
+
+  const fcMountKey =
+    presentationMode === 'agenda' && periodPreset === 'custom' && customApplied
+      ? `ca:${customApplied.startYmd}:${customApplied.endYmd}`
+      : `p:${presentationMode}:${periodPreset}`;
+
+  const initialFcViewName = (() => {
+    if (presentationMode === 'agenda' && periodPreset === 'custom' && customApplied) {
+      return 'customAgendaRange';
+    }
+    const p =
+      periodPreset === 'month'
+        ? 'month'
+        : periodPreset === 'week'
+          ? 'week'
+          : periodPreset === 'day'
+            ? 'day'
+            : 'month';
+    return presetToFcViewName(p, presentationMode);
+  })();
+
+  const headerToolbarRight =
+    presentationMode === 'calendar'
+      ? 'dayGridMonth,timeGridWeek,timeGridDay'
+      : periodPreset === 'custom' && customApplied
+        ? ''
+        : 'listMonth,listWeek,listDay';
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -477,72 +668,259 @@ const Calendar: React.FC = () => {
             <button
               type="button"
               onClick={toggleSummaryWidgets}
-              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              className="btn-secondary flex items-center justify-center gap-0 md:gap-2 max-md:px-3 flex-1 sm:flex-initial min-w-0"
               aria-pressed={showSummaryWidgets}
+              aria-label={
+                showSummaryWidgets ? t('pages.calendar.hideSummaryCards') : t('pages.calendar.showSummaryCards')
+              }
               title={
                 showSummaryWidgets ? t('pages.calendar.hideSummaryCards') : t('pages.calendar.showSummaryCards')
               }
             >
-              {showSummaryWidgets ? <EyeOff size={18} /> : <Eye size={18} />}
-              <span className="hidden xs:inline">
+              {showSummaryWidgets ? <EyeOff size={18} aria-hidden /> : <Eye size={18} aria-hidden />}
+              <span className="hidden md:inline">
                 {showSummaryWidgets ? t('pages.calendar.hideSummaryShort') : t('pages.calendar.showSummaryShort')}
               </span>
-              <span className="xs:hidden">{t('pages.calendar.summaryMobile')}</span>
             </button>
             <button
               type="button"
               onClick={togglePeriodDetailTables}
-              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              className="btn-secondary flex items-center justify-center gap-0 md:gap-2 max-md:px-3 flex-1 sm:flex-initial min-w-0"
               aria-pressed={showPeriodDetailTables}
+              aria-label={
+                showPeriodDetailTables
+                  ? t('pages.calendar.hidePeriodDetailCards')
+                  : t('pages.calendar.showPeriodDetailCards')
+              }
               title={
                 showPeriodDetailTables
                   ? t('pages.calendar.hidePeriodDetailCards')
                   : t('pages.calendar.showPeriodDetailCards')
               }
             >
-              {showPeriodDetailTables ? <EyeOff size={18} /> : <Eye size={18} />}
-              <span className="hidden xs:inline">
+              {showPeriodDetailTables ? <EyeOff size={18} aria-hidden /> : <Eye size={18} aria-hidden />}
+              <span className="hidden md:inline">
                 {showPeriodDetailTables
                   ? t('pages.calendar.hidePeriodDetailShort')
                   : t('pages.calendar.showPeriodDetailShort')}
               </span>
-              <span className="xs:hidden">{t('pages.calendar.periodDetailMobile')}</span>
             </button>
             <button
               type="button"
               onClick={() => setShowFilters(!showFilters)}
-              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              className="btn-secondary flex items-center justify-center gap-0 md:gap-2 max-md:px-3 flex-1 sm:flex-initial min-w-0"
+              aria-expanded={showFilters}
+              aria-label={t('pages.calendar.filters')}
+              title={t('pages.calendar.filters')}
             >
-              <Filter size={18} />
-              <span>{t('pages.calendar.filters')}</span>
+              <Filter size={18} aria-hidden />
+              <span className="hidden md:inline">{t('pages.calendar.filters')}</span>
             </button>
             <button
               type="button"
               onClick={() => setShowHistoryPanel((v) => !v)}
-              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              className="btn-secondary flex items-center justify-center gap-0 md:gap-2 max-md:px-3 flex-1 sm:flex-initial min-w-0"
               aria-pressed={showHistoryPanel}
+              aria-label={
+                showHistoryPanel ? t('pages.calendar.hideHistoryPanel') : t('pages.calendar.showHistoryPanel')
+              }
               title={
                 showHistoryPanel ? t('pages.calendar.hideHistoryPanel') : t('pages.calendar.showHistoryPanel')
               }
             >
-              <History size={18} />
-              <span className="hidden xs:inline">
+              <History size={18} aria-hidden />
+              <span className="hidden md:inline">
                 {showHistoryPanel ? t('pages.calendar.hideHistoryShort') : t('pages.calendar.historyShort')}
               </span>
-              <span className="xs:hidden">{t('pages.calendar.historyMobile')}</span>
             </button>
             <button
               type="button"
               onClick={handleRefresh}
-              className="btn-secondary flex items-center justify-center gap-2 flex-1 sm:flex-initial min-w-0"
+              className="btn-secondary flex items-center justify-center gap-0 md:gap-2 max-md:px-3 flex-1 sm:flex-initial min-w-0"
+              aria-label={t('pages.calendar.refresh')}
+              title={t('pages.calendar.refresh')}
             >
-              <RefreshCw size={18} />
-              <span>{t('pages.calendar.refresh')}</span>
+              <RefreshCw size={18} aria-hidden />
+              <span className="hidden md:inline">{t('pages.calendar.refresh')}</span>
             </button>
           </div>
         </div>
 
-        {/* Financial Summary — eventos del rango visible; ingresos solo «Recibido», gastos solo «Pagado» */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-lg border border-dark-700/80 bg-dark-750/80 p-4 sm:p-5 mb-6 ring-1 ring-white/[0.06] shadow-sm flex flex-col gap-5"
+        >
+          <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-center md:gap-x-5 lg:gap-x-7 xl:gap-x-10">
+            <div className="flex flex-row flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-dark-400 text-sm font-medium whitespace-nowrap shrink-0">
+                {t('pages.calendar.presentationLabel')}
+              </span>
+              <div className="flex flex-wrap gap-2" role="group" aria-label={t('pages.calendar.presentationLabel')}>
+                <button
+                  type="button"
+                  onClick={() => handlePresentationSelect('calendar')}
+                  aria-pressed={presentationMode === 'calendar'}
+                  className={`btn-secondary text-sm px-3 py-2 ${
+                    presentationMode === 'calendar'
+                      ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-transparent'
+                      : ''
+                  }`}
+                >
+                  {t('pages.calendar.presentationCalendar')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePresentationSelect('agenda')}
+                  aria-pressed={presentationMode === 'agenda'}
+                  className={`btn-secondary text-sm px-3 py-2 ${
+                    presentationMode === 'agenda'
+                      ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-transparent'
+                      : ''
+                  }`}
+                >
+                  {t('pages.calendar.presentationAgenda')}
+                </button>
+              </div>
+            </div>
+
+            <div
+              className="hidden md:block w-px min-h-[2.25rem] shrink-0 self-center bg-dark-600/60"
+              aria-hidden
+            />
+
+            <div className="flex flex-row flex-wrap items-center gap-x-3 gap-y-2 md:flex-1 md:min-w-[14rem]">
+              <span className="text-dark-400 text-sm font-medium whitespace-nowrap shrink-0">
+                {t('pages.calendar.periodModeLabel')}
+              </span>
+              <div className="flex flex-wrap gap-2" role="group" aria-label={t('pages.calendar.periodModeLabel')}>
+                {(presentationMode === 'agenda'
+                  ? CALENDAR_PERIOD_PRESETS
+                  : (PERIOD_PRESETS_NO_CUSTOM as readonly CalendarPeriodPreset[])
+                ).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => handlePresetSelect(p)}
+                    aria-pressed={periodPreset === p}
+                    className={`btn-secondary text-sm px-3 py-2 inline-flex items-center gap-2 ${
+                      periodPreset === p ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-transparent' : ''
+                    }`}
+                  >
+                    {p === 'custom' ? (
+                      <>
+                        <CalendarRange className="w-4 h-4 shrink-0 text-primary-400" aria-hidden />
+                        <span>{t('pages.calendar.periodPreset.custom')}</span>
+                      </>
+                    ) : (
+                      t(`pages.calendar.periodPreset.${p}`)
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {presentationMode === 'calendar' && (
+              <>
+                <div
+                  className="hidden md:block w-px min-h-[2.25rem] shrink-0 self-center bg-dark-600/60"
+                  aria-hidden
+                />
+                <div className="hidden md:flex flex-row flex-wrap items-center gap-3 flex-1 min-w-[min(100%,22rem)] max-w-xl">
+                  <CalendarRange className="w-4 h-4 text-dark-500 shrink-0 mt-0.5" aria-hidden />
+                  <p className="text-dark-400 text-xs sm:text-sm leading-snug flex-1 min-w-[12rem]">
+                    {t('pages.calendar.customOnlyInAgendaLead')}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs sm:text-sm px-3 py-2 shrink-0 whitespace-nowrap"
+                    onClick={openAgendaCustomPeriod}
+                  >
+                    {t('pages.calendar.switchToAgendaCustom')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {presentationMode === 'agenda' && (
+            <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-start md:gap-x-10">
+              <p className="text-dark-500 text-xs leading-relaxed max-w-prose md:max-w-md">
+                {t('pages.calendar.periodAgendaSubtitle')}
+              </p>
+              {periodPreset !== 'custom' && (
+                <p className="text-dark-500 text-xs leading-relaxed max-w-prose md:max-w-sm">
+                  {t('pages.calendar.customChipHint')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {presentationMode === 'agenda' && periodPreset === 'custom' && (
+            <motion.div
+              layout
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              transition={{ duration: 0.2 }}
+              className="rounded-lg border border-dark-600/55 bg-dark-800/60 p-4 sm:p-4 ring-1 ring-white/[0.04]"
+            >
+              <div className="flex items-start gap-3 mb-4">
+                <CalendarRange className="w-5 h-5 text-primary-400 shrink-0 mt-0.5" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white">{t('pages.calendar.customRangeSectionTitle')}</p>
+                  <p className="text-dark-500 text-xs mt-1 leading-relaxed">{t('pages.calendar.customRangePanelLead', { max: MAX_CUSTOM_PERIOD_DAYS })}</p>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 sm:items-end">
+                <div className="min-w-[10rem] flex-1 sm:flex-initial sm:max-w-[12rem]">
+                  <label className="label mb-2" htmlFor="pf-cal-custom-start">
+                    {t('pages.calendar.customRangeStart')}
+                  </label>
+                  <input
+                    id="pf-cal-custom-start"
+                    type="date"
+                    value={customDraftStart}
+                    onChange={(e) => setCustomDraftStart(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+                <div className="min-w-[10rem] flex-1 sm:flex-initial sm:max-w-[12rem]">
+                  <label className="label mb-2" htmlFor="pf-cal-custom-end">
+                    {t('pages.calendar.customRangeEnd')}
+                  </label>
+                  <input
+                    id="pf-cal-custom-end"
+                    type="date"
+                    value={customDraftEnd}
+                    onChange={(e) => setCustomDraftEnd(e.target.value)}
+                    className="input w-full"
+                  />
+                </div>
+                <button type="button" className="btn-primary w-full sm:w-auto shrink-0" onClick={handleApplyCustomRange}>
+                  {t('pages.calendar.customRangeApply')}
+                </button>
+              </div>
+              <p className="text-dark-500 text-xs mt-4 leading-relaxed border-t border-dark-600/50 pt-3">
+                {t('pages.calendar.customRangeHint', { max: MAX_CUSTOM_PERIOD_DAYS })}
+              </p>
+            </motion.div>
+          )}
+
+          {presentationMode === 'calendar' && (
+            <div className="md:hidden flex gap-3 items-start rounded-lg border border-dark-600/45 bg-dark-800/35 p-3 sm:p-4 ring-1 ring-white/[0.03]">
+              <CalendarRange className="w-5 h-5 text-dark-500 shrink-0 mt-1" aria-hidden />
+              <div className="min-w-0 flex-1 space-y-3">
+                <p className="text-dark-400 text-sm leading-relaxed">{t('pages.calendar.customOnlyInAgendaLead')}</p>
+                <button type="button" className="btn-secondary text-sm inline-flex items-center gap-2 px-3 py-2" onClick={openAgendaCustomPeriod}>
+                  <CalendarRange className="w-4 h-4 text-primary-400 shrink-0" aria-hidden />
+                  {t('pages.calendar.switchToAgendaCustom')}
+                </button>
+              </div>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Financial Summary — período seleccionado; ingresos solo «Recibido», gastos solo «Pagado» */}
         {showSummaryWidgets && summary && (
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -726,28 +1104,25 @@ const Calendar: React.FC = () => {
       >
         <div className="calendar-container">
           <FullCalendar
+            key={fcMountKey}
             ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-            initialView={isMobileCalendar ? 'listMonth' : 'dayGridMonth'}
-            headerToolbar={
-              isMobileCalendar
-                ? {
-                    left: 'prev,next',
-                    center: 'title',
-                    right: 'today,listMonth,listWeek,listDay',
-                  }
-                : {
-                    left: 'prev,next today',
-                    center: 'title',
-                    right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
-                  }
-            }
+            initialView={initialFcViewName}
+            {...(presentationMode === 'agenda' && periodPreset === 'custom' && customApplied
+              ? { initialDate: customApplied.startYmd }
+              : {})}
+            headerToolbar={{
+              left: isMobileCalendar ? 'prev,next' : 'prev,next today',
+              center: 'title',
+              right: headerToolbarRight,
+            }}
             events={events}
             dateClick={handleDateClick}
             eventClick={handleEventClick}
             viewDidMount={handleViewChange}
             datesSet={fetchEvents}
             locale={calendarLocale}
+            views={fcViews}
             firstDay={1}
             titleFormat={(arg) => formatCalendarToolbarTitle(arg, localeTag)}
             dayHeaderFormat={(arg) => formatVerboseUiDate(arg as VerboseDateArg, { weekday: 'short' }, localeTag)}
@@ -760,36 +1135,6 @@ const Calendar: React.FC = () => {
               hour: '2-digit',
               minute: '2-digit',
               hour12: false,
-            }}
-            views={{
-              listWeek: {
-                listDayFormat: (arg) => formatVerboseUiDate(arg as VerboseDateArg, { weekday: 'long' }, localeTag),
-                listDaySideFormat: (arg) =>
-                  formatVerboseUiDate(arg as VerboseDateArg, {
-                    month: 'long',
-                    day: 'numeric',
-                    year: 'numeric',
-                  }, localeTag),
-              },
-              listMonth: {
-                listDayFormat: (arg) => formatVerboseUiDate(arg as VerboseDateArg, { weekday: 'long' }, localeTag),
-                listDaySideFormat: (arg) =>
-                  formatVerboseUiDate(arg as VerboseDateArg, {
-                    month: 'long',
-                    day: 'numeric',
-                    year: 'numeric',
-                  }, localeTag),
-              },
-              listDay: {
-                listDayFormat: (arg) =>
-                  formatVerboseUiDate(arg as VerboseDateArg, {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  }, localeTag),
-                listDaySideFormat: false,
-              },
             }}
             height="auto"
             eventDisplay="block"

@@ -25,6 +25,12 @@
     "de": "Deutsch"
   },
   "localeHint": "Todos los textos de la aplicación siguen esta preferencia; las fechas y formatos numéricos se adaptan al idioma seleccionado.",
+  "calendarCardPaymentLabel": "Calendario: monto de «Pago de tarjeta»",
+  "calendarCardPaymentHint": "Por defecto se usa el pago mínimo de cada tarjeta. Los montos de eventos ya generados se refrescan al volver al calendario o al pulsar actualizar allí.",
+  "calendarCardPayment": {
+    "minimum_payment": "Pago mínimo",
+    "current_debt": "Deuda actual"
+  },
   "prefsSaving": "Guardando...",
   "prefsSaveIdle": "Guardar preferencias",
   "toastPrefsSaved": "Preferencias guardadas",

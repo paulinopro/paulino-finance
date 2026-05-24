@@ -11,6 +11,8 @@ export interface User {
   secondaryCurrencyPreference?: string;
   /** `es` | `en` | `de` — predeterminado en servidor `es`. */
   localePreference?: string;
+  /** Monto mostrado en eventos «Pago de tarjeta» del calendario financiero. */
+  calendarCardPaymentAmountBasis?: 'minimum_payment' | 'current_debt';
   /** Tasa manual (secundaria por 1 principal); vacío en UI = usar tasa del día. */
   exchangeRateManual?: number | null;
   /** Tasa aplicada (manual o API/cache). Secundaria por 1 unidad de principal. */

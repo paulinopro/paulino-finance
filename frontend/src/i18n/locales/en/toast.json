@@ -33,7 +33,9 @@
     "statusUpdateError": "Could not update status",
     "eventsUpdated": "Events updated",
     "eventsUpdatedWithHidden": "Events updated. {{count}} orphan event(s) are hidden from the calendar (still in History).",
-    "refreshError": "Could not refresh events"
+    "refreshError": "Could not refresh events",
+    "customRangeInvalid": "Enter a valid date range (start ≤ end).",
+    "customRangeTooLong": "Custom range is limited to {{max}} days."
   },
   "adminDashboard": {
     "statsLoadError": "Could not load statistics"

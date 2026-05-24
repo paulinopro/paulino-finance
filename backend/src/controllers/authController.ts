@@ -13,6 +13,7 @@ import {
   resolvedCurrencyPairFromRow,
   userCurrencyPreferencePayload,
 } from '../utils/userCurrencyPair';
+import { coerceCalendarCardPaymentAmountBasis, normalizeCalendarCardPaymentAmountBasis } from '../constants/calendarUserPreferences';
 
 function hashResetToken(token: string): string {
   return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
@@ -80,7 +81,7 @@ export const register = async (req: Request, res: Response) => {
     const result = await query(
       `INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd, exchange_rate_manual)
        VALUES ($1, $2, $3, $4, $5, NULL, NULL)
-       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual, timezone, locale_preference, created_at, is_super_admin`,
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual, timezone, locale_preference, calendar_card_payment_amount_basis, created_at, is_super_admin`,
       [email, passwordHash, firstName || null, lastName || null, isSuper]
     );
 
@@ -124,6 +125,9 @@ export const register = async (req: Request, res: Response) => {
         localePreference: user.locale_preference || 'es',
         ...ratePayload,
         timezone: user.timezone || 'America/Santo_Domingo',
+        calendarCardPaymentAmountBasis: coerceCalendarCardPaymentAmountBasis(
+          user.calendar_card_payment_amount_basis
+        ),
         isSuperAdmin: !!user.is_super_admin,
         hasUserSubscriptionRecord: !!freePlan.rows[0],
         subscriptionPlan: 'free',
@@ -146,7 +150,9 @@ export const login = async (req: Request, res: Response) => {
 
     const result = await query(
       `SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.cedula, u.telegram_chat_id, u.currency_preference,
-              u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference,
+              u.calendar_card_payment_amount_basis,
+              u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.email = $1`,
       [email]
@@ -190,6 +196,9 @@ export const login = async (req: Request, res: Response) => {
         localePreference: user.locale_preference || 'es',
         ...ratePayloadLogin,
         timezone: user.timezone || 'America/Santo_Domingo',
+        calendarCardPaymentAmountBasis: coerceCalendarCardPaymentAmountBasis(
+          user.calendar_card_payment_amount_basis
+        ),
         isSuperAdmin: user.is_super_admin === true,
         hasUserSubscriptionRecord: user.has_user_subscription_row === true,
         subscriptionPlan: user.subscription_plan || 'free',
@@ -208,7 +217,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 
     const result = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.cedula, u.telegram_chat_id,
-              u.currency_preference, u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.created_at,
+              u.currency_preference, u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual,
+              u.timezone, u.locale_preference, u.calendar_card_payment_amount_basis, u.created_at,
               u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1`,
@@ -235,6 +245,9 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         localePreference: user.locale_preference || 'es',
         ...ratePayloadMe,
         timezone: user.timezone || 'America/Santo_Domingo',
+        calendarCardPaymentAmountBasis: coerceCalendarCardPaymentAmountBasis(
+          user.calendar_card_payment_amount_basis
+        ),
         isSuperAdmin: user.is_super_admin === true,
         isActive: user.is_active !== false,
         subscriptionPlan: user.subscription_plan || 'free',
@@ -264,6 +277,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
       currencyPreference,
       secondaryCurrencyPreference,
       localePreference,
+      calendarCardPaymentAmountBasis,
     } = req.body;
 
     // Handle null/empty values explicitly
@@ -390,6 +404,16 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
       paramIndex++;
     }
 
+    if (calendarCardPaymentAmountBasis !== undefined) {
+      const b = normalizeCalendarCardPaymentAmountBasis(calendarCardPaymentAmountBasis);
+      if (!b) {
+        return res.status(400).json({ message: 'Preferencia de monto en calendario no válida' });
+      }
+      updates.push(`calendar_card_payment_amount_basis = $${paramIndex}`);
+      values.push(b);
+      paramIndex++;
+    }
+
     if (email !== undefined) {
       const emailNorm = String(email).trim().toLowerCase();
       if (!emailNorm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
@@ -419,7 +443,8 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex}
        RETURNING id, email, first_name, last_name, cedula, telegram_chat_id,
-                 currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual, timezone, locale_preference, created_at, is_super_admin`,
+                 currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual,
+                 timezone, locale_preference, calendar_card_payment_amount_basis, created_at, is_super_admin`,
       values
     );
 
@@ -444,6 +469,9 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
         localePreference: user.locale_preference || 'es',
         ...ratePayloadUp,
         timezone: user.timezone || 'America/Santo_Domingo',
+        calendarCardPaymentAmountBasis: coerceCalendarCardPaymentAmountBasis(
+          user.calendar_card_payment_amount_basis
+        ),
         isSuperAdmin: user.is_super_admin === true,
       },
     });

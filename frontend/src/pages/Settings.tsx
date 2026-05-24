@@ -7,6 +7,11 @@ import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { User, Bell, DollarSign, Send, Globe, Smartphone } from 'lucide-react';
+import {
+  CALENDAR_CARD_PAYMENT_AMOUNT_BASIS_OPTIONS,
+  DEFAULT_CALENDAR_CARD_PAYMENT_AMOUNT_BASIS,
+  type CalendarCardPaymentAmountBasis,
+} from '../constants/calendarUserPreferences';
 import { SETTINGS_CURRENCY_OPTIONS, SETTINGS_LOCALE_OPTIONS } from '../constants/userPreferences';
 import { defaultSecondaryForPrimary, useIntlFormatting } from '../context/IntlFormattingContext';
 import { tzI18nKey, pushFailureI18nKey } from '../i18n/config';
@@ -42,6 +47,8 @@ const Settings: React.FC = () => {
   const [currencyPreference, setCurrencyPreference] = useState('DOP');
   const [secondaryCurrencyPreference, setSecondaryCurrencyPreference] = useState('USD');
   const [localePreference, setLocalePreference] = useState('es');
+  const [calendarCardPaymentAmountBasis, setCalendarCardPaymentAmountBasis] =
+    useState(DEFAULT_CALENDAR_CARD_PAYMENT_AMOUNT_BASIS);
   const [exchangeRateManualInput, setExchangeRateManualInput] = useState('');
   const [notificationSettings, setNotificationSettings] = useState<any>({});
   const [telegramSaving, setTelegramSaving] = useState(false);
@@ -69,6 +76,9 @@ const Settings: React.FC = () => {
         user.secondaryCurrencyPreference || defaultSecondaryForPrimary(user.currencyPreference || 'DOP')
       );
       setLocalePreference(user.localePreference || 'es');
+      setCalendarCardPaymentAmountBasis(
+        user.calendarCardPaymentAmountBasis ?? DEFAULT_CALENDAR_CARD_PAYMENT_AMOUNT_BASIS
+      );
       const manual = user.exchangeRateManual;
       setExchangeRateManualInput(
         manual !== undefined && manual !== null && Number.isFinite(manual) ? String(manual) : ''
@@ -111,6 +121,7 @@ const Settings: React.FC = () => {
         currencyPreference,
         secondaryCurrencyPreference,
         localePreference,
+        calendarCardPaymentAmountBasis,
       });
       updateUser(response.data.user);
       toast.success(t('settings.toastPrefsSaved'));
@@ -319,6 +330,23 @@ const Settings: React.FC = () => {
                 ))}
               </select>
               <p className="text-xs text-dark-400 mt-1">{t('settings.localeHint')}</p>
+            </div>
+            <div>
+              <label className="label">{t('settings.calendarCardPaymentLabel')}</label>
+              <select
+                value={calendarCardPaymentAmountBasis}
+                onChange={(e) =>
+                  setCalendarCardPaymentAmountBasis(e.target.value as CalendarCardPaymentAmountBasis)
+                }
+                className="input w-full"
+              >
+                {CALENDAR_CARD_PAYMENT_AMOUNT_BASIS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {t(`settings.calendarCardPayment.${opt.value}` as const)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-dark-400 mt-1">{t('settings.calendarCardPaymentHint')}</p>
             </div>
             <button type="submit" disabled={prefsSaving} className="btn-primary w-full">
               {prefsSaving ? t('settings.prefsSaving') : t('settings.prefsSaveIdle')}

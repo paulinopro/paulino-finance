@@ -22,6 +22,10 @@ import {
   bankBalancesToPrimary,
   getConversionContextForUser,
 } from './userCurrencyConversion';
+import {
+  coerceCalendarCardPaymentAmountBasis,
+  type CalendarCardPaymentAmountBasis,
+} from '../constants/calendarUserPreferences';
 
 export interface CalendarEvent {
   id: number;
@@ -67,6 +71,15 @@ async function replaceCalendarEventFromSource(
      WHERE id = $6 AND user_id = $7`,
     [b.title, b.amount, b.currency, b.color, b.status, eventId, userId]
   );
+}
+
+async function fetchUserCalendarCardPaymentBasis(
+  userId: number
+): Promise<CalendarCardPaymentAmountBasis> {
+  const r = await query(`SELECT calendar_card_payment_amount_basis FROM users WHERE id = $1`, [
+    userId,
+  ]);
+  return coerceCalendarCardPaymentAmountBasis(r.rows[0]?.calendar_card_payment_amount_basis);
 }
 
 function recurringExpenseSlotStatus(
@@ -666,9 +679,14 @@ export const generateCalendarEvents = async (
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const calendarCardBasis = await fetchUserCalendarCardPaymentBasis(userId);
+
     // Get credit cards with payment due dates
     const cardsResult = await query(
-      `SELECT id, bank_name, card_name, payment_due_day, current_debt_dop, current_debt_usd, currency_type
+      `SELECT id, bank_name, card_name, payment_due_day,
+              current_debt_dop, current_debt_usd, currency_type,
+              COALESCE(minimum_payment_dop, 0)::numeric AS minimum_payment_dop,
+              COALESCE(minimum_payment_usd, 0)::numeric AS minimum_payment_usd
        FROM credit_cards
        WHERE user_id = $1`,
       [userId]
@@ -678,29 +696,50 @@ export const generateCalendarEvents = async (
       const dueDay = card.payment_due_day;
       const currentMonth = start.getMonth();
       const currentYear = start.getFullYear();
-      
+
+      const minDop = parseFloat(String(card.minimum_payment_dop ?? 0));
+      const minUsd = parseFloat(String(card.minimum_payment_usd ?? 0));
+
       // Generate events for each month in range
       let checkDate = new Date(currentYear, currentMonth, dueDay);
       while (checkDate <= end) {
         const eventDate = dateToYmdLocal(checkDate);
         const isOverdue = checkDate < today;
-        
+
         const ct = String(card.currency_type ?? 'DOP');
         let debtAmount: number;
         let currency: string;
         if (ct === 'USD') {
-          debtAmount = parseFloat(card.current_debt_usd || 0);
+          debtAmount = parseFloat(String(card.current_debt_usd || 0));
           currency = sec;
         } else if (ct === 'DOP') {
-          debtAmount = parseFloat(card.current_debt_dop || 0);
+          debtAmount = parseFloat(String(card.current_debt_dop || 0));
           currency = pri;
         } else {
           debtAmount = bankBalancesToPrimary(
-            parseFloat(card.current_debt_dop || 0),
-            parseFloat(card.current_debt_usd || 0),
+            parseFloat(String(card.current_debt_dop || 0)),
+            parseFloat(String(card.current_debt_usd || 0)),
             ctxCal
           );
           currency = pri;
+        }
+
+        let displayAmount = debtAmount;
+        let displayCurrency = currency;
+        if (calendarCardBasis === 'minimum_payment' && debtAmount > 0) {
+          if (ct === 'USD') {
+            const cand = minUsd > 0 ? minUsd : debtAmount;
+            displayAmount = cand;
+            displayCurrency = sec;
+          } else if (ct === 'DOP') {
+            const cand = minDop > 0 ? minDop : debtAmount;
+            displayAmount = cand;
+            displayCurrency = pri;
+          } else {
+            const minPrim = bankBalancesToPrimary(minDop, minUsd, ctxCal);
+            displayAmount = minPrim > 0 ? minPrim : debtAmount;
+            displayCurrency = pri;
+          }
         }
 
         // Check if event already exists
@@ -727,8 +766,8 @@ export const generateCalendarEvents = async (
                 card.id,
                 eventDate,
                 cardTitle,
-                debtAmount,
-                currency,
+                displayAmount,
+                displayCurrency,
                 cardStatus,
                 cardColor,
               ]
@@ -736,8 +775,8 @@ export const generateCalendarEvents = async (
           } else {
             await replaceCalendarEventFromSource(userId, existingEvent.rows[0].id, {
               title: cardTitle,
-              amount: debtAmount,
-              currency,
+              amount: displayAmount,
+              currency: displayCurrency,
               status: cardStatus,
               color: cardColor,
             });

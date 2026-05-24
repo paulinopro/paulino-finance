@@ -205,6 +205,20 @@ const createTables = async () => {
     END $$;
   `);
 
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users'
+          AND column_name = 'calendar_card_payment_amount_basis'
+      ) THEN
+        ALTER TABLE users ADD COLUMN calendar_card_payment_amount_basis VARCHAR(32)
+          NOT NULL DEFAULT 'minimum_payment';
+      END IF;
+    END $$;
+  `);
+
   /* Tasa manual en formato secundaria por 1 principal; migra legado DOP/USD con exchange_rate_dop_usd = DOP por 1 USD */
   await query(`
     UPDATE users SET exchange_rate_manual = exchange_rate_dop_usd

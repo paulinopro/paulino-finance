@@ -33,7 +33,9 @@
     "statusUpdateError": "Error al actualizar estado",
     "eventsUpdated": "Eventos actualizados",
     "eventsUpdatedWithHidden": "Eventos actualizados. {{count}} evento(s) sin origen activo ya no se muestran en el calendario (siguen en Historial).",
-    "refreshError": "Error al actualizar eventos"
+    "refreshError": "Error al actualizar eventos",
+    "customRangeInvalid": "Indica un rango de fechas válido (desde ≤ hasta).",
+    "customRangeTooLong": "El período personalizado admite máximo {{max}} días."
   },
   "adminDashboard": {
     "statsLoadError": "No se pudieron cargar las estadísticas"

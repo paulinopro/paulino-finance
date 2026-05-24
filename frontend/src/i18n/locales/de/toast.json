@@ -33,7 +33,9 @@
     "statusUpdateError": "Status konnte nicht aktualisiert werden",
     "eventsUpdated": "Ereignisse aktualisiert",
     "eventsUpdatedWithHidden": "Ereignisse aktualisiert. {{count}} verwaiste Ereignis(se) werden im Kalender ausgeblendet (weiterhin unter Verlauf).",
-    "refreshError": "Ereignisse konnten nicht aktualisiert werden"
+    "refreshError": "Ereignisse konnten nicht aktualisiert werden",
+    "customRangeInvalid": "Bitte gültiges Datumsinterval eingeben (von ≤ bis).",
+    "customRangeTooLong": "Benutzerdefinierter Zeitraum: höchstens {{max}} Tage."
   },
   "adminDashboard": {
     "statsLoadError": "Statistiken konnten nicht geladen werden"

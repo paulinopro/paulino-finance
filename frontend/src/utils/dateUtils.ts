@@ -139,6 +139,36 @@ export function calendarDateToSortableMs(value: string | null | undefined): numb
   return new Date(y, m - 1, d).getTime();
 }
 
+/**
+ * Cantidad de días calendario inclusivos desde `startYmd` hasta `endYmd`.
+ * Espera `YYYY-MM-DD` (se normalizan con `formatDateForInput`).
+ */
+export function inclusiveCalendarDaysBetween(startYmd: string, endYmd: string): number {
+  const start = formatDateForInput(startYmd);
+  const end = formatDateForInput(endYmd);
+  if (!start || !end) return 0;
+  const a = calendarDateToSortableMs(start);
+  const b = calendarDateToSortableMs(end);
+  if (!a || !b || b < a) return 0;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+
+/** Primer y último día (inclusive) del mes calendario que contiene la fecha (`YYYY-MM-DD`). */
+export function getCalendarMonthBoundsYmd(anyDayWithinMonth: string): { startYmd: string; endYmd: string } {
+  const ymd = formatDateForInput(anyDayWithinMonth) || todayYmdLocal();
+  const parts = ymd.split('-').map((x) => parseInt(x, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    return getCalendarMonthBoundsYmd(todayYmdLocal());
+  }
+  const [yRaw, moRaw] = parts;
+  const mo = Math.max(1, Math.min(12, moRaw));
+  const ym = `${yRaw}-${String(mo).padStart(2, '0')}`;
+  const startYmd = `${ym}-01`;
+  const lastDayNum = new Date(yRaw, mo, 0).getDate();
+  const endYmd = `${ym}-${String(lastDayNum).padStart(2, '0')}`;
+  return { startYmd, endYmd };
+}
+
 /** Ejes de gráficos: fecha API `YYYY-MM-DD` → etiqueta local sin desfase UTC. */
 export function formatChartAxisEsShort(value: string | null | undefined, localeTag: string = 'es-DO'): string {
   const ymd = formatDateForInput(value);

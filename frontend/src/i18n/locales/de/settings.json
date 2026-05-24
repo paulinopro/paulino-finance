@@ -25,6 +25,12 @@
     "de": "Deutsch"
   },
   "localeHint": "Die Oberfläche folgt dieser Sprache; Datums- und Zahlenformat passen sich an.",
+  "calendarCardPaymentLabel": "Finanzkalender: Betrag bei «Kartenzahlung»",
+  "calendarCardPaymentHint": "Standardmäßig wird der Mindestbetrag je Karte angezeigt. Bereits erzeugte Termine aktualisieren sich, wenn Sie den Kalender neu öffnen oder dort aktualisieren.",
+  "calendarCardPayment": {
+    "minimum_payment": "Mindestzahlung",
+    "current_debt": "Aktueller Kontostand"
+  },
   "prefsSaving": "Speichern …",
   "prefsSaveIdle": "Einstellungen speichern",
   "toastPrefsSaved": "Einstellungen gespeichert",

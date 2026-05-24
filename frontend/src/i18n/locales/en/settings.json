@@ -25,6 +25,12 @@
     "de": "German"
   },
   "localeHint": "All UI text follows this preference; dates and number formats adapt to it.",
+  "calendarCardPaymentLabel": "Financial calendar: card payment amount",
+  "calendarCardPaymentHint": "By default each card's minimum payment is shown. Existing events refresh when you reopen the calendar or tap refresh there.",
+  "calendarCardPayment": {
+    "minimum_payment": "Minimum payment",
+    "current_debt": "Current balance"
+  },
   "prefsSaving": "Saving…",
   "prefsSaveIdle": "Save preferences",
   "toastPrefsSaved": "Preferences saved",
