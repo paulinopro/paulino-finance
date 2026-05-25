@@ -11,6 +11,7 @@ export const SUBSCRIPTION_MODULE_KEYS = [
   'accounts',
   'reports',
   'calendar',
+  'agenda',
   'accounts_payable',
   'accounts_receivable',
   'budgets',

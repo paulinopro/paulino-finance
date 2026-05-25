@@ -10,8 +10,10 @@ const database_1 = require("../config/database");
 const jwt_1 = require("../utils/jwt");
 const emailService_1 = require("../services/emailService");
 const notificationTemplateSeed_1 = require("../services/notificationTemplateSeed");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const exchangeRatePayload_1 = require("../services/exchangeRatePayload");
 const userPreferences_1 = require("../constants/userPreferences");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
+const calendarUserPreferences_1 = require("../constants/calendarUserPreferences");
 function hashResetToken(token) {
     return crypto_1.default.createHash('sha256').update(token, 'utf8').digest('hex');
 }
@@ -67,11 +69,9 @@ const register = async (req, res) => {
         const isSuper = superEmails.includes(String(email).trim().toLowerCase());
         // Hash password
         const passwordHash = await bcryptjs_1.default.hash(password, 10);
-        // Create user
-        const defaultRate = (0, exchangeRate_1.getDefaultExchangeRateDopUsd)();
-        const result = await (0, database_1.query)(`INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, exchange_rate_dop_usd, timezone, locale_preference, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper, defaultRate]);
+        const result = await (0, database_1.query)(`INSERT INTO users (email, password_hash, first_name, last_name, is_super_admin, exchange_rate_dop_usd, exchange_rate_manual)
+       VALUES ($1, $2, $3, $4, $5, NULL, NULL)
+       RETURNING id, email, first_name, last_name, cedula, telegram_chat_id, currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual, timezone, locale_preference, calendar_card_payment_amount_basis, created_at, is_super_admin`, [email, passwordHash, firstName || null, lastName || null, isSuper]);
         const user = result.rows[0];
         const freePlan = await (0, database_1.query)(`SELECT id FROM subscription_plans WHERE slug = 'free' LIMIT 1`);
         if (freePlan.rows[0]) {
@@ -89,6 +89,7 @@ const register = async (req, res) => {
             userId: user.id,
             isSuperAdmin: !!user.is_super_admin,
         });
+        const ratePayload = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(user.id, user);
         res.status(201).json({
             success: true,
             message: 'User registered successfully',
@@ -100,10 +101,11 @@ const register = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(user),
                 localePreference: user.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
+                ...ratePayload,
                 timezone: user.timezone || 'America/Santo_Domingo',
+                calendarCardPaymentAmountBasis: (0, calendarUserPreferences_1.coerceCalendarCardPaymentAmountBasis)(user.calendar_card_payment_amount_basis),
                 isSuperAdmin: !!user.is_super_admin,
                 hasUserSubscriptionRecord: !!freePlan.rows[0],
                 subscriptionPlan: 'free',
@@ -124,7 +126,9 @@ const login = async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.password_hash, u.first_name, u.last_name, u.cedula, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+              u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference,
+              u.calendar_card_payment_amount_basis,
+              u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.email = $1`, [email]);
         if (result.rows.length === 0) {
@@ -143,6 +147,7 @@ const login = async (req, res) => {
             userId: user.id,
             isSuperAdmin: user.is_super_admin === true,
         });
+        const ratePayloadLogin = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(user.id, user);
         res.json({
             success: true,
             message: 'Login successful',
@@ -154,10 +159,11 @@ const login = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(user),
                 localePreference: user.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
+                ...ratePayloadLogin,
                 timezone: user.timezone || 'America/Santo_Domingo',
+                calendarCardPaymentAmountBasis: (0, calendarUserPreferences_1.coerceCalendarCardPaymentAmountBasis)(user.calendar_card_payment_amount_basis),
                 isSuperAdmin: user.is_super_admin === true,
                 hasUserSubscriptionRecord: user.has_user_subscription_row === true,
                 subscriptionPlan: user.subscription_plan || 'free',
@@ -175,7 +181,8 @@ const getMe = async (req, res) => {
     try {
         const userId = req.userId;
         const result = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.cedula, u.telegram_chat_id,
-              u.currency_preference, u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.created_at,
+              u.currency_preference, u.secondary_currency_preference, u.exchange_rate_dop_usd, u.exchange_rate_manual,
+              u.timezone, u.locale_preference, u.calendar_card_payment_amount_basis, u.created_at,
               u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1`, [userId]);
@@ -183,6 +190,7 @@ const getMe = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
         const user = result.rows[0];
+        const ratePayloadMe = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(userId, user);
         res.json({
             success: true,
             user: {
@@ -192,10 +200,11 @@ const getMe = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(user),
                 localePreference: user.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
+                ...ratePayloadMe,
                 timezone: user.timezone || 'America/Santo_Domingo',
+                calendarCardPaymentAmountBasis: (0, calendarUserPreferences_1.coerceCalendarCardPaymentAmountBasis)(user.calendar_card_payment_amount_basis),
                 isSuperAdmin: user.is_super_admin === true,
                 isActive: user.is_active !== false,
                 subscriptionPlan: user.subscription_plan || 'free',
@@ -214,27 +223,25 @@ exports.getMe = getMe;
 const updateMe = async (req, res) => {
     try {
         const userId = req.userId;
-        const { firstName, lastName, cedula, telegramChatId, exchangeRateDopUsd, timezone, email, currencyPreference, localePreference } = req.body;
+        const { firstName, lastName, cedula, telegramChatId, exchangeRateManual, exchangeRateDopUsd, timezone, email, currencyPreference, secondaryCurrencyPreference, localePreference, calendarCardPaymentAmountBasis, } = req.body;
         // Handle null/empty values explicitly
         // For telegramChatId: if provided (even if empty string), update it; if undefined, keep current value
         let telegramValue = null;
         if (telegramChatId !== undefined) {
             telegramValue = telegramChatId === '' || telegramChatId === null ? null : telegramChatId;
         }
-        // For exchangeRateDopUsd: if provided, parse it; if undefined, keep current value
-        // If empty string or null, set to null; if undefined, don't update
-        let exchangeRateValue = null;
-        let shouldUpdateExchangeRate = false;
-        if (exchangeRateDopUsd !== undefined) {
-            shouldUpdateExchangeRate = true;
-            if (exchangeRateDopUsd === '' || exchangeRateDopUsd === null) {
-                exchangeRateValue = null;
+        /** Tasa manual secundaria por 1 principal; vacío/null → solo API/cache */
+        let manualRateValue = null;
+        let shouldUpdateManualRate = false;
+        const rawManual = exchangeRateManual !== undefined ? exchangeRateManual : exchangeRateDopUsd;
+        if (rawManual !== undefined) {
+            shouldUpdateManualRate = true;
+            if (rawManual === '' || rawManual === null) {
+                manualRateValue = null;
             }
             else {
-                exchangeRateValue = parseFloat(exchangeRateDopUsd);
-                if (isNaN(exchangeRateValue)) {
-                    exchangeRateValue = null;
-                }
+                const n = parseFloat(rawManual);
+                manualRateValue = Number.isFinite(n) && n > 0 ? n : null;
             }
         }
         // Build dynamic UPDATE query based on what's provided
@@ -264,9 +271,9 @@ const updateMe = async (req, res) => {
             values.push(telegramValue);
             paramIndex++;
         }
-        if (shouldUpdateExchangeRate) {
-            updates.push(`exchange_rate_dop_usd = $${paramIndex}`);
-            values.push(exchangeRateValue);
+        if (shouldUpdateManualRate) {
+            updates.push(`exchange_rate_manual = $${paramIndex}`);
+            values.push(manualRateValue);
             paramIndex++;
         }
         if (timezone !== undefined) {
@@ -274,13 +281,42 @@ const updateMe = async (req, res) => {
             values.push(timezone || 'America/Santo_Domingo');
             paramIndex++;
         }
-        if (currencyPreference !== undefined) {
-            const cur = (0, userPreferences_1.normalizeCurrencyPreference)(currencyPreference);
-            if (!cur) {
-                return res.status(400).json({ message: 'Moneda no válida' });
+        if (currencyPreference !== undefined || secondaryCurrencyPreference !== undefined) {
+            const row = await (0, database_1.query)(`SELECT currency_preference, secondary_currency_preference FROM users WHERE id = $1`, [userId]);
+            const curPair = (0, userCurrencyPair_1.resolvedCurrencyPairFromRow)(row.rows[0] || {});
+            let nextPrimary = curPair.primary;
+            let nextSecondary = curPair.secondary;
+            if (currencyPreference !== undefined) {
+                const p = (0, userPreferences_1.normalizeCurrencyPreference)(currencyPreference);
+                if (!p) {
+                    return res.status(400).json({ message: 'Moneda principal no válida' });
+                }
+                nextPrimary = p;
+            }
+            if (secondaryCurrencyPreference !== undefined) {
+                const s = (0, userPreferences_1.normalizeCurrencyPreference)(secondaryCurrencyPreference);
+                if (!s) {
+                    return res.status(400).json({ message: 'Moneda secundaria no válida' });
+                }
+                nextSecondary = s;
+            }
+            if (currencyPreference !== undefined && secondaryCurrencyPreference === undefined) {
+                nextSecondary = curPair.secondary;
+                if (nextSecondary === nextPrimary) {
+                    nextSecondary = (0, userCurrencyPair_1.defaultSecondaryForPrimary)(nextPrimary);
+                }
+            }
+            if (secondaryCurrencyPreference !== undefined && currencyPreference === undefined) {
+                nextPrimary = curPair.primary;
+            }
+            if (nextPrimary === nextSecondary) {
+                return res.status(400).json({ message: 'La moneda principal y la secundaria deben ser distintas' });
             }
             updates.push(`currency_preference = $${paramIndex}`);
-            values.push(cur);
+            values.push(nextPrimary);
+            paramIndex++;
+            updates.push(`secondary_currency_preference = $${paramIndex}`);
+            values.push(nextSecondary);
             paramIndex++;
         }
         if (localePreference !== undefined) {
@@ -290,6 +326,15 @@ const updateMe = async (req, res) => {
             }
             updates.push(`locale_preference = $${paramIndex}`);
             values.push(loc);
+            paramIndex++;
+        }
+        if (calendarCardPaymentAmountBasis !== undefined) {
+            const b = (0, calendarUserPreferences_1.normalizeCalendarCardPaymentAmountBasis)(calendarCardPaymentAmountBasis);
+            if (!b) {
+                return res.status(400).json({ message: 'Preferencia de monto en calendario no válida' });
+            }
+            updates.push(`calendar_card_payment_amount_basis = $${paramIndex}`);
+            values.push(b);
             paramIndex++;
         }
         if (email !== undefined) {
@@ -314,11 +359,13 @@ const updateMe = async (req, res) => {
        SET ${updates.join(', ')}
        WHERE id = $${paramIndex}
        RETURNING id, email, first_name, last_name, cedula, telegram_chat_id,
-                 currency_preference, exchange_rate_dop_usd, timezone, locale_preference, created_at, is_super_admin`, values);
+                 currency_preference, secondary_currency_preference, exchange_rate_dop_usd, exchange_rate_manual,
+                 timezone, locale_preference, calendar_card_payment_amount_basis, created_at, is_super_admin`, values);
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'User not found' });
         }
         const user = result.rows[0];
+        const ratePayloadUp = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(user.id, user);
         res.json({
             success: true,
             message: 'Profile updated successfully',
@@ -329,10 +376,11 @@ const updateMe = async (req, res) => {
                 lastName: user.last_name,
                 cedula: user.cedula != null ? String(user.cedula) : null,
                 telegramChatId: user.telegram_chat_id,
-                currencyPreference: user.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(user),
                 localePreference: user.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(user.exchange_rate_dop_usd),
+                ...ratePayloadUp,
                 timezone: user.timezone || 'America/Santo_Domingo',
+                calendarCardPaymentAmountBasis: (0, calendarUserPreferences_1.coerceCalendarCardPaymentAmountBasis)(user.calendar_card_payment_amount_basis),
                 isSuperAdmin: user.is_super_admin === true,
             },
         });

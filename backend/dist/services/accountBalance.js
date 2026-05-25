@@ -6,13 +6,21 @@ exports.parseBalanceForCurrency = parseBalanceForCurrency;
 exports.applyBalanceDelta = applyBalanceDelta;
 exports.recordBankAccountMovement = recordBankAccountMovement;
 const database_1 = require("../config/database");
-function isCurrencyAllowedForAccount(currencyType, currency) {
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
+/**
+ * `currency_type` en BD: DOP = solo primer riel (moneda principal del usuario), USD = solo segundo riel
+ * (secundaria), DUAL = ambos. Los nombres del enum son legado; el riel 1 va en `balance_dop`, el 2 en `balance_usd`.
+ */
+function isCurrencyAllowedForAccount(currencyType, currency, pair) {
+    const c = currency.trim().toUpperCase();
+    const p = pair.primary;
+    const s = pair.secondary;
     if (currencyType === 'DUAL')
-        return currency === 'DOP' || currency === 'USD';
+        return c === p || c === s;
     if (currencyType === 'DOP')
-        return currency === 'DOP';
+        return c === p;
     if (currencyType === 'USD')
-        return currency === 'USD';
+        return c === s;
     return false;
 }
 async function runQuery(text, params, client) {
@@ -37,9 +45,13 @@ async function insertBankAccountMovementLedger(userId, accountId, currency, dire
      (user_id, bank_account_id, amount, currency, direction, description, status, occurred_at)
      VALUES ($1, $2, $3::numeric, $4, $5, $6, $7, CURRENT_TIMESTAMP)`, [userId, accountId, mag, currency.toUpperCase(), direction, description, status]);
 }
-function parseBalanceForCurrency(row, currency) {
-    const v = currency === 'DOP' ? row.balance_dop : row.balance_usd;
-    return parseFloat(v || '0');
+function parseBalanceForCurrency(row, currency, pair) {
+    const c = currency.trim().toUpperCase();
+    if (c === pair.primary)
+        return parseFloat(row.balance_dop || '0');
+    if (c === pair.secondary)
+        return parseFloat(row.balance_usd || '0');
+    return 0;
 }
 /**
  * Adds delta to the balance in the given currency leg (DOP or USD).
@@ -49,14 +61,16 @@ async function applyBalanceDelta(userId, accountId, currency, delta, client, mov
     if (!acc) {
         throw new Error('ACCOUNT_NOT_FOUND');
     }
-    if (!isCurrencyAllowedForAccount(acc.currency_type, currency)) {
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    if (!isCurrencyAllowedForAccount(acc.currency_type, currency, pair)) {
         throw new Error('CURRENCY_MISMATCH');
     }
-    if (currency === 'DOP') {
+    const c = currency.trim().toUpperCase();
+    if (c === pair.primary) {
         await runQuery(`UPDATE bank_accounts SET balance_dop = balance_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND user_id = $3`, [delta, accountId, userId], client);
     }
-    else if (currency === 'USD') {
+    else if (c === pair.secondary) {
         await runQuery(`UPDATE bank_accounts SET balance_usd = balance_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND user_id = $3`, [delta, accountId, userId], client);
     }

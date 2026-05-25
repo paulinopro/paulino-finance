@@ -25,6 +25,7 @@ const categories_1 = __importDefault(require("./routes/categories"));
 const reports_1 = __importDefault(require("./routes/reports"));
 const templates_1 = __importDefault(require("./routes/templates"));
 const calendar_1 = __importDefault(require("./routes/calendar"));
+const agenda_1 = __importDefault(require("./routes/agenda"));
 const accountsPayable_1 = __importDefault(require("./routes/accountsPayable"));
 const accountsReceivable_1 = __importDefault(require("./routes/accountsReceivable"));
 const budgets_1 = __importDefault(require("./routes/budgets"));
@@ -36,6 +37,7 @@ const admin_1 = __importDefault(require("./routes/admin"));
 const subscription_1 = __importDefault(require("./routes/subscription"));
 const notificationService_1 = require("./services/notificationService");
 const webPushService_1 = require("./services/webPushService");
+const openErRatesService_1 = require("./services/openErRatesService");
 // Carga .env: raíz del repo (monorepo) y luego backend/.env (sobrescribe)
 const rootEnv = path_1.default.resolve(__dirname, '../../.env');
 const backendEnv = path_1.default.resolve(__dirname, '../.env');
@@ -87,6 +89,7 @@ app.use('/api/categories', categories_1.default);
 app.use('/api/reports', reports_1.default);
 app.use('/api/templates', templates_1.default);
 app.use('/api/calendar', calendar_1.default);
+app.use('/api/agenda', agenda_1.default);
 app.use('/api/accounts-payable', accountsPayable_1.default);
 app.use('/api/accounts-receivable', accountsReceivable_1.default);
 app.use('/api/budgets', budgets_1.default);
@@ -104,6 +107,13 @@ app.use(errorHandler_1.errorHandler);
     // Start notification scheduler
     (0, notificationService_1.startNotificationScheduler)();
     console.log('Notification scheduler started');
+    const dailyMs = 24 * 60 * 60 * 1000;
+    setTimeout(() => {
+        void (0, openErRatesService_1.refreshAllAllowedCurrencySnapshots)();
+    }, 15000);
+    setInterval(() => {
+        void (0, openErRatesService_1.refreshAllAllowedCurrencySnapshots)();
+    }, dailyMs);
     app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
     });

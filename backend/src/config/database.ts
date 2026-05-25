@@ -970,6 +970,68 @@ const createTables = async () => {
     `CREATE INDEX IF NOT EXISTS idx_calendar_events_show_on_calendar ON calendar_events(user_id, show_on_calendar)`
   );
 
+  // Agenda hub: ítems canónicos (local-first) y estado de sincronización con proveedores externos (fases siguientes).
+  await query(`
+    CREATE TABLE IF NOT EXISTS agenda_items (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind VARCHAR(32) NOT NULL CHECK (kind IN ('EVENT','TASK','REMINDER','APPOINTMENT','NOTE')),
+      title VARCHAR(512) NOT NULL,
+      description TEXT,
+      starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      ends_at TIMESTAMP WITH TIME ZONE,
+      all_day BOOLEAN NOT NULL DEFAULT false,
+      status VARCHAR(32) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','DONE','TENTATIVE','CANCELLED')),
+      recurrence_rule TEXT,
+      finance_link_type VARCHAR(64),
+      finance_link_id INTEGER,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      sync_to_external BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_agenda_items_user_id ON agenda_items(user_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_agenda_items_starts ON agenda_items(user_id, starts_at)`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS agenda_provider_connections (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider VARCHAR(32) NOT NULL CHECK (provider IN ('GOOGLE_CALENDAR','ICLOUD_CALDAV')),
+      account_label VARCHAR(255),
+      credentials_encrypted TEXT,
+      oauth_access_token TEXT,
+      oauth_refresh_token TEXT,
+      token_expires_at TIMESTAMP WITH TIME ZONE,
+      external_default_calendar_id VARCHAR(512),
+      sync_direction VARCHAR(24) NOT NULL DEFAULT 'OUTBOUND_ONLY' CHECK (sync_direction IN ('OUTBOUND_ONLY','TWO_WAY_PENDING')),
+      status VARCHAR(24) NOT NULL DEFAULT 'DISCONNECTED' CHECK (status IN ('DISCONNECTED','CONNECTED','ERROR')),
+      last_error TEXT,
+      meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, provider)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_agenda_provider_connections_user ON agenda_provider_connections(user_id)`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS agenda_item_sync_state (
+      id SERIAL PRIMARY KEY,
+      agenda_item_id INTEGER NOT NULL REFERENCES agenda_items(id) ON DELETE CASCADE,
+      connection_id INTEGER NOT NULL REFERENCES agenda_provider_connections(id) ON DELETE CASCADE,
+      external_uid TEXT NOT NULL,
+      etag TEXT,
+      last_pushed_at TIMESTAMP WITH TIME ZONE,
+      last_error TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(agenda_item_id, connection_id)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_agenda_sync_connection ON agenda_item_sync_state(connection_id)`);
+
   // Create indexes for better performance
   await query(`CREATE INDEX IF NOT EXISTS idx_credit_cards_user_id ON credit_cards(user_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)`);
@@ -1408,6 +1470,15 @@ const createTables = async () => {
         EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I', t, t || '_currency_check');
       END LOOP;
     END $$;
+  `);
+
+  /* Plan full: activar módulo agenda en instalaciones que ya tenían JSON antiguo (solo si la clave no existe). */
+  await query(`
+    UPDATE subscription_plans
+    SET enabled_modules = COALESCE(enabled_modules, '{}'::jsonb) || '{"agenda": true}'::jsonb
+    WHERE slug = 'full'
+      AND COALESCE(enabled_modules, '{}'::jsonb) IS NOT NULL
+      AND NOT ((COALESCE(enabled_modules, '{}'::jsonb)) ? 'agenda')
   `);
 };
 

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteBudget = exports.updateBudget = exports.createBudget = exports.getBudgets = void 0;
 const database_1 = require("../config/database");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const getBudgets = async (req, res) => {
     try {
         const userId = req.userId;
@@ -123,6 +124,13 @@ const createBudget = async (req, res) => {
         if (periodType === 'MONTHLY' && !periodMonth) {
             return res.status(400).json({ message: 'Period month is required for monthly budgets' });
         }
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const cur = String(currency).trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const result = await (0, database_1.query)(`INSERT INTO budgets (user_id, name, category, amount, currency, period_type, period_month, period_year)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, name, category, amount, currency, period_type, period_month, period_year, spent, created_at, updated_at`, [userId, name, category || null, amount, currency, periodType, periodMonth || null, periodYear]);
@@ -157,6 +165,19 @@ const updateBudget = async (req, res) => {
         const userId = req.userId;
         const { id } = req.params;
         const { name, category, amount, currency, periodType, periodMonth, periodYear } = req.body;
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const prevRow = await (0, database_1.query)(`SELECT currency FROM budgets WHERE id = $1 AND user_id = $2`, [id, userId]);
+        if (prevRow.rows.length === 0) {
+            return res.status(404).json({ message: 'Budget not found' });
+        }
+        const mergedCur = currency !== undefined && currency !== null && String(currency).trim() !== ''
+            ? String(currency).trim().toUpperCase()
+            : String(prevRow.rows[0].currency || '').trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, mergedCur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const result = await (0, database_1.query)(`UPDATE budgets
        SET name = COALESCE($1, name),
            category = COALESCE($2, category),

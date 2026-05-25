@@ -7,8 +7,9 @@ const subscriptionService_1 = require("../services/subscriptionService");
 const notificationService_1 = require("../services/notificationService");
 const adminAuditService_1 = require("../services/adminAuditService");
 const maintenanceMode_1 = require("../middleware/maintenanceMode");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const exchangeRatePayload_1 = require("../services/exchangeRatePayload");
 const adminStatsCacheStore_1 = require("./adminStatsCacheStore");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'cancelled', 'expired', 'past_due']);
 const USERS_EXPORT_MAX = 10000;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -573,8 +574,8 @@ const impersonateUser = async (req, res) => {
         if (Number.isNaN(targetId)) {
             return res.status(400).json({ message: 'ID inválido' });
         }
-        const target = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
+        const target = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference, u.secondary_currency_preference,
+              u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.is_super_admin, u.is_active, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1`, [targetId]);
         if (target.rows.length === 0) {
@@ -592,6 +593,7 @@ const impersonateUser = async (req, res) => {
             impersonatedBy: adminId,
         });
         void (0, adminAuditService_1.logAdminAction)(adminId, 'user.impersonate', 'user', targetId, { targetEmail: u.email });
+        const rateTarget = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(u.id, u);
         res.json({
             token,
             user: {
@@ -600,9 +602,9 @@ const impersonateUser = async (req, res) => {
                 firstName: u.first_name,
                 lastName: u.last_name,
                 telegramChatId: u.telegram_chat_id,
-                currencyPreference: u.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(u),
                 localePreference: u.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(u.exchange_rate_dop_usd),
+                ...rateTarget,
                 timezone: u.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: false,
                 subscriptionPlan: u.subscription_plan || 'free',
@@ -624,8 +626,8 @@ const stopImpersonation = async (req, res) => {
         if (impersonatedBy == null) {
             return res.status(400).json({ message: 'No estás en modo suplantación' });
         }
-        const admin = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference,
-              u.exchange_rate_dop_usd, u.timezone, u.locale_preference, u.is_super_admin, u.subscription_plan, u.subscription_status,
+        const admin = await (0, database_1.query)(`SELECT u.id, u.email, u.first_name, u.last_name, u.telegram_chat_id, u.currency_preference, u.secondary_currency_preference,
+              u.exchange_rate_dop_usd, u.exchange_rate_manual, u.timezone, u.locale_preference, u.is_super_admin, u.subscription_plan, u.subscription_status,
               (SELECT EXISTS(SELECT 1 FROM user_subscriptions us WHERE us.user_id = u.id)) AS has_user_subscription_row
        FROM users u WHERE u.id = $1 AND u.is_super_admin = true`, [impersonatedBy]);
         if (admin.rows.length === 0) {
@@ -640,6 +642,7 @@ const stopImpersonation = async (req, res) => {
         void (0, adminAuditService_1.logAdminAction)(impersonatedBy, 'user.impersonate_end', 'user', req.userId, {
             viewedEmail: viewed.rows[0]?.email ?? null,
         });
+        const rateAdmin = await (0, exchangeRatePayload_1.exchangeRatePayloadForUser)(u.id, u);
         res.json({
             token,
             user: {
@@ -648,9 +651,9 @@ const stopImpersonation = async (req, res) => {
                 firstName: u.first_name,
                 lastName: u.last_name,
                 telegramChatId: u.telegram_chat_id,
-                currencyPreference: u.currency_preference || 'DOP',
+                ...(0, userCurrencyPair_1.userCurrencyPreferencePayload)(u),
                 localePreference: u.locale_preference || 'es',
-                exchangeRateDopUsd: (0, exchangeRate_1.resolveExchangeRateDopUsd)(u.exchange_rate_dop_usd),
+                ...rateAdmin,
                 timezone: u.timezone || 'America/Santo_Domingo',
                 isSuperAdmin: true,
                 subscriptionPlan: u.subscription_plan || 'free',

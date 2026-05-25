@@ -24,7 +24,7 @@ export declare function getSubscriptionDetailsForUser(userId: number): Promise<{
     isSuperAdmin: boolean;
     status: "active";
     plan: null;
-    modules: ("dashboard" | "cards" | "loans" | "income" | "expenses" | "accounts" | "reports" | "calendar" | "accounts_payable" | "accounts_receivable" | "budgets" | "financial_goals" | "cash_flow" | "projections" | "vehicles" | "notifications" | "categories" | "templates" | "settings" | "profile" | "subscription")[];
+    modules: ("dashboard" | "cards" | "loans" | "income" | "expenses" | "accounts" | "reports" | "calendar" | "agenda" | "accounts_payable" | "accounts_receivable" | "budgets" | "financial_goals" | "cash_flow" | "projections" | "vehicles" | "notifications" | "categories" | "templates" | "settings" | "profile" | "subscription")[];
     currentPeriodStart: null;
     currentPeriodEnd: null;
     billingInterval: null;

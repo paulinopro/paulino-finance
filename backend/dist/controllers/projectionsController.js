@@ -2,11 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProjections = void 0;
 const database_1 = require("../config/database");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const projectionsMonthlyEquivalent_1 = require("../utils/projectionsMonthlyEquivalent");
-function toDop(amount, currency, exchangeRate) {
-    return currency === 'USD' ? amount * exchangeRate : amount;
-}
 const getProjections = async (req, res) => {
     try {
         const userId = req.userId;
@@ -17,8 +14,7 @@ const getProjections = async (req, res) => {
                 message: 'El parámetro months debe ser un entero entre 1 y 600',
             });
         }
-        const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
+        const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         // Promedio mensual de ingresos/gastos únicos (últimos 3 meses), por moneda → luego DOP
         const avgIncomeResult = await (0, database_1.query)(`SELECT AVG(total) as avg_income, currency
        FROM (
@@ -52,26 +48,26 @@ const getProjections = async (req, res) => {
        FROM bank_accounts
        WHERE user_id = $1`, [userId]);
         const accounts = accountsResult.rows[0];
-        const currentBalance = parseFloat(accounts.total_dop || 0) + (parseFloat(accounts.total_usd || 0) * exchangeRate);
+        const currentBalance = (0, userCurrencyConversion_1.bankBalancesToPrimary)(parseFloat(accounts.total_dop || 0), parseFloat(accounts.total_usd || 0), ctx);
         let avgMonthlyIncomeDop = 0;
         avgIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.avg_income || 0);
-            avgMonthlyIncomeDop += toDop(amount, row.currency, exchangeRate);
+            avgMonthlyIncomeDop += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
         });
         recurrentIncomeRows.rows.forEach((row) => {
             const raw = parseFloat(row.amount || 0);
             const monthlySame = (0, projectionsMonthlyEquivalent_1.recurringAmountToMonthlySameCurrency)(raw, row.frequency);
-            avgMonthlyIncomeDop += toDop(monthlySame, row.currency, exchangeRate);
+            avgMonthlyIncomeDop += (0, userCurrencyConversion_1.amountToPrimary)(monthlySame, String(row.currency || 'DOP'), ctx);
         });
         let avgMonthlyExpensesDop = 0;
         avgExpensesResult.rows.forEach((row) => {
             const amount = parseFloat(row.avg_expenses || 0);
-            avgMonthlyExpensesDop += toDop(amount, row.currency, exchangeRate);
+            avgMonthlyExpensesDop += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
         });
         recurrentExpenseRows.rows.forEach((row) => {
             const raw = parseFloat(row.amount || 0);
             const monthlySame = (0, projectionsMonthlyEquivalent_1.recurringAmountToMonthlySameCurrency)(raw, row.frequency);
-            avgMonthlyExpensesDop += toDop(monthlySame, row.currency, exchangeRate);
+            avgMonthlyExpensesDop += (0, userCurrencyConversion_1.amountToPrimary)(monthlySame, String(row.currency || 'DOP'), ctx);
         });
         const projections = [];
         let runningBalance = currentBalance;

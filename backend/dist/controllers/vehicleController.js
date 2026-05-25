@@ -2,11 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteVehicleExpense = exports.updateVehicleExpense = exports.createVehicleExpense = exports.getVehicleExpenses = exports.deleteVehicle = exports.updateVehicle = exports.createVehicle = exports.getVehicles = void 0;
 const database_1 = require("../config/database");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
 const expenseDeletionService_1 = require("../services/expenseDeletionService");
 const vehicleExpenseLinkSync_1 = require("../services/vehicleExpenseLinkSync");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 /** Gasto de vehículo vinculado a `expenses`: puntual (variable, sin frecuencia). */
 const VEHICLE_LINKED_EXPENSE_TAXONOMY = {
     nature: 'variable',
@@ -36,9 +37,7 @@ const getVehicles = async (req, res) => {
        FROM vehicles
        WHERE user_id = $1
        ORDER BY created_at DESC`, [userId]);
-        // Get user's exchange rate once
-        const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
+        const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const vehicles = await Promise.all(result.rows.map(async (vehicle) => {
             // Get total expenses for this vehicle
             const expensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
@@ -48,7 +47,7 @@ const getVehicles = async (req, res) => {
             let totalExpenses = 0;
             expensesResult.rows.forEach((row) => {
                 const amount = parseFloat(row.total || 0);
-                totalExpenses += row.currency === 'USD' ? amount * exchangeRate : amount;
+                totalExpenses += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             });
             return {
                 id: vehicle.id,
@@ -84,6 +83,15 @@ const createVehicle = async (req, res) => {
         const { make, model, year, licensePlate, color, mileage, purchaseDate, purchasePrice, currency, notes } = req.body;
         if (!make || !model) {
             return res.status(400).json({ message: 'Make and model are required' });
+        }
+        if (currency != null && String(currency).trim() !== '') {
+            const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+            const cur = String(currency).trim().toUpperCase();
+            if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+                return res.status(400).json({
+                    message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+                });
+            }
         }
         const result = await (0, database_1.query)(`INSERT INTO vehicles (user_id, make, model, year, license_plate, color, mileage, purchase_date, purchase_price, currency, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -132,6 +140,21 @@ const updateVehicle = async (req, res) => {
         const userId = req.userId;
         const { id } = req.params;
         const { make, model, year, licensePlate, color, mileage, purchaseDate, purchasePrice, currency, notes } = req.body;
+        const prevV = await (0, database_1.query)(`SELECT currency FROM vehicles WHERE id = $1 AND user_id = $2`, [id, userId]);
+        if (prevV.rows.length === 0) {
+            return res.status(404).json({ message: 'Vehicle not found' });
+        }
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const mergedCur = currency !== undefined && currency !== null && String(currency).trim() !== ''
+            ? String(currency).trim().toUpperCase()
+            : prevV.rows[0].currency != null && String(prevV.rows[0].currency).trim() !== ''
+                ? String(prevV.rows[0].currency).trim().toUpperCase()
+                : '';
+        if (mergedCur !== '' && !(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, mergedCur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const result = await (0, database_1.query)(`UPDATE vehicles
        SET make = COALESCE($1, make),
            model = COALESCE($2, model),
@@ -150,9 +173,7 @@ const updateVehicle = async (req, res) => {
             return res.status(404).json({ message: 'Vehicle not found' });
         }
         const vehicle = result.rows[0];
-        // Get user's exchange rate
-        const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
+        const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         // Get total expenses
         const expensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM vehicle_expenses
@@ -161,7 +182,7 @@ const updateVehicle = async (req, res) => {
         let totalExpenses = 0;
         expensesResult.rows.forEach((row) => {
             const amount = parseFloat(row.total || 0);
-            totalExpenses += row.currency === 'USD' ? amount * exchangeRate : amount;
+            totalExpenses += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
         });
         res.json({
             success: true,
@@ -282,8 +303,20 @@ const createVehicleExpense = async (req, res) => {
     const vLblRows = await (0, database_1.query)(`SELECT make, model, license_plate FROM vehicles WHERE id = $1 AND user_id = $2`, [vehicleId, userId]);
     const vehTag = vehicleLedgerTag(vLblRows.rows[0], vehicleId);
     const amt = parseFloat(String(amount));
-    const cur = String(currency);
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    const cur = String(currency).trim().toUpperCase();
+    if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+        return res.status(400).json({
+            message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+        });
+    }
     const bankAccountId = parseBankAccountIdFromBody(body);
+    if (bankAccountId) {
+        const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, cur);
+        if (ledErr) {
+            return res.status(400).json({ message: ledErr });
+        }
+    }
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');

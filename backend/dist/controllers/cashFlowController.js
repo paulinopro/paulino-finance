@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCashFlow = void 0;
 const database_1 = require("../config/database");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
 const dateUtils_1 = require("../utils/dateUtils");
 const recurrenceSql_1 = require("../constants/recurrenceSql");
@@ -15,9 +15,6 @@ function parseLocalDateFromYmd(s) {
 }
 function expenseRowIsAnnual(row) {
     return (0, incomeExpenseTaxonomy_1.normalizeFrequency)(row.frequency) === 'annual';
-}
-function toDop(amount, currency, exchangeRate) {
-    return currency === 'USD' ? amount * exchangeRate : amount;
 }
 function addToFrequencyBucket(map, frequencyKey, amountDop) {
     map[frequencyKey] = (map[frequencyKey] || 0) + amountDop;
@@ -71,9 +68,7 @@ const getCashFlow = async (req, res) => {
     try {
         const userId = req.userId;
         const { startDate, endDate, period } = req.query;
-        // Get user's exchange rate
-        const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
+        const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         let start;
         let end;
         if (startDate && endDate) {
@@ -133,7 +128,7 @@ const getCashFlow = async (req, res) => {
         incomeResult.rows.forEach((row) => {
             const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             if (!cashFlowByDate[date]) {
                 cashFlowByDate[date] = { income: 0, expenses: 0 };
             }
@@ -144,7 +139,7 @@ const getCashFlow = async (req, res) => {
        WHERE user_id = $1 AND (${recurrenceSql_1.INCOME_RECURRENT_ROWS})`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             const frequency = row.frequency;
             const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({
                 frequency,
@@ -165,7 +160,7 @@ const getCashFlow = async (req, res) => {
         expensesResult.rows.forEach((row) => {
             const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             if (!cashFlowByDate[date]) {
                 cashFlowByDate[date] = { income: 0, expenses: 0 };
             }
@@ -181,7 +176,7 @@ const getCashFlow = async (req, res) => {
          )`, [userId]);
         recurringExpensesExpandedResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             const dates = (0, dateUtils_1.getExpenseOccurrenceDatesInPeriod)({
                 frequency: row.frequency,
                 payment_day: row.payment_day,
@@ -201,7 +196,7 @@ const getCashFlow = async (req, res) => {
         accountsPayableResult.rows.forEach((row) => {
             const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             if (!cashFlowByDate[date]) {
                 cashFlowByDate[date] = { income: 0, expenses: 0 };
             }
@@ -211,7 +206,7 @@ const getCashFlow = async (req, res) => {
         accountsReceivableResult.rows.forEach((row) => {
             const date = (0, dateUtils_1.toYmdFromPgDate)(row.date);
             const amount = parseFloat(row.total);
-            const amountDop = row.currency === 'USD' ? amount * exchangeRate : amount;
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             if (!cashFlowByDate[date]) {
                 cashFlowByDate[date] = { income: 0, expenses: 0 };
             }
@@ -248,7 +243,7 @@ const getCashFlow = async (req, res) => {
         let punctualIncomeVariable = 0;
         incomePunctualByNature.rows.forEach((r) => {
             const v = parseFloat(r.total);
-            const dop = toDop(v, r.currency, exchangeRate);
+            const dop = (0, userCurrencyConversion_1.amountToPrimary)(v, String(r.currency || 'DOP'), ctx);
             if (r.nat === 'fixed')
                 punctualIncomeFixed += dop;
             else
@@ -258,7 +253,7 @@ const getCashFlow = async (req, res) => {
         const recurrentIncomeByFrequency = {};
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = toDop(amount, row.currency, exchangeRate);
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             const frequency = row.frequency;
             const dates = (0, dateUtils_1.getFixedIncomeOccurrenceDates)({
                 frequency,
@@ -276,7 +271,7 @@ const getCashFlow = async (req, res) => {
         let accountsReceivableTotal = 0;
         accountsReceivableResult.rows.forEach((row) => {
             const amount = parseFloat(row.total);
-            accountsReceivableTotal += toDop(amount, row.currency, exchangeRate);
+            accountsReceivableTotal += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
         });
         const expensePunctualByNature = await (0, database_1.query)(`SELECT e.nature AS nat, e.currency, SUM(e.amount) AS total
        FROM expenses e
@@ -286,7 +281,7 @@ const getCashFlow = async (req, res) => {
         let punctualExpenseVariable = 0;
         expensePunctualByNature.rows.forEach((r) => {
             const v = parseFloat(r.total);
-            const dop = toDop(v, r.currency, exchangeRate);
+            const dop = (0, userCurrencyConversion_1.amountToPrimary)(v, String(r.currency || 'DOP'), ctx);
             if (r.nat === 'fixed')
                 punctualExpenseFixed += dop;
             else
@@ -296,7 +291,7 @@ const getCashFlow = async (req, res) => {
         const recurrentExpenseByFrequency = {};
         recurringExpensesExpandedResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
-            const amountDop = toDop(amount, row.currency, exchangeRate);
+            const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
             const dates = (0, dateUtils_1.getExpenseOccurrenceDatesInPeriod)({
                 frequency: row.frequency,
                 payment_day: row.payment_day,
@@ -321,7 +316,7 @@ const getCashFlow = async (req, res) => {
         let accountsPayableTotal = 0;
         accountsPayableResult.rows.forEach((row) => {
             const amount = parseFloat(row.total);
-            accountsPayableTotal += toDop(amount, row.currency, exchangeRate);
+            accountsPayableTotal += (0, userCurrencyConversion_1.amountToPrimary)(amount, String(row.currency || 'DOP'), ctx);
         });
         const incomeSum = punctualIncomeTotal + recurrentIncomeTotal + accountsReceivableTotal;
         const expenseSum = punctualExpenseTotal +
@@ -339,12 +334,7 @@ const getCashFlow = async (req, res) => {
          * - Tarjetas: pago mínimo × nº de fechas de pago (día del mes) que caen en el rango
          * - Préstamos: cuotas en amortization_schedule con due_date en rango, o next_payment en rango sin tabla
          */
-        const apRemainingResult = await (0, database_1.query)(`SELECT COALESCE(SUM(
-         CASE
-           WHEN ap.currency = 'USD' THEN GREATEST(ap.amount::numeric - COALESCE(tp.total_paid, 0), 0) * $2
-           ELSE GREATEST(ap.amount::numeric - COALESCE(tp.total_paid, 0), 0)
-         END
-       ), 0) AS total
+        const apRemainingByCur = await (0, database_1.query)(`SELECT ap.currency, COALESCE(SUM(GREATEST(ap.amount::numeric - COALESCE(tp.total_paid, 0), 0)), 0) AS total
        FROM accounts_payable ap
        LEFT JOIN (
          SELECT account_payable_id, SUM(amount) AS total_paid
@@ -353,9 +343,14 @@ const getCashFlow = async (req, res) => {
        ) tp ON tp.account_payable_id = ap.id
        WHERE ap.user_id = $1
          AND ap.status <> 'PAID'
-         AND ap.due_date::date >= $3::date
-         AND ap.due_date::date <= $4::date`, [userId, exchangeRate, startYmd, endYmd]);
-        const pendingAccountsPayable = Math.round(parseFloat(apRemainingResult.rows[0]?.total || '0'));
+         AND ap.due_date::date >= $2::date
+         AND ap.due_date::date <= $3::date
+       GROUP BY ap.currency`, [userId, startYmd, endYmd]);
+        let pendingAccountsPayable = 0;
+        for (const r of apRemainingByCur.rows) {
+            pendingAccountsPayable += (0, userCurrencyConversion_1.amountToPrimary)(parseFloat(String(r.total || 0)), String(r.currency || 'DOP'), ctx);
+        }
+        pendingAccountsPayable = Math.round(pendingAccountsPayable);
         const cardRowsResult = await (0, database_1.query)(`SELECT payment_due_day, minimum_payment_dop, minimum_payment_usd, currency_type
        FROM credit_cards
        WHERE user_id = $1`, [userId]);
@@ -369,30 +364,30 @@ const getCashFlow = async (req, res) => {
             const ct = String(row.currency_type ?? 'DOP');
             let per = 0;
             if (ct === 'DOP') {
-                per = minDop;
+                per = (0, userCurrencyConversion_1.amountToPrimary)(minDop, ctx.pair.primary, ctx);
             }
             else if (ct === 'USD') {
-                per = minUsd * exchangeRate;
+                per = (0, userCurrencyConversion_1.amountToPrimary)(minUsd, ctx.pair.secondary, ctx);
             }
             else {
-                per = minDop + minUsd * exchangeRate;
+                per = (0, userCurrencyConversion_1.bankBalancesToPrimary)(minDop, minUsd, ctx);
             }
             pendingCreditCardMinimums += per * n;
         }
         pendingCreditCardMinimums = Math.round(pendingCreditCardMinimums);
-        const loanAmortResult = await (0, database_1.query)(`SELECT COALESCE(SUM(
-         CASE
-           WHEN l.currency = 'USD' THEN a.total_due::numeric * $1
-           ELSE a.total_due::numeric
-         END
-       ), 0) AS total
+        const loanAmortByCur = await (0, database_1.query)(`SELECT l.currency, COALESCE(SUM(a.total_due::numeric), 0) AS total
        FROM amortization_schedule a
        INNER JOIN loans l ON l.id = a.loan_id
-       WHERE l.user_id = $2
-         AND a.due_date::date >= $3::date
-         AND a.due_date::date <= $4::date
-         AND a.status IN ('PENDING', 'OVERDUE')`, [exchangeRate, userId, startYmd, endYmd]);
-        let pendingLoanInstallments = Math.round(parseFloat(String(loanAmortResult.rows[0]?.total ?? 0)) || 0);
+       WHERE l.user_id = $1
+         AND a.due_date::date >= $2::date
+         AND a.due_date::date <= $3::date
+         AND a.status IN ('PENDING', 'OVERDUE')
+       GROUP BY l.currency`, [userId, startYmd, endYmd]);
+        let pendingLoanInstallments = 0;
+        for (const r of loanAmortByCur.rows) {
+            pendingLoanInstallments += (0, userCurrencyConversion_1.amountToPrimary)(parseFloat(String(r.total ?? 0)), String(r.currency || 'DOP'), ctx);
+        }
+        pendingLoanInstallments = Math.round(pendingLoanInstallments);
         const loanNextFallback = await (0, database_1.query)(`SELECT l.installment_amount, l.fixed_charge, l.currency
        FROM loans l
        WHERE l.user_id = $1
@@ -403,7 +398,7 @@ const getCashFlow = async (req, res) => {
          AND NOT EXISTS (SELECT 1 FROM amortization_schedule a WHERE a.loan_id = l.id)`, [userId, startYmd, endYmd]);
         for (const row of loanNextFallback.rows) {
             const inst = parseFloat(String(row.installment_amount)) + parseFloat(String(row.fixed_charge || '0'));
-            pendingLoanInstallments += Math.round(toDop(inst, String(row.currency || 'DOP'), exchangeRate));
+            pendingLoanInstallments += Math.round((0, userCurrencyConversion_1.amountToPrimary)(inst, String(row.currency || 'DOP'), ctx));
         }
         pendingLoanInstallments = Math.round(pendingLoanInstallments);
         const pendingCommitments = pendingAccountsPayable + pendingCreditCardMinimums + pendingLoanInstallments;

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.listBankAccountMovements = exports.getAccount = exports.getAccounts = void 0;
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const BAL_EPS = 1e-9;
 const getAccounts = async (req, res) => {
     try {
@@ -195,11 +196,12 @@ const createAccount = async (req, res) => {
         const ct = row.currency_type;
         const bd = parseFloat(row.balance_dop || 0);
         const bu = parseFloat(row.balance_usd || 0);
-        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'DOP') && bd > BAL_EPS) {
-            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, 'DOP', 'IN', bd, 'Saldo inicial (DOP)');
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, pair.primary, pair) && bd > BAL_EPS) {
+            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, pair.primary, 'IN', bd, `Saldo inicial (${pair.primary})`);
         }
-        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'USD') && bu > BAL_EPS) {
-            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, 'USD', 'IN', bu, 'Saldo inicial (USD)');
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, pair.secondary, pair) && bu > BAL_EPS) {
+            await (0, accountBalance_1.recordBankAccountMovement)(userId, accId, pair.secondary, 'IN', bu, `Saldo inicial (${pair.secondary})`);
         }
         res.status(201).json({
             success: true,
@@ -263,16 +265,17 @@ const updateAccount = async (req, res) => {
         const ct = row.currency_type;
         const newDop = parseFloat(row.balance_dop || 0);
         const newUsd = parseFloat(row.balance_usd || 0);
-        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'DOP')) {
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, pair.primary, pair)) {
             const dDop = newDop - oldDop;
             if (Math.abs(dDop) > BAL_EPS) {
-                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, 'DOP', dDop > 0 ? 'IN' : 'OUT', Math.abs(dDop), 'Ajuste manual de balance (DOP)');
+                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, pair.primary, dDop > 0 ? 'IN' : 'OUT', Math.abs(dDop), `Ajuste manual de balance (${pair.primary})`);
             }
         }
-        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, 'USD')) {
+        if ((0, accountBalance_1.isCurrencyAllowedForAccount)(ct, pair.secondary, pair)) {
             const dUsd = newUsd - oldUsd;
             if (Math.abs(dUsd) > BAL_EPS) {
-                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, 'USD', dUsd > 0 ? 'IN' : 'OUT', Math.abs(dUsd), 'Ajuste manual de balance (USD)');
+                await (0, accountBalance_1.recordBankAccountMovement)(userId, accountId, pair.secondary, dUsd > 0 ? 'IN' : 'OUT', Math.abs(dUsd), `Ajuste manual de balance (${pair.secondary})`);
             }
         }
         res.json({

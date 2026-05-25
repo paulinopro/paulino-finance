@@ -4,9 +4,10 @@ exports.updatePayment = exports.getAmortizationSchedule = exports.deletePayment 
 const database_1 = require("../config/database");
 const amortizationService_1 = require("../services/amortizationService");
 const accountBalance_1 = require("../services/accountBalance");
-const exchangeRate_1 = require("../utils/exchangeRate");
+const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const dateUtils_1 = require("../utils/dateUtils");
 const calendarService_1 = require("../services/calendarService");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -138,28 +139,13 @@ const getLoans = async (req, res) => {
                 updatedAt: row.updated_at,
             };
         });
-        // Get exchange rate once
-        const userResult = await (0, database_1.query)('SELECT exchange_rate_dop_usd FROM users WHERE id = $1', [userId]);
-        const exchangeRate = (0, exchangeRate_1.resolveExchangeRateDopUsd)(userResult.rows[0]?.exchange_rate_dop_usd);
-        // Calculate totals
+        const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const totalRemaining = loans
             .filter((l) => l.status === 'ACTIVE')
-            .reduce((sum, l) => {
-            // Sum by currency, convert USD to DOP
-            if (l.currency === 'DOP') {
-                return sum + (l.remainingBalance || 0);
-            }
-            return sum + ((l.remainingBalance || 0) * exchangeRate);
-        }, 0);
+            .reduce((sum, l) => sum + (0, userCurrencyConversion_1.amountToPrimary)(l.remainingBalance || 0, String(l.currency || 'DOP'), ctx), 0);
         const totalInstallment = loans
             .filter((l) => l.status === 'ACTIVE')
-            .reduce((sum, l) => {
-            // Sum by currency, convert USD to DOP
-            if (l.currency === 'DOP') {
-                return sum + l.installmentAmount;
-            }
-            return sum + (l.installmentAmount * exchangeRate);
-        }, 0);
+            .reduce((sum, l) => sum + (0, userCurrencyConversion_1.amountToPrimary)(l.installmentAmount, String(l.currency || 'DOP'), ctx), 0);
         res.json({
             success: true,
             loans,
@@ -267,6 +253,15 @@ const createLoan = async (req, res) => {
         if (!loanName || !totalAmount || !interestRate || !totalInstallments || !startDate || !installmentAmount) {
             return res.status(400).json({ message: 'Missing required fields' });
         }
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const cur = currency != null && String(currency).trim() !== ''
+            ? String(currency).trim().toUpperCase()
+            : pair.primary;
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         // Calculate next payment date based on payment_day and start_date
         let nextPaymentDate = null;
         if (paymentDay) {
@@ -301,7 +296,7 @@ const createLoan = async (req, res) => {
             fixedCharge || 0,
             paymentDay || null,
             nextPaymentDate,
-            currency || 'DOP',
+            cur,
             interestCalculationBase || 'ACTUAL_360',
         ]);
         const row = result.rows[0];
@@ -344,6 +339,20 @@ const updateLoan = async (req, res) => {
         const checkResult = await (0, database_1.query)('SELECT id FROM loans WHERE id = $1 AND user_id = $2', [loanId, userId]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({ message: 'Loan not found' });
+        }
+        const existingCurRow = await (0, database_1.query)(`SELECT currency FROM loans WHERE id = $1 AND user_id = $2`, [
+            loanId,
+            userId,
+        ]);
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const prevCur = String(existingCurRow.rows[0]?.currency || '').trim().toUpperCase();
+        const nextCur = currency !== undefined && currency !== null && String(currency).trim() !== ''
+            ? String(currency).trim().toUpperCase()
+            : prevCur;
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, nextCur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
         }
         // Process dates: ensure startDate is always provided, endDate can be null
         // Convert empty string to null for both dates

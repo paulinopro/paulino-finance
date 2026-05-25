@@ -21,6 +21,7 @@ import {
   FileText,
   MessageSquare,
   Calendar as CalendarIcon,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Target,
@@ -75,6 +76,7 @@ function pathToModule(pathname: string): string | null {
     accounts: 'accounts',
     reports: 'reports',
     calendar: 'calendar',
+    agenda: 'agenda',
     'accounts-payable': 'accounts_payable',
     'accounts-receivable': 'accounts_receivable',
     budgets: 'budgets',
@@ -251,6 +253,7 @@ const Layout: React.FC = () => {
         icon: CalendarIcon,
         children: [
           { menuKey: 'calendar', path: '/calendar', label: t('nav.calendar'), icon: CalendarIcon, module: 'calendar' },
+          { menuKey: 'agenda', path: '/agenda', label: t('nav.agenda'), icon: CalendarDays, module: 'agenda' },
           { menuKey: 'budgets', path: '/budgets', label: t('nav.budgets'), icon: FileText, module: 'budgets' },
           { menuKey: 'financial_goals', path: '/financial-goals', label: t('nav.financialGoals'), icon: Target, module: 'financial_goals' },
         ],

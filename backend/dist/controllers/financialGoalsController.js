@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteFinancialGoal = exports.updateFinancialGoal = exports.createFinancialGoal = exports.getFinancialGoals = void 0;
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 function parseBankAccountIdBody(body, mode, previous) {
     if (!('bankAccountId' in body)) {
         return mode === 'create' ? null : previous;
@@ -19,7 +20,8 @@ async function validateGoalBankAccount(userId, accountId, currency) {
     const row = await (0, accountBalance_1.getAccountRow)(userId, accountId);
     if (!row)
         return 'Cuenta no encontrada';
-    if (!(0, accountBalance_1.isCurrencyAllowedForAccount)(row.currency_type, currency)) {
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    if (!(0, accountBalance_1.isCurrencyAllowedForAccount)(row.currency_type, currency, pair)) {
         return 'La moneda de la meta debe coincidir con la cuenta (o usar cuenta DUAL)';
     }
     return null;
@@ -77,7 +79,20 @@ const createFinancialGoal = async (req, res) => {
         if (!name || !targetAmount || !currency) {
             return res.status(400).json({ message: 'Name, target amount, and currency are required' });
         }
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const cur = String(currency).trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const bankAccountId = parseBankAccountIdBody(body, 'create', null);
+        if (bankAccountId) {
+            const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, cur);
+            if (ledErr) {
+                return res.status(400).json({ message: ledErr });
+            }
+        }
         const errAcc = await validateGoalBankAccount(userId, bankAccountId, String(currency));
         if (errAcc) {
             return res.status(400).json({ message: errAcc });
@@ -124,7 +139,20 @@ const updateFinancialGoal = async (req, res) => {
         }
         const prevBank = prevRow.rows[0].bank_account_id;
         const effCurrency = currency !== undefined && currency !== null ? String(currency) : String(prevRow.rows[0].currency);
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const effNorm = effCurrency.trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, effNorm)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const newBankId = parseBankAccountIdBody(body, 'update', prevBank);
+        if (newBankId) {
+            const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, effNorm);
+            if (ledErr) {
+                return res.status(400).json({ message: ledErr });
+            }
+        }
         const errAcc = await validateGoalBankAccount(userId, newBankId, effCurrency);
         if (errAcc) {
             return res.status(400).json({ message: errAcc });

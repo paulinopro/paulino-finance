@@ -11,6 +11,8 @@ const telegramService_1 = require("./telegramService");
 const templateService_1 = require("./templateService");
 const webPushService_1 = require("./webPushService");
 const incomeExpenseTaxonomy_1 = require("../constants/incomeExpenseTaxonomy");
+const intlFormat_1 = require("../utils/intlFormat");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 /** Cron diario revisión tarjetas / préstamos / gastos recurrentes (hora local del proceso o TZ). */
 exports.NOTIFICATION_DAILY_CRON = '0 9 * * *';
 let schedulerConfiguredAtIso = null;
@@ -49,25 +51,28 @@ function formatMoneyOpt(v) {
         return '';
     return n.toFixed(2);
 }
-/** Variables para plantillas de pago de tarjeta (alineado con credit_cards + condicionales por moneda). */
-function buildCardPaymentTemplateVariables(card, days) {
+/** Variables para plantillas de pago de tarjeta (rails DOP/USD en BD = moneda principal/secundaria del usuario). */
+function buildCardPaymentTemplateVariables(card, days, localePreference, pair) {
+    const localeTag = (0, intlFormat_1.localeTagFromUiLanguage)(localePreference ?? undefined);
     const ct = String(card.currency_type ?? '');
-    const debtDop = parseFloat(String(card.current_debt_dop ?? 0));
-    const debtUsd = parseFloat(String(card.current_debt_usd ?? 0));
+    const debtPrimaryRail = parseFloat(String(card.current_debt_dop ?? 0));
+    const debtSecondaryRail = parseFloat(String(card.current_debt_usd ?? 0));
+    const primaryIso = pair.primary;
+    const secondaryIso = pair.secondary;
     let debtText = '';
     if (ct === 'DOP') {
-        debtText = `${debtDop.toFixed(2)} DOP`;
+        debtText = (0, intlFormat_1.formatCurrencyAmount)(debtPrimaryRail, primaryIso, localeTag);
     }
     else if (ct === 'USD') {
-        debtText = `${debtUsd.toFixed(2)} USD`;
+        debtText = (0, intlFormat_1.formatCurrencyAmount)(debtSecondaryRail, secondaryIso, localeTag);
     }
     else {
-        debtText = `${debtDop.toFixed(2)} DOP / ${debtUsd.toFixed(2)} USD`;
+        debtText = `${(0, intlFormat_1.formatCurrencyAmount)(debtPrimaryRail, primaryIso, localeTag)} / ${(0, intlFormat_1.formatCurrencyAmount)(debtSecondaryRail, secondaryIso, localeTag)}`;
     }
     const currencyTypeLabel = {
-        DOP: 'DOP',
-        USD: 'USD',
-        DUAL: 'DOP y USD (dual)',
+        DOP: primaryIso,
+        USD: secondaryIso,
+        DUAL: `${primaryIso} y ${secondaryIso} (dual)`,
     };
     const hideDop = ct === 'USD';
     const hideUsd = ct === 'DOP';
@@ -81,6 +86,8 @@ function buildCardPaymentTemplateVariables(card, days) {
         currencyType: ct,
         currencyTypeLabel: currencyTypeLabel[ct] ?? ct,
         cutOffDay: String(card.cut_off_day ?? ''),
+        primaryCurrency: primaryIso,
+        secondaryCurrency: secondaryIso,
         creditLimitDop: hideDop ? '' : formatMoneyOpt(card.credit_limit_dop),
         creditLimitUsd: hideUsd ? '' : formatMoneyOpt(card.credit_limit_usd),
         currentDebtDop: hideDop ? '' : formatMoneyOpt(card.current_debt_dop),
@@ -97,13 +104,15 @@ const checkAndSendNotifications = async () => {
         const currentMonth = today.getMonth() + 1;
         const currentYear = today.getFullYear();
         // Get all users with notification settings enabled
-        const usersResult = await (0, database_1.query)(`SELECT DISTINCT u.id, u.telegram_chat_id, u.exchange_rate_dop_usd
+        const usersResult = await (0, database_1.query)(`SELECT DISTINCT u.id, u.telegram_chat_id, u.locale_preference
        FROM users u
        INNER JOIN notification_settings ns ON u.id = ns.user_id
        WHERE ns.enabled = true`, []);
         for (const user of usersResult.rows) {
             const userId = user.id;
             const telegramChatId = user.telegram_chat_id;
+            const localeTag = (0, intlFormat_1.localeTagFromUiLanguage)(user.locale_preference);
+            const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
             // Get user's notification settings
             const settingsResult = await (0, database_1.query)(`SELECT notification_type, days_before, telegram_enabled
          FROM notification_settings
@@ -143,19 +152,19 @@ const checkAndSendNotifications = async () => {
 <b>Tarjeta:</b> {cardName}
 <b>Tipo de moneda:</b> {currencyTypeLabel}
 
-{{#if creditLimitDop}}<b>Límite de crédito (DOP):</b> {creditLimitDop}{{/if}}
-{{#if currentDebtDop}}<b>Deuda actual (DOP):</b> {currentDebtDop}{{/if}}
-{{#if minimumPaymentDop}}<b>Pago mínimo (DOP):</b> {minimumPaymentDop}{{/if}}
-{{#if creditLimitUsd}}<b>Límite de crédito (USD):</b> {creditLimitUsd}{{/if}}
-{{#if currentDebtUsd}}<b>Deuda actual (USD):</b> {currentDebtUsd}{{/if}}
-{{#if minimumPaymentUsd}}<b>Pago mínimo (USD):</b> {minimumPaymentUsd}{{/if}}
+{{#if creditLimitDop}}<b>Límite de crédito ({primaryCurrency}):</b> {creditLimitDop}{{/if}}
+{{#if currentDebtDop}}<b>Deuda actual ({primaryCurrency}):</b> {currentDebtDop}{{/if}}
+{{#if minimumPaymentDop}}<b>Pago mínimo ({primaryCurrency}):</b> {minimumPaymentDop}{{/if}}
+{{#if creditLimitUsd}}<b>Límite de crédito ({secondaryCurrency}):</b> {creditLimitUsd}{{/if}}
+{{#if currentDebtUsd}}<b>Deuda actual ({secondaryCurrency}):</b> {currentDebtUsd}{{/if}}
+{{#if minimumPaymentUsd}}<b>Pago mínimo ({secondaryCurrency}):</b> {minimumPaymentUsd}{{/if}}
 
 <b>Deuda resumida:</b> {debtText}
 <b>Día de corte:</b> {cutOffDay}
 <b>Día límite de pago:</b> {dueDay} de este mes
 <b>Días restantes (recordatorio):</b> {days}`;
                             const title = (0, templateService_1.renderTemplate)(titleTemplate, {});
-                            const message = (0, templateService_1.renderTemplate)(messageTemplate, buildCardPaymentTemplateVariables(card, days));
+                            const message = (0, templateService_1.renderTemplate)(messageTemplate, buildCardPaymentTemplateVariables(card, days, user.locale_preference, pair));
                             const plainTitle = title.replace(/<[^>]*>/g, '');
                             const ins = await (0, database_1.query)(`INSERT INTO notifications (user_id, type, title, message, related_id, related_type)
                  VALUES ($1, 'CARD_PAYMENT', $2, $3, $4, 'CARD')
@@ -196,15 +205,19 @@ const checkAndSendNotifications = async () => {
                             const template = await (0, templateService_1.getTemplate)(userId, 'LOAN_PAYMENT');
                             const titleTemplate = template?.titleTemplate || 'Recordatorio de Pago de Préstamo';
                             const messageTemplate = template?.messageTemplate ||
-                                '🔔 <b>Recordatorio de Pago de Préstamo</b> 🔔\n\n<b>Préstamo:</b> {loanName}\n<b>Monto de cuota:</b> {installmentAmount} {currency}\n<b>Progreso:</b> {paidInstallments}/{totalInstallments} cuotas\n<b>Próximo pago:</b> {nextPaymentDate}\n<b>Días restantes:</b> {days}';
+                                '🔔 <b>Recordatorio de Pago de Préstamo</b> 🔔\n\n<b>Préstamo:</b> {loanName}\n<b>Monto de cuota:</b> {installmentAmountFormatted}\n<b>Progreso:</b> {paidInstallments}/{totalInstallments} cuotas\n<b>Próximo pago:</b> {nextPaymentDate}\n<b>Días restantes:</b> {days}';
+                            const loanCurRaw = String(loan.currency ?? '').trim().toUpperCase();
+                            const loanCurrencyIso = loanCurRaw || pair.primary;
+                            const installmentAmountFormatted = (0, intlFormat_1.formatCurrencyAmount)(parseFloat(String(loan.installment_amount ?? 0)), loanCurrencyIso, localeTag);
                             const title = (0, templateService_1.renderTemplate)(titleTemplate, {});
                             const message = (0, templateService_1.renderTemplate)(messageTemplate, {
                                 loanName: loan.loan_name,
-                                installmentAmount: parseFloat(loan.installment_amount).toFixed(2),
-                                currency: loan.currency,
+                                installmentAmount: parseFloat(String(loan.installment_amount ?? 0)).toFixed(2),
+                                installmentAmountFormatted,
+                                currency: loanCurrencyIso,
                                 paidInstallments: loan.paid_installments,
                                 totalInstallments: loan.total_installments,
-                                nextPaymentDate: nextPaymentDate.toLocaleDateString('es-DO'),
+                                nextPaymentDate: nextPaymentDate.toLocaleDateString(localeTag),
                                 days: days,
                             });
                             const plainTitle = title.replace(/<[^>]*>/g, '').trim();
@@ -263,8 +276,8 @@ const checkAndSendNotifications = async () => {
                             const title = (0, templateService_1.renderTemplate)(titleTemplate, {});
                             const message = (0, templateService_1.renderTemplate)(messageTemplate, {
                                 description: expense.description,
-                                amount: parseFloat(expense.amount).toFixed(2),
-                                currency: expense.currency,
+                                amount: (0, intlFormat_1.formatCurrencyAmount)(parseFloat(expense.amount), String(expense.currency || pair.primary), localeTag),
+                                currency: '',
                                 paymentDay: paymentDay,
                                 days: days,
                                 expenseScheduleLabel,

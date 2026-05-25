@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteGoalMovement = exports.updateGoalMovement = exports.addGoalMovement = exports.getGoalMovements = void 0;
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const roundMoney = (n) => Math.round(n * 100) / 100;
 function runQuery(client, text, params) {
     if (client)
@@ -72,7 +73,8 @@ async function validateAccountForGoalCurrency(userId, accountId, currency) {
     const row = await (0, accountBalance_1.getAccountRow)(userId, accountId);
     if (!row)
         return 'Cuenta no encontrada';
-    if (!(0, accountBalance_1.isCurrencyAllowedForAccount)(row.currency_type, currency)) {
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    if (!(0, accountBalance_1.isCurrencyAllowedForAccount)(row.currency_type, currency, pair)) {
         return 'La moneda debe coincidir con la cuenta (o usar cuenta DUAL)';
     }
     return null;

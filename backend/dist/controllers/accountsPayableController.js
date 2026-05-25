@@ -5,6 +5,7 @@ const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
 const calendarService_1 = require("../services/calendarService");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -389,6 +390,13 @@ const createAccountPayable = async (req, res) => {
         if (!description || !amount || !currency || !dueDate) {
             return res.status(400).json({ message: 'Description, amount, currency, and due date are required' });
         }
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const cur = String(currency).trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, cur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         const result = await (0, database_1.query)(`INSERT INTO accounts_payable (user_id, description, amount, currency, due_date, category, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at`, [userId, description, amount, currency, dueDate, category || null, notes || null]);
@@ -422,6 +430,22 @@ const updateAccountPayable = async (req, res) => {
         const userId = req.userId;
         const { id } = req.params;
         const { description, amount, currency, dueDate, category, notes } = req.body;
+        const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+        const prevRow = await (0, database_1.query)(`SELECT currency FROM accounts_payable WHERE id = $1 AND user_id = $2`, [
+            id,
+            userId,
+        ]);
+        if (prevRow.rows.length === 0) {
+            return res.status(404).json({ message: 'Account payable not found' });
+        }
+        const mergedCur = currency !== undefined && currency !== null && String(currency).trim() !== ''
+            ? String(currency).trim().toUpperCase()
+            : String(prevRow.rows[0].currency || '').trim().toUpperCase();
+        if (!(0, userCurrencyPair_1.isCurrencyInUserPair)(pair, mergedCur)) {
+            return res.status(400).json({
+                message: 'La moneda debe ser la principal o la secundaria de tu perfil (Configuración).',
+            });
+        }
         if (amount != null) {
             const paid = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
             if ((0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(String(amount))) < paid - 0.005) {

@@ -27,6 +27,7 @@ const Profile = React.lazy(() => import('./pages/Profile'));
 const Reports = React.lazy(() => import('./pages/Reports'));
 const NotificationTemplates = React.lazy(() => import('./pages/NotificationTemplates'));
 const Calendar = React.lazy(() => import('./pages/Calendar'));
+const Agenda = React.lazy(() => import('./pages/Agenda'));
 const AccountsPayable = React.lazy(() => import('./pages/AccountsPayable'));
 const AccountsReceivable = React.lazy(() => import('./pages/AccountsReceivable'));
 const Budgets = React.lazy(() => import('./pages/Budgets'));
@@ -121,6 +122,7 @@ function App() {
                   <Route path="accounts" element={<Accounts />} />
                   <Route path="reports" element={<Reports />} />
                   <Route path="calendar" element={<Calendar />} />
+                  <Route path="agenda" element={<Agenda />} />
                   <Route path="profile" element={<Profile />} />
                   <Route path="settings" element={<Settings />} />
                   <Route path="templates" element={<NotificationTemplates />} />

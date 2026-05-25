@@ -62,17 +62,24 @@ const updateStatus = async (req, res) => {
     try {
         const userId = req.userId;
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, actualAmount } = req.body;
         if (!status || !['PENDING', 'PAID', 'RECEIVED', 'OVERDUE', 'CANCELLED'].includes(status)) {
             return res.status(400).json({ message: 'Valid status is required' });
         }
-        const updatedEvent = await (0, calendarService_1.updateEventStatus)(userId, parseInt(id), status);
+        const updatedEvent = await (0, calendarService_1.updateEventStatus)(userId, parseInt(id), status, {
+            actualAmount: actualAmount !== undefined && actualAmount !== null && actualAmount !== ''
+                ? actualAmount
+                : undefined,
+        });
         if (!updatedEvent) {
             return res.status(404).json({ message: 'Event not found' });
         }
         res.json({ success: true, event: updatedEvent, message: 'Event status updated successfully' });
     }
     catch (error) {
+        if (error?.message === 'INVALID_ACTUAL_AMOUNT') {
+            return res.status(400).json({ message: 'actualAmount must be a positive number' });
+        }
         console.error('Update event status error:', error);
         res.status(500).json({ message: 'Error updating event status', error: error.message });
     }

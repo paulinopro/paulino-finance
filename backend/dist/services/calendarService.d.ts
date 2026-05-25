@@ -12,6 +12,10 @@ export interface CalendarEvent {
     recurrencePattern?: string;
     color: string;
     notes?: string;
+    /** Metadatos del ingreso/gasto origen (JOIN en GET events). */
+    sourceNature?: 'fixed' | 'variable';
+    sourceRecurrenceType?: 'recurrent' | 'non_recurrent';
+    sourceFrequency?: string | null;
 }
 /**
  * Deja de mostrar en el calendario financiero las filas ligadas al origen (p. ej. al borrar un ingreso).
@@ -70,7 +74,9 @@ export declare const generateCalendarEvents: (userId: number, startDate: string,
 /**
  * Update event status
  */
-export declare const updateEventStatus: (userId: number, eventId: number, status: "PENDING" | "PAID" | "RECEIVED" | "OVERDUE" | "CANCELLED") => Promise<CalendarEvent | null>;
+export declare const updateEventStatus: (userId: number, eventId: number, status: "PENDING" | "PAID" | "RECEIVED" | "OVERDUE" | "CANCELLED", opts?: {
+    actualAmount?: number | string | null;
+}) => Promise<CalendarEvent | null>;
 /**
  * Get financial summary for a date range
  */
@@ -80,7 +86,7 @@ export declare const getFinancialSummary: (userId: number, startDate: string, en
     balance: number;
     pendingPayments: number;
     overduePayments: number;
-    /** Todos los totales expresados en DOP (USD × tasa del usuario). */
-    displayCurrency: "DOP";
+    /** Todos los totales expresados en moneda principal (conversión con tasa del usuario / API). */
+    displayCurrency: string;
 }>;
 //# sourceMappingURL=calendarService.d.ts.map

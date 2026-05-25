@@ -156,7 +156,61 @@ const createTables = async () => {
                      WHERE table_schema = 'public' AND table_name='users' AND column_name='locale_preference') THEN
         ALTER TABLE users ADD COLUMN locale_preference VARCHAR(16) DEFAULT 'es';
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'secondary_currency_preference') THEN
+        ALTER TABLE users ADD COLUMN secondary_currency_preference VARCHAR(3) DEFAULT 'USD';
+        UPDATE users SET secondary_currency_preference = CASE
+          WHEN UPPER(TRIM(COALESCE(currency_preference, ''))) = 'USD' THEN 'DOP'
+          ELSE 'USD'
+        END;
+      END IF;
     END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS exchange_rate_snapshots (
+      base_code VARCHAR(3) PRIMARY KEY,
+      rates_json JSONB NOT NULL,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'exchange_rate_manual'
+      ) THEN
+        ALTER TABLE users ADD COLUMN exchange_rate_manual DECIMAL(20, 8) NULL;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'users'
+          AND column_name = 'calendar_card_payment_amount_basis'
+      ) THEN
+        ALTER TABLE users ADD COLUMN calendar_card_payment_amount_basis VARCHAR(32)
+          NOT NULL DEFAULT 'minimum_payment';
+      END IF;
+    END $$;
+  `);
+    /* Tasa manual en formato secundaria por 1 principal; migra legado DOP/USD con exchange_rate_dop_usd = DOP por 1 USD */
+    await (0, exports.query)(`
+    UPDATE users SET exchange_rate_manual = exchange_rate_dop_usd
+    WHERE exchange_rate_manual IS NULL
+      AND exchange_rate_dop_usd IS NOT NULL AND exchange_rate_dop_usd > 0
+      AND UPPER(TRIM(COALESCE(currency_preference, ''))) = 'USD'
+      AND UPPER(TRIM(COALESCE(secondary_currency_preference, ''))) = 'DOP'
+  `);
+    await (0, exports.query)(`
+    UPDATE users SET exchange_rate_manual = (1.0 / NULLIF(exchange_rate_dop_usd, 0))::decimal
+    WHERE exchange_rate_manual IS NULL
+      AND exchange_rate_dop_usd IS NOT NULL AND exchange_rate_dop_usd > 0
+      AND UPPER(TRIM(COALESCE(currency_preference, ''))) = 'DOP'
+      AND UPPER(TRIM(COALESCE(secondary_currency_preference, ''))) = 'USD'
   `);
     await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS system_settings (
@@ -829,6 +883,65 @@ const createTables = async () => {
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_type ON calendar_events(event_type)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_status ON calendar_events(status)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_calendar_events_show_on_calendar ON calendar_events(user_id, show_on_calendar)`);
+    // Agenda hub: ítems canónicos (local-first) y estado de sincronización con proveedores externos (fases siguientes).
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS agenda_items (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind VARCHAR(32) NOT NULL CHECK (kind IN ('EVENT','TASK','REMINDER','APPOINTMENT','NOTE')),
+      title VARCHAR(512) NOT NULL,
+      description TEXT,
+      starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      ends_at TIMESTAMP WITH TIME ZONE,
+      all_day BOOLEAN NOT NULL DEFAULT false,
+      status VARCHAR(32) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','DONE','TENTATIVE','CANCELLED')),
+      recurrence_rule TEXT,
+      finance_link_type VARCHAR(64),
+      finance_link_id INTEGER,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      sync_to_external BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_items_user_id ON agenda_items(user_id)`);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_items_starts ON agenda_items(user_id, starts_at)`);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS agenda_provider_connections (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider VARCHAR(32) NOT NULL CHECK (provider IN ('GOOGLE_CALENDAR','ICLOUD_CALDAV')),
+      account_label VARCHAR(255),
+      credentials_encrypted TEXT,
+      oauth_access_token TEXT,
+      oauth_refresh_token TEXT,
+      token_expires_at TIMESTAMP WITH TIME ZONE,
+      external_default_calendar_id VARCHAR(512),
+      sync_direction VARCHAR(24) NOT NULL DEFAULT 'OUTBOUND_ONLY' CHECK (sync_direction IN ('OUTBOUND_ONLY','TWO_WAY_PENDING')),
+      status VARCHAR(24) NOT NULL DEFAULT 'DISCONNECTED' CHECK (status IN ('DISCONNECTED','CONNECTED','ERROR')),
+      last_error TEXT,
+      meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, provider)
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_provider_connections_user ON agenda_provider_connections(user_id)`);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS agenda_item_sync_state (
+      id SERIAL PRIMARY KEY,
+      agenda_item_id INTEGER NOT NULL REFERENCES agenda_items(id) ON DELETE CASCADE,
+      connection_id INTEGER NOT NULL REFERENCES agenda_provider_connections(id) ON DELETE CASCADE,
+      external_uid TEXT NOT NULL,
+      etag TEXT,
+      last_pushed_at TIMESTAMP WITH TIME ZONE,
+      last_error TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(agenda_item_id, connection_id)
+    )
+  `);
+    await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_sync_connection ON agenda_item_sync_state(connection_id)`);
     // Create indexes for better performance
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_credit_cards_user_id ON credit_cards(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)`);
@@ -1129,6 +1242,55 @@ const createTables = async () => {
       END IF;
     END $$;
   `);
+    /* Montos por período (mes) para ingresos/gastos recurrentes variables al marcar pagado/cobrado */
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS expense_period_amounts (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      amount DECIMAL(15, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT expense_period_amounts_month_chk CHECK (month >= 1 AND month <= 12),
+      CONSTRAINT expense_period_amounts_year_chk CHECK (year >= 1900 AND year <= 2100),
+      UNIQUE (expense_id, year, month)
+    )
+  `);
+    await (0, exports.query)(`
+    CREATE INDEX IF NOT EXISTS idx_expense_period_amounts_user ON expense_period_amounts(user_id)
+  `);
+    await (0, exports.query)(`
+    CREATE TABLE IF NOT EXISTS income_period_amounts (
+      id SERIAL PRIMARY KEY,
+      income_id INTEGER NOT NULL REFERENCES income(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      amount DECIMAL(15, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT income_period_amounts_month_chk CHECK (month >= 1 AND month <= 12),
+      CONSTRAINT income_period_amounts_year_chk CHECK (year >= 1900 AND year <= 2100),
+      UNIQUE (income_id, year, month)
+    )
+  `);
+    await (0, exports.query)(`
+    CREATE INDEX IF NOT EXISTS idx_income_period_amounts_user ON income_period_amounts(user_id)
+  `);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'income' AND column_name = 'last_received_month'
+      ) THEN
+        ALTER TABLE income ADD COLUMN last_received_month INTEGER;
+        ALTER TABLE income ADD COLUMN last_received_year INTEGER;
+      END IF;
+    END $$;
+  `);
     await (0, exports.query)(`
     DO $$
     BEGIN
@@ -1177,6 +1339,36 @@ const createTables = async () => {
         OR title_template LIKE '%' || '{expenseTypeLabel}' || '%'
         OR message_template LIKE '%<b>Tipo:</b> {expenseScheduleLabel}%'
       );
+  `);
+    /* Permite códigos ISO distintos de DOP/USD en movimientos, transferencias y tablas de dominio. */
+    await (0, exports.query)(`
+    DO $$
+    DECLARE t text;
+    BEGIN
+      FOREACH t IN ARRAY ARRAY[
+        'account_transfers',
+        'cash_adjustments',
+        'bank_account_movements',
+        'credit_card_payments',
+        'accounts_payable',
+        'accounts_receivable',
+        'budgets',
+        'financial_goals',
+        'vehicles',
+        'vehicle_expenses'
+      ]
+      LOOP
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I', t, t || '_currency_check');
+      END LOOP;
+    END $$;
+  `);
+    /* Plan full: activar módulo agenda en instalaciones que ya tenían JSON antiguo (solo si la clave no existe). */
+    await (0, exports.query)(`
+    UPDATE subscription_plans
+    SET enabled_modules = COALESCE(enabled_modules, '{}'::jsonb) || '{"agenda": true}'::jsonb
+    WHERE slug = 'full'
+      AND COALESCE(enabled_modules, '{}'::jsonb) IS NOT NULL
+      AND NOT ((COALESCE(enabled_modules, '{}'::jsonb)) ? 'agenda')
   `);
 };
 exports.default = pool;

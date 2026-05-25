@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCashAdjustment = exports.listCashAdjustments = void 0;
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const listCashAdjustments = async (req, res) => {
     try {
         const userId = req.userId;
@@ -44,8 +45,10 @@ const createCashAdjustment = async (req, res) => {
     if (isNaN(delta) || delta === 0) {
         return res.status(400).json({ message: 'amountDelta must be a non-zero number' });
     }
-    if (String(currency) !== 'DOP' && String(currency) !== 'USD') {
-        return res.status(400).json({ message: 'currency must be DOP or USD' });
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, String(currency));
+    if (ledErr) {
+        return res.status(400).json({ message: ledErr });
     }
     const client = await (0, database_1.getClient)();
     try {

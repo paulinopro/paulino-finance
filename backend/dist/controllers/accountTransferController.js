@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAccountTransfer = exports.listAccountTransfers = void 0;
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
+const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const listAccountTransfers = async (req, res) => {
     try {
         const userId = req.userId;
@@ -41,8 +42,10 @@ const createAccountTransfer = async (req, res) => {
     if (!fromAccountId || !toAccountId || !currency || amount == null || isNaN(amt) || amt <= 0) {
         return res.status(400).json({ message: 'fromAccountId, toAccountId, amount (>0) and currency are required' });
     }
-    if (String(currency) !== 'DOP' && String(currency) !== 'USD') {
-        return res.status(400).json({ message: 'currency must be DOP or USD' });
+    const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
+    const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, String(currency));
+    if (ledErr) {
+        return res.status(400).json({ message: ledErr });
     }
     if (Number(fromAccountId) === Number(toAccountId)) {
         return res.status(400).json({ message: 'Source and destination accounts must differ' });
@@ -56,7 +59,7 @@ const createAccountTransfer = async (req, res) => {
             await client.query('ROLLBACK');
             return res.status(404).json({ message: 'Account not found' });
         }
-        const fromBal = (0, accountBalance_1.parseBalanceForCurrency)(from, currency);
+        const fromBal = (0, accountBalance_1.parseBalanceForCurrency)(from, currency, pair);
         if (fromBal + 1e-9 < amt) {
             await client.query('ROLLBACK');
             return res.status(400).json({ message: 'Insufficient balance in the source account for this currency' });
