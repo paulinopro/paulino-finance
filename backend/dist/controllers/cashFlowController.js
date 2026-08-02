@@ -275,7 +275,7 @@ const getCashFlow = async (req, res) => {
         });
         const expensePunctualByNature = await (0, database_1.query)(`SELECT e.nature AS nat, e.currency, SUM(e.amount) AS total
        FROM expenses e
-       WHERE user_id = $1 AND (${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL})
+       WHERE e.user_id = $1 AND e.is_active = TRUE AND (${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY e.nature, e.currency`, [userId, start, end]);
         let punctualExpenseFixed = 0;
         let punctualExpenseVariable = 0;
@@ -378,7 +378,7 @@ const getCashFlow = async (req, res) => {
         const loanAmortByCur = await (0, database_1.query)(`SELECT l.currency, COALESCE(SUM(a.total_due::numeric), 0) AS total
        FROM amortization_schedule a
        INNER JOIN loans l ON l.id = a.loan_id
-       WHERE l.user_id = $1
+       WHERE l.user_id = $1 AND l.is_active = TRUE
          AND a.due_date::date >= $2::date
          AND a.due_date::date <= $3::date
          AND a.status IN ('PENDING', 'OVERDUE')

@@ -41,9 +41,10 @@ export const getBudgets = async (req: AuthRequest, res: Response) => {
       // Gastos del período: consultas distintas para mensual vs anual (placeholders y tipos alineados).
       const isMonthly = budget.period_type === 'MONTHLY';
       const spentSql = isMonthly
-        ? `SELECT SUM(amount) as total
-           FROM expenses
-           WHERE user_id = $1
+        ? `SELECT SUM(e.amount) as total
+           FROM expenses e
+           WHERE e.user_id = $1
+             AND e.is_active = TRUE
              AND currency = $2
              AND (category = $3 OR $3 IS NULL)
              AND (
@@ -59,9 +60,10 @@ export const getBudgets = async (req: AuthRequest, res: Response) => {
                  AND EXTRACT(YEAR FROM date) = $4
                )
              )`
-        : `SELECT SUM(amount) as total
-           FROM expenses
-           WHERE user_id = $1
+        : `SELECT SUM(e.amount) as total
+           FROM expenses e
+           WHERE e.user_id = $1
+             AND e.is_active = TRUE
              AND currency = $2
              AND (category = $3 OR $3 IS NULL)
              AND (
@@ -87,9 +89,10 @@ export const getBudgets = async (req: AuthRequest, res: Response) => {
 
       // Get accounts payable paid in the period
       const accountsPayableResult = await query(
-        `SELECT SUM(amount) as total
-         FROM accounts_payable
-         WHERE user_id = $1
+        `SELECT SUM(ap.amount) as total
+         FROM accounts_payable ap
+         WHERE ap.user_id = $1
+           AND ap.is_active = TRUE
            AND currency = $2
            AND (category = $3 OR $3 IS NULL)
            AND status = 'PAID'

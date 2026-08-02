@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { query } from '../config/database';
+import { InactiveEntityError } from './entityActivation';
 import { getUserCurrencyPair, type UserCurrencyPair } from '../utils/userCurrencyPair';
 
 export type BankAccountMovementStatus = 'completed' | 'pending' | 'cancelled';
@@ -35,6 +36,7 @@ export type AccountRow = {
   currency_type: string;
   account_kind: string;
   bank_name: string | null;
+  is_active: boolean;
 };
 
 async function runQuery(
@@ -52,7 +54,7 @@ export async function getAccountRow(
   client?: PoolClient
 ): Promise<AccountRow | undefined> {
   const r = await runQuery(
-    `SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind, bank_name
+    `SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind, bank_name, is_active
      FROM bank_accounts WHERE id = $1 AND user_id = $2`,
     [accountId, userId],
     client
@@ -110,25 +112,36 @@ export async function applyBalanceDelta(
   if (!acc) {
     throw new Error('ACCOUNT_NOT_FOUND');
   }
+  if (acc.is_active !== true) {
+    throw new InactiveEntityError('La cuenta bancaria está inactiva');
+  }
   const pair = await getUserCurrencyPair(userId);
   if (!isCurrencyAllowedForAccount(acc.currency_type, currency, pair)) {
     throw new Error('CURRENCY_MISMATCH');
   }
   const c = currency.trim().toUpperCase();
   if (c === pair.primary) {
-    await runQuery(
+    const updated = await runQuery(
       `UPDATE bank_accounts SET balance_dop = balance_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND user_id = $3`,
+       WHERE id = $2 AND user_id = $3 AND is_active = TRUE
+       RETURNING id`,
       [delta, accountId, userId],
       client
     );
+    if (updated.rows.length === 0) {
+      throw new InactiveEntityError('La cuenta bancaria está inactiva');
+    }
   } else if (c === pair.secondary) {
-    await runQuery(
+    const updated = await runQuery(
       `UPDATE bank_accounts SET balance_usd = balance_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND user_id = $3`,
+       WHERE id = $2 AND user_id = $3 AND is_active = TRUE
+       RETURNING id`,
       [delta, accountId, userId],
       client
     );
+    if (updated.rows.length === 0) {
+      throw new InactiveEntityError('La cuenta bancaria está inactiva');
+    }
   } else {
     throw new Error('CURRENCY_MISMATCH');
   }

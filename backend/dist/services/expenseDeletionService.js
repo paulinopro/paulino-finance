@@ -13,15 +13,16 @@ async function removeExpenseForUser(userId, expenseId) {
         return false;
     }
     const row = pre.rows[0];
-    await (0, accountsPaymentLinkSync_1.deletePayablePaymentByExpenseId)(userId, expenseId);
     if ((0, incomeExpenseTaxonomy_1.expenseUsesImmediateBalance)(row) && row.bank_account_id) {
         try {
             await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, parseFloat(row.amount), undefined, { description: `Reversión por eliminación: «${row.description}»` });
         }
         catch (e) {
             console.error('Reverse balance on expense delete:', e);
+            throw e;
         }
     }
+    await (0, accountsPaymentLinkSync_1.deletePayablePaymentByExpenseId)(userId, expenseId);
     const result = await (0, database_1.query)('DELETE FROM expenses WHERE id = $1 AND user_id = $2 RETURNING id', [expenseId, userId]);
     if (result.rows.length > 0) {
         await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, expenseId, ['RECURRING_EXPENSE', 'EXPENSE']);

@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { respondInactiveEntityError } from './activeEntityGuard';
 import { AuthRequest } from '../middleware/auth';
 import { toYmdFromPgDate } from '../utils/dateUtils';
 import {
@@ -41,6 +42,7 @@ export const getEvents = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, events });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get calendar events error:', error);
     res.status(500).json({ message: 'Error fetching calendar events', error: error.message });
   }
@@ -63,6 +65,7 @@ export const getSummary = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, summary });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get financial summary error:', error);
     res.status(500).json({ message: 'Error fetching financial summary', error: error.message });
   }
@@ -94,6 +97,7 @@ export const updateStatus = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, event: updatedEvent, message: 'Event status updated successfully' });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     if (error?.message === 'INVALID_ACTUAL_AMOUNT') {
       return res.status(400).json({ message: 'actualAmount must be a positive number' });
     }
@@ -123,6 +127,7 @@ export const refreshEvents = async (req: AuthRequest, res: Response) => {
       orphansPurged: orphansHidden,
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Refresh calendar events error:', error);
     res.status(500).json({ message: 'Error refreshing calendar events', error: error.message });
   }
@@ -152,6 +157,7 @@ export const listOrphanEvents = async (req: AuthRequest, res: Response) => {
       })),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('List orphan calendar events error:', error);
     res.status(500).json({ message: 'Error listing orphan calendar events', error: error.message });
   }
@@ -174,6 +180,7 @@ export const getHistory = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, count: events.length, events });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get calendar history error:', error);
     res.status(500).json({ message: 'Error fetching calendar history', error: error.message });
   }

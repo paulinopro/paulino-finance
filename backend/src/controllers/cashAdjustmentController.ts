@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -35,6 +35,7 @@ export const listCashAdjustments = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, adjustments });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('List cash adjustments error:', error);
     res.status(500).json({ message: 'Error listing adjustments', error: error.message });
   }
@@ -101,6 +102,7 @@ export const createCashAdjustment = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Cash adjustment error:', error);
     if (error.message === 'ACCOUNT_NOT_FOUND') {
       return res.status(404).json({ message: 'Account not found' });

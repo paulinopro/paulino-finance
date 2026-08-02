@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { Response } from 'express';
+import { respondInactiveEntityError } from './activeEntityGuard';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta, getAccountRow, isCurrencyAllowedForAccount } from '../services/accountBalance';
@@ -139,6 +140,7 @@ export const getGoalMovements = async (req: AuthRequest, res: Response) => {
       movements: result.rows.map((row) => mapMovementRow(row as Record<string, unknown>)),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get financial goal movements error:', error);
     res.status(500).json({ message: 'Error fetching financial goal movements', error: error.message });
   }
@@ -310,6 +312,7 @@ export const addGoalMovement = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Add financial goal movement error:', error);
     res.status(500).json({ message: 'Error adding financial goal movement', error: error.message });
   } finally {
@@ -480,6 +483,7 @@ export const updateGoalMovement = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update financial goal movement error:', error);
     res.status(500).json({ message: 'Error updating financial goal movement', error: error.message });
   } finally {
@@ -568,6 +572,7 @@ export const deleteGoalMovement = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete financial goal movement error:', error);
     res.status(500).json({ message: 'Error deleting financial goal movement', error: error.message });
   } finally {

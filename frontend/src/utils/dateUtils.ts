@@ -132,7 +132,10 @@ export function todayYmdLocal(): string {
 
 /** Timestamp local para ordenar por fecha calendario (evita parse UTC de `YYYY-MM-DD`). */
 export function calendarDateToSortableMs(value: string | null | undefined): number {
-  const ymd = formatDateForInput(value);
+  const displayMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(value || '').trim());
+  const ymd = displayMatch
+    ? `${displayMatch[3]}-${displayMatch[2]}-${displayMatch[1]}`
+    : formatDateForInput(value);
   if (!ymd) return 0;
   const [y, m, d] = ymd.split('-').map((x) => parseInt(x, 10));
   if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return 0;

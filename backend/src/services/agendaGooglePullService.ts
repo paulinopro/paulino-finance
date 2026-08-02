@@ -56,6 +56,39 @@ async function storeConnectionSyncToken(connectionId: number, syncToken: string 
   );
 }
 
+function isInvalidSyncToken(error: unknown): boolean {
+  const err = error as { code?: unknown; message?: unknown };
+  const message = typeof err.message === 'string' ? err.message : String(error);
+  return err.code === 410 || /\b410\b|syncToken/i.test(message);
+}
+
+async function listAllGoogleEventPages(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  range: { fromIso: string; toIso: string },
+  syncToken: string | null
+): Promise<{ events: calendar_v3.Schema$Event[]; nextSyncToken: string | null }> {
+  const events: calendar_v3.Schema$Event[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | null = null;
+
+  do {
+    const res = await calendar.events.list({
+      calendarId,
+      maxResults: 2500,
+      showDeleted: true,
+      singleEvents: false,
+      ...(syncToken ? { syncToken } : { timeMin: range.fromIso, timeMax: range.toIso }),
+      ...(pageToken ? { pageToken } : {}),
+    });
+    events.push(...(res.data.items || []));
+    pageToken = res.data.nextPageToken || undefined;
+    if (!pageToken) nextSyncToken = res.data.nextSyncToken || null;
+  } while (pageToken);
+
+  return { events, nextSyncToken };
+}
+
 export async function pullGoogleAgendaEvents(
   userId: number,
   range: { fromIso: string; toIso: string }
@@ -69,30 +102,26 @@ export async function pullGoogleAgendaEvents(
 
   try {
     const syncToken = await getConnectionSyncToken(loaded.connectionId);
-    const res = await calendar.events.list({
-      calendarId: loaded.calendarId,
-      maxResults: 2500,
-      showDeleted: true,
-      singleEvents: false,
-      ...(syncToken
-        ? { syncToken }
-        : { timeMin: range.fromIso, timeMax: range.toIso }),
-    });
+    let pulled;
+    try {
+      pulled = await listAllGoogleEventPages(calendar, loaded.calendarId, range, syncToken);
+    } catch (error: unknown) {
+      if (!syncToken || !isInvalidSyncToken(error)) throw error;
+      await query(`UPDATE agenda_provider_connections SET sync_token = NULL WHERE id = $1`, [
+        loaded.connectionId,
+      ]);
+      pulled = await listAllGoogleEventPages(calendar, loaded.calendarId, range, null);
+    }
 
-    for (const item of res.data.items || []) {
+    for (const item of pulled.events) {
       const draft = googleEventToAgendaDraft(item, loaded.connectionId);
       if (draft) events.push(draft);
     }
-    await storeConnectionSyncToken(loaded.connectionId, res.data.nextSyncToken || null);
+    await storeConnectionSyncToken(loaded.connectionId, pulled.nextSyncToken);
   } catch (e: unknown) {
     const msg = typeof (e as { message?: unknown }).message === 'string' ? (e as { message: string }).message : String(e);
     errors.push(msg);
     await recordGoogleConnectionError(userId, msg);
-    if (/\b410\b|syncToken/i.test(msg)) {
-      await query(`UPDATE agenda_provider_connections SET sync_token = NULL WHERE id = $1`, [
-        loaded.connectionId,
-      ]).catch(() => undefined);
-    }
   }
 
   return { events, errors };

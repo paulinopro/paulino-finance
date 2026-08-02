@@ -61,6 +61,8 @@ const getAccountsPayable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get accounts payable error:', error);
         res.status(500).json({ message: 'Error fetching accounts payable', error: error.message });
     }
@@ -97,6 +99,8 @@ const getAccountPayablePayments = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get account payable payments error:', error);
         res.status(500).json({ message: 'Error fetching payments', error: error.message });
     }
@@ -156,7 +160,8 @@ const addAccountPayablePayment = async (req, res) => {
                 });
             }
             catch (e) {
-                console.error('AP payment balance:', e);
+                await (0, database_1.query)('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [expenseId, userId]);
+                throw e;
             }
         }
         await (0, database_1.query)(`INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
@@ -194,6 +199,8 @@ const addAccountPayablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Add account payable payment error:', error);
         res.status(500).json({ message: 'Error recording payment', error: error.message });
     }
@@ -258,6 +265,8 @@ const updateAccountPayablePayment = async (req, res) => {
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
+                        if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
+                            return;
                         console.error('AP update revert balance:', e);
                         return res.status(500).json({ message: 'Error al ajustar saldo de la cuenta (reversión)' });
                     }
@@ -301,6 +310,8 @@ const updateAccountPayablePayment = async (req, res) => {
         }
         catch (e) {
             await client.query('ROLLBACK');
+            if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
+                return;
             console.error('Update AP payment tx:', e);
             return res.status(500).json({ message: 'Error al actualizar abono', error: e.message });
         }
@@ -333,6 +344,8 @@ const updateAccountPayablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update account payable payment error:', error);
         res.status(500).json({ message: 'Error updating payment', error: error.message });
     }
@@ -382,6 +395,8 @@ const deleteAccountPayablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete account payable payment error:', error);
         res.status(500).json({ message: 'Error deleting payment', error: error.message });
     }
@@ -424,6 +439,8 @@ const createAccountPayable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create account payable error:', error);
         res.status(500).json({ message: 'Error creating account payable', error: error.message });
     }
@@ -492,6 +509,8 @@ const updateAccountPayable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update account payable error:', error);
         res.status(500).json({ message: 'Error updating account payable', error: error.message });
     }
@@ -544,7 +563,8 @@ const payAccountPayable = async (req, res) => {
                 });
             }
             catch (e) {
-                console.error('AP pay balance:', e);
+                await (0, database_1.query)('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [expenseId, userId]);
+                throw e;
             }
         }
         await (0, database_1.query)(`INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
@@ -577,6 +597,8 @@ const payAccountPayable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Pay account payable error:', error);
         res.status(500).json({ message: 'Error paying account payable', error: error.message });
     }
@@ -603,6 +625,8 @@ const deleteAccountPayable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete account payable error:', error);
         res.status(500).json({ message: 'Error deleting account payable', error: error.message });
     }

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteVehicleExpense = exports.updateVehicleExpense = exports.createVehicleExpense = exports.getVehicleExpenses = exports.deleteVehicle = exports.updateVehicle = exports.createVehicle = exports.getVehicles = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
@@ -72,6 +73,8 @@ const getVehicles = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get vehicles error:', error);
         res.status(500).json({ message: 'Error fetching vehicles', error: error.message });
     }
@@ -130,6 +133,8 @@ const createVehicle = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create vehicle error:', error);
         res.status(500).json({ message: 'Error creating vehicle', error: error.message });
     }
@@ -205,6 +210,8 @@ const updateVehicle = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update vehicle error:', error);
         res.status(500).json({ message: 'Error updating vehicle', error: error.message });
     }
@@ -224,6 +231,8 @@ const deleteVehicle = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete vehicle error:', error);
         res.status(500).json({ message: 'Error deleting vehicle', error: error.message });
     }
@@ -270,6 +279,8 @@ const getVehicleExpenses = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get vehicle expenses error:', error);
         res.status(500).json({ message: 'Error fetching vehicle expenses', error: error.message });
     }
@@ -383,6 +394,8 @@ const createVehicleExpense = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create vehicle expense error:', error);
         res.status(500).json({ message: 'Error creating vehicle expense', error: error.message });
     }
@@ -561,6 +574,8 @@ const updateVehicleExpense = async (req, res) => {
         }
         catch (error) {
             await client.query('ROLLBACK');
+            if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+                return;
             console.error('Update vehicle expense error:', error);
             res.status(500).json({ message: 'Error updating vehicle expense', error: error.message });
         }
@@ -569,6 +584,8 @@ const updateVehicleExpense = async (req, res) => {
         }
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update vehicle expense error:', error);
         res.status(500).json({ message: 'Error updating vehicle expense', error: error.message });
     }
@@ -601,6 +618,8 @@ const deleteVehicleExpense = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete vehicle expense error:', error);
         res.status(500).json({ message: 'Error deleting vehicle expense', error: error.message });
     }

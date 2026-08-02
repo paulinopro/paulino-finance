@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -70,6 +70,7 @@ export const getAccountsReceivable = async (req: AuthRequest, res: Response) => 
       })),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get accounts receivable error:', error);
     res.status(500).json({ message: 'Error fetching accounts receivable', error: error.message });
   }
@@ -114,6 +115,7 @@ export const getAccountReceivablePayments = async (req: AuthRequest, res: Respon
       })),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get account receivable payments error:', error);
     res.status(500).json({ message: 'Error fetching payments', error: error.message });
   }
@@ -181,7 +183,8 @@ export const addAccountReceivablePayment = async (req: AuthRequest, res: Respons
           description: `[CxC] Abono por cobrar · «${account.description}»`,
         });
       } catch (e: any) {
-        console.error('AR payment balance:', e);
+        await query('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
+        throw e;
       }
     }
 
@@ -233,6 +236,7 @@ export const addAccountReceivablePayment = async (req: AuthRequest, res: Respons
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Add account receivable payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
   }
@@ -315,6 +319,7 @@ export const updateAccountReceivablePayment = async (req: AuthRequest, res: Resp
             });
           } catch (e: any) {
             await client.query('ROLLBACK');
+            if (respondInactiveEntityError(e, res)) return;
             console.error('AR update revert balance:', e);
             return res.status(500).json({ message: 'Error al ajustar saldo de la cuenta (reversión)' });
           }
@@ -353,6 +358,7 @@ export const updateAccountReceivablePayment = async (req: AuthRequest, res: Resp
       await client.query('COMMIT');
     } catch (e: any) {
       await client.query('ROLLBACK');
+      if (respondInactiveEntityError(e, res)) return;
       console.error('Update AR payment tx:', e);
       return res.status(500).json({ message: 'Error al actualizar abono', error: e.message });
     } finally {
@@ -388,6 +394,7 @@ export const updateAccountReceivablePayment = async (req: AuthRequest, res: Resp
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update account receivable payment error:', error);
     res.status(500).json({ message: 'Error updating payment', error: error.message });
   }
@@ -450,6 +457,7 @@ export const deleteAccountReceivablePayment = async (req: AuthRequest, res: Resp
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete account receivable payment error:', error);
     res.status(500).json({ message: 'Error deleting payment', error: error.message });
   }
@@ -499,6 +507,7 @@ export const createAccountReceivable = async (req: AuthRequest, res: Response) =
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create account receivable error:', error);
     res.status(500).json({ message: 'Error creating account receivable', error: error.message });
   }
@@ -576,6 +585,7 @@ export const updateAccountReceivable = async (req: AuthRequest, res: Response) =
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update account receivable error:', error);
     res.status(500).json({ message: 'Error updating account receivable', error: error.message });
   }
@@ -642,7 +652,8 @@ export const receiveAccountReceivable = async (req: AuthRequest, res: Response) 
           description: `[CxC] Cobro total por cobrar · «${account.description}»`,
         });
       } catch (e: any) {
-        console.error('AR receive balance:', e);
+        await query('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
+        throw e;
       }
     }
 
@@ -684,6 +695,7 @@ export const receiveAccountReceivable = async (req: AuthRequest, res: Response) 
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Receive account receivable error:', error);
     res.status(500).json({ message: 'Error receiving account receivable', error: error.message });
   }
@@ -719,6 +731,7 @@ export const deleteAccountReceivable = async (req: AuthRequest, res: Response) =
       message: 'Cuenta por cobrar eliminada; ingresos vinculados eliminados',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete account receivable error:', error);
     res.status(500).json({ message: 'Error deleting account receivable', error: error.message });
   }

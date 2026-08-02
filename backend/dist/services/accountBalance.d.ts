@@ -18,6 +18,7 @@ export type AccountRow = {
     currency_type: string;
     account_kind: string;
     bank_name: string | null;
+    is_active: boolean;
 };
 export declare function getAccountRow(userId: number, accountId: number, client?: PoolClient): Promise<AccountRow | undefined>;
 export declare function parseBalanceForCurrency(row: AccountRow, currency: string, pair: UserCurrencyPair): number;

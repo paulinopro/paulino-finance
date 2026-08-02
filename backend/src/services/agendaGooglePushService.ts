@@ -180,6 +180,7 @@ export async function syncAgendaItemToGoogleCalendar(userId: number, agendaItemI
     await recordGoogleConnectionError(userId, msg || String(e));
     await flagSyncSqlError(oauth.connectionId, agendaItemId, msg || String(e)).catch(() => undefined);
     console.warn('Google Calendar push failed', userId, agendaItemId, msg || e);
+    throw e instanceof Error ? e : new Error(msg || String(e));
   }
 }
 
@@ -205,6 +206,7 @@ export async function removeAgendaItemFromGoogleCalendar(userId: number, agendaI
 
   const calendar = google.calendar({ version: 'v3', auth: oauth.client });
 
+  const failures: string[] = [];
   for (const r of res.rows as { external_uid: string; calendar_id: string }[]) {
     if (!r.external_uid) continue;
     const calId = r.calendar_id || oauth.calendarId;
@@ -216,8 +218,14 @@ export async function removeAgendaItemFromGoogleCalendar(userId: number, agendaI
       const notFound = err.code === 404 || /\b404\b/.test(msg) || /NOT_FOUND/i.test(msg);
       if (!notFound) {
         console.warn('Google Calendar delete failed', msg);
+        failures.push(msg);
+        await recordGoogleConnectionError(userId, msg);
+        await flagSyncSqlError(oauth.connectionId, agendaItemId, msg).catch(() => undefined);
       }
     }
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join('; '));
   }
 }
 

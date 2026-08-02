@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { isCurrencyAllowedForAccount, recordBankAccountMovement } from '../services/accountBalance';
@@ -104,6 +105,7 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get accounts error:', error);
     res.status(500).json({ message: 'Error fetching accounts', error: error.message });
   }
@@ -143,6 +145,7 @@ export const getAccount = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get account error:', error);
     res.status(500).json({ message: 'Error fetching account', error: error.message });
   }
@@ -196,6 +199,7 @@ export const listBankAccountMovements = async (req: AuthRequest, res: Response) 
       total: countR.rows[0]?.c ?? 0,
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('List account movements error:', error);
     res.status(500).json({ message: 'Error listing movements', error: error.message });
   }
@@ -277,6 +281,7 @@ export const createAccount = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create account error:', error);
     res.status(500).json({ message: 'Error creating account', error: error.message });
   }
@@ -286,6 +291,7 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const accountId = parseInt(req.params.id);
+    if (!(await ensureActiveEntity('accounts', accountId, userId, res))) return;
     const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } =
       req.body;
 
@@ -315,7 +321,7 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
            currency_type = COALESCE($6, currency_type),
            account_kind = COALESCE($7, account_kind),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $8 AND user_id = $9
+       WHERE id = $8 AND user_id = $9 AND is_active = TRUE
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
                  currency_type, account_kind, created_at, updated_at`,
       [
@@ -330,6 +336,11 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
         userId,
       ]
     );
+
+    if (result.rows.length === 0) {
+      if (!(await ensureActiveEntity('accounts', accountId, userId, res))) return;
+      return res.status(404).json({ message: 'Account not found' });
+    }
 
     const row = result.rows[0];
     const ct = row.currency_type as string;
@@ -381,6 +392,7 @@ export const updateAccount = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update account error:', error);
     res.status(500).json({ message: 'Error updating account', error: error.message });
   }
@@ -405,6 +417,7 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       message: 'Account deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete account error:', error);
     res.status(500).json({ message: 'Error deleting account', error: error.message });
   }

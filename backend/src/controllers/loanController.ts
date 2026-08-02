@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -49,7 +49,7 @@ async function removeLoanPaymentById(paymentId: number, userId: number): Promise
 
   const updateStatus = newPaidInstallments >= payment.total_installments ? 'PAID' : 'ACTIVE';
   await query(
-    `UPDATE loans 
+    `UPDATE loans
      SET paid_installments = $1, status = $2, updated_at = CURRENT_TIMESTAMP
      WHERE id = $3`,
     [newPaidInstallments, updateStatus, loanId]
@@ -97,11 +97,11 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
     // Helper function to calculate next payment date
     const calculateNextPaymentDate = (loan: any): string | null => {
       if (!loan.payment_day || loan.status === 'PAID') return null;
-      
+
       const today = new Date();
       const currentMonth = today.getMonth();
       const currentYear = today.getFullYear();
-      
+
       // Get last payment date or start date
       let lastPaymentDate: Date;
       if (loan.next_payment_date) {
@@ -109,21 +109,21 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       } else {
         lastPaymentDate = new Date(loan.start_date);
       }
-      
+
       // Calculate next payment date based on payment_day
       const nextPayment = new Date(currentYear, currentMonth, loan.payment_day);
-      
+
       // If payment day has passed this month, move to next month
       if (nextPayment < today) {
         nextPayment.setMonth(nextPayment.getMonth() + 1);
       }
-      
+
       // If we have a last payment date, ensure next payment is after it
       if (lastPaymentDate && nextPayment <= lastPaymentDate) {
         nextPayment.setMonth(nextPayment.getMonth() + 1);
         nextPayment.setDate(loan.payment_day);
       }
-      
+
       return dateToYmdLocal(nextPayment);
     };
 
@@ -140,9 +140,9 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
         next_payment_date: row.next_payment_date,
         status: row.status,
       };
-      
+
       const nextPaymentDate = calculateNextPaymentDate(loan);
-      
+
       return {
         id: row.id,
         loanName: row.loan_name,
@@ -196,6 +196,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get loans error:', error);
     res.status(500).json({ message: 'Error fetching loans', error: error.message });
   }
@@ -224,7 +225,7 @@ export const getLoan = async (req: AuthRequest, res: Response) => {
 
     // Get payments
     const paymentsResult = await query(
-      `SELECT id, payment_date, amount, principal_amount, interest_amount, charge_amount, 
+      `SELECT id, payment_date, amount, principal_amount, interest_amount, charge_amount,
               late_fee, installment_number, outstanding_balance, payment_type, notes, bank_account_id,
               created_at, updated_at
        FROM loan_payments
@@ -249,7 +250,7 @@ export const getLoan = async (req: AuthRequest, res: Response) => {
       (item) => item.status === 'PENDING' || item.status === 'OVERDUE' || item.status === 'FUTURE'
     );
     const nextPaymentDate = nextInstallment ? nextInstallment.dueDate : null;
-    
+
     // Return the actual dates from the database, not calculated ones
     // This ensures that when editing, the user sees the dates they originally saved
     const actualStartDate = loan.start_date;
@@ -299,6 +300,7 @@ export const getLoan = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get loan error:', error);
     res.status(500).json({ message: 'Error fetching loan', error: error.message });
   }
@@ -345,7 +347,7 @@ export const createLoan = async (req: AuthRequest, res: Response) => {
       const today = new Date();
       const currentMonth = today.getMonth();
       const currentYear = today.getFullYear();
-      
+
       let nextPayment = new Date(currentYear, currentMonth, paymentDay);
       if (nextPayment < today || nextPayment < start) {
         nextPayment.setMonth(nextPayment.getMonth() + 1);
@@ -355,7 +357,7 @@ export const createLoan = async (req: AuthRequest, res: Response) => {
     }
 
     const result = await query(
-      `INSERT INTO loans 
+      `INSERT INTO loans
        (user_id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
         total_installments, start_date, end_date, installment_amount, fixed_charge, payment_day, next_payment_date, currency, interest_calculation_base)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -407,6 +409,7 @@ export const createLoan = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create loan error:', error);
     res.status(500).json({ message: 'Error creating loan', error: error.message });
   }
@@ -463,12 +466,12 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
     // Convert empty string to null for both dates
     const processedStartDate = (startDate === '' || startDate === null || startDate === undefined) ? null : startDate;
     const processedEndDate = (endDate === '' || endDate === null || endDate === undefined) ? null : endDate;
-    
+
     // Validate startDate is provided
     if (!processedStartDate) {
       return res.status(400).json({ message: 'Start date is required' });
     }
-    
+
     // Calculate next payment date if payment_day is being updated
     let nextPaymentDate = null;
     if (paymentDay !== undefined) {
@@ -481,7 +484,7 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
       const today = new Date();
       const currentMonth = today.getMonth();
       const currentYear = today.getFullYear();
-      
+
       let nextPayment = new Date(currentYear, currentMonth, paymentDay);
       if (nextPayment < today || nextPayment < start) {
         nextPayment.setMonth(nextPayment.getMonth() + 1);
@@ -561,6 +564,7 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update loan error:', error);
     res.status(500).json({ message: 'Error updating loan', error: error.message });
   }
@@ -587,6 +591,7 @@ export const deleteLoan = async (req: AuthRequest, res: Response) => {
       message: 'Loan deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete loan error:', error);
     res.status(500).json({ message: 'Error deleting loan', error: error.message });
   }
@@ -629,8 +634,8 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 
     // Insert payment with detailed breakdown
     const paymentResult = await query(
-      `INSERT INTO loan_payments 
-       (loan_id, payment_date, amount, principal_amount, interest_amount, charge_amount, 
+      `INSERT INTO loan_payments
+       (loan_id, payment_date, amount, principal_amount, interest_amount, charge_amount,
         late_fee, installment_number, outstanding_balance, payment_type, notes, bank_account_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id, payment_date, amount, principal_amount, interest_amount, charge_amount,
@@ -671,7 +676,7 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
       const paymentDateObj = new Date(paymentDate);
       const currentMonth = paymentDateObj.getMonth();
       const currentYear = paymentDateObj.getFullYear();
-      
+
       let nextPayment = new Date(currentYear, currentMonth, loan.payment_day);
       nextPayment.setMonth(nextPayment.getMonth() + 1);
       nextPaymentDate = dateToYmdLocal(nextPayment);
@@ -680,7 +685,7 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
     // Update loan
     const updateStatus = newPaidInstallments >= loan.total_installments ? 'PAID' : 'ACTIVE';
     await query(
-      `UPDATE loans 
+      `UPDATE loans
        SET paid_installments = $1, status = $2, next_payment_date = COALESCE($3, next_payment_date), updated_at = CURRENT_TIMESTAMP
        WHERE id = $4`,
       [newPaidInstallments, updateStatus, nextPaymentDate, loanId]
@@ -754,6 +759,7 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Record payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
   }
@@ -787,6 +793,7 @@ export const deletePayment = async (req: AuthRequest, res: Response) => {
         });
       } catch (e: any) {
         console.error('Revert balance on loan payment delete:', e);
+      throw e;
       }
     }
 
@@ -797,6 +804,7 @@ export const deletePayment = async (req: AuthRequest, res: Response) => {
       message: 'Payment deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete payment error:', error);
     res.status(500).json({ message: 'Error deleting payment', error: error.message });
   }
@@ -820,7 +828,7 @@ export const getAmortizationSchedule = async (req: AuthRequest, res: Response) =
 
     // Generate or get amortization schedule with user timezone
     const schedule = await generateAmortizationSchedule(loanId, userId);
-    
+
     // Get loan details for summary
     const loanDetailsResult = await query(
       `SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.start_date, l.currency,
@@ -869,6 +877,7 @@ export const getAmortizationSchedule = async (req: AuthRequest, res: Response) =
       schedule: schedule,
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get amortization schedule error:', error);
     res.status(500).json({ message: 'Error fetching amortization schedule', error: error.message });
   }
@@ -922,6 +931,7 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
         );
       } catch (e: any) {
         console.error('Revert balance on loan payment update:', e);
+      throw e;
       }
     }
 
@@ -946,8 +956,8 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
            bank_account_id = $10,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $11
-       RETURNING id, payment_date, amount, principal_amount, interest_amount, 
-                 charge_amount, late_fee, installment_number, outstanding_balance, 
+       RETURNING id, payment_date, amount, principal_amount, interest_amount,
+                 charge_amount, late_fee, installment_number, outstanding_balance,
                  payment_type, notes, bank_account_id, updated_at`,
       [
         effDate,
@@ -1009,6 +1019,7 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update payment error:', error);
     res.status(500).json({ message: 'Error updating payment', error: error.message });
   }

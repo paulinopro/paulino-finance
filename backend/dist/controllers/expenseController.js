@@ -233,6 +233,8 @@ const getExpenses = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get expenses error:', error);
         res.status(500).json({ message: 'Error fetching expenses', error: error.message });
     }
@@ -298,6 +300,8 @@ const getExpense = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get expense error:', error);
         res.status(500).json({ message: 'Error fetching expense', error: error.message });
     }
@@ -450,6 +454,8 @@ const createExpense = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create expense error:', error);
         res.status(500).json({ message: 'Error creating expense', error: error.message });
     }
@@ -636,6 +642,8 @@ const updateExpense = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update expense error:', error);
         res.status(500).json({ message: 'Error updating expense', error: error.message });
     }
@@ -658,6 +666,8 @@ const deleteExpense = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete expense error:', error);
         res.status(500).json({ message: 'Error deleting expense', error: error.message });
     }
@@ -815,6 +825,8 @@ const updateExpensePaymentStatus = async (req, res) => {
         }
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update payment status error:', error);
         res.status(500).json({ message: 'Error updating payment status', error: error.message });
     }

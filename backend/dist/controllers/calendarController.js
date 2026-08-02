@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getHistory = exports.listOrphanEvents = exports.refreshEvents = exports.updateStatus = exports.getSummary = exports.getEvents = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const dateUtils_1 = require("../utils/dateUtils");
 const calendarService_1 = require("../services/calendarService");
 /**
@@ -30,6 +31,8 @@ const getEvents = async (req, res) => {
         res.json({ success: true, events });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get calendar events error:', error);
         res.status(500).json({ message: 'Error fetching calendar events', error: error.message });
     }
@@ -50,6 +53,8 @@ const getSummary = async (req, res) => {
         res.json({ success: true, summary });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get financial summary error:', error);
         res.status(500).json({ message: 'Error fetching financial summary', error: error.message });
     }
@@ -77,6 +82,8 @@ const updateStatus = async (req, res) => {
         res.json({ success: true, event: updatedEvent, message: 'Event status updated successfully' });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         if (error?.message === 'INVALID_ACTUAL_AMOUNT') {
             return res.status(400).json({ message: 'actualAmount must be a positive number' });
         }
@@ -104,6 +111,8 @@ const refreshEvents = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Refresh calendar events error:', error);
         res.status(500).json({ message: 'Error refreshing calendar events', error: error.message });
     }
@@ -134,6 +143,8 @@ const listOrphanEvents = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('List orphan calendar events error:', error);
         res.status(500).json({ message: 'Error listing orphan calendar events', error: error.message });
     }
@@ -154,6 +165,8 @@ const getHistory = async (req, res) => {
         res.json({ success: true, count: events.length, events });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get calendar history error:', error);
         res.status(500).json({ message: 'Error fetching calendar history', error: error.message });
     }

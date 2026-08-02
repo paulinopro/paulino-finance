@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.listBankAccountMovements = exports.getAccount = exports.getAccounts = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
@@ -93,6 +94,8 @@ const getAccounts = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get accounts error:', error);
         res.status(500).json({ message: 'Error fetching accounts', error: error.message });
     }
@@ -127,6 +130,8 @@ const getAccount = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get account error:', error);
         res.status(500).json({ message: 'Error fetching account', error: error.message });
     }
@@ -171,6 +176,8 @@ const listBankAccountMovements = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('List account movements error:', error);
         res.status(500).json({ message: 'Error listing movements', error: error.message });
     }
@@ -228,6 +235,8 @@ const createAccount = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create account error:', error);
         res.status(500).json({ message: 'Error creating account', error: error.message });
     }
@@ -237,6 +246,8 @@ const updateAccount = async (req, res) => {
     try {
         const userId = req.userId;
         const accountId = parseInt(req.params.id);
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accounts', accountId, userId, res)))
+            return;
         const { bankName, accountType, accountNumber, balanceDop, balanceUsd, currencyType, accountKind } = req.body;
         const checkResult = await (0, database_1.query)(`SELECT id, balance_dop, balance_usd, currency_type FROM bank_accounts WHERE id = $1 AND user_id = $2`, [accountId, userId]);
         if (checkResult.rows.length === 0) {
@@ -255,7 +266,7 @@ const updateAccount = async (req, res) => {
            currency_type = COALESCE($6, currency_type),
            account_kind = COALESCE($7, account_kind),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $8 AND user_id = $9
+       WHERE id = $8 AND user_id = $9 AND is_active = TRUE
        RETURNING id, bank_name, account_type, account_number, balance_dop, balance_usd,
                  currency_type, account_kind, created_at, updated_at`, [
             bankName,
@@ -268,6 +279,11 @@ const updateAccount = async (req, res) => {
             accountId,
             userId,
         ]);
+        if (result.rows.length === 0) {
+            if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accounts', accountId, userId, res)))
+                return;
+            return res.status(404).json({ message: 'Account not found' });
+        }
         const row = result.rows[0];
         const ct = row.currency_type;
         const newDop = parseFloat(row.balance_dop || 0);
@@ -303,6 +319,8 @@ const updateAccount = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update account error:', error);
         res.status(500).json({ message: 'Error updating account', error: error.message });
     }
@@ -322,6 +340,8 @@ const deleteAccount = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete account error:', error);
         res.status(500).json({ message: 'Error deleting account', error: error.message });
     }

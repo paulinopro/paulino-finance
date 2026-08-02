@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import type { PoolClient } from 'pg';
 import { getClient, query } from '../config/database';
@@ -307,6 +307,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get expenses error:', error);
     res.status(500).json({ message: 'Error fetching expenses', error: error.message });
   }
@@ -381,6 +382,7 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get expense error:', error);
     res.status(500).json({ message: 'Error fetching expense', error: error.message });
   }
@@ -561,6 +563,7 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create expense error:', error);
     res.status(500).json({ message: 'Error creating expense', error: error.message });
   } finally {
@@ -786,6 +789,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update expense error:', error);
     res.status(500).json({ message: 'Error updating expense', error: error.message });
   } finally {
@@ -808,6 +812,7 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
       message: 'Expense deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete expense error:', error);
     res.status(500).json({ message: 'Error deleting expense', error: error.message });
   }
@@ -984,6 +989,7 @@ export const updateExpensePaymentStatus = async (req: AuthRequest, res: Response
       });
     }
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update payment status error:', error);
     res.status(500).json({ message: 'Error updating payment status', error: error.message });
   }

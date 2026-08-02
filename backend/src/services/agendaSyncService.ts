@@ -13,6 +13,9 @@ export interface AgendaSyncResult {
   errors: Array<{ provider: string; message: string }>;
 }
 
+type ExternalProvider = 'GOOGLE_CALENDAR' | 'ICLOUD_CALDAV';
+type SyncRange = { fromIso: string; toIso: string };
+
 function dateOrNull(raw: string | null | undefined): Date | null {
   if (!raw) return null;
   const d = new Date(raw);
@@ -24,25 +27,38 @@ function externalStampMs(draft: AgendaExternalEventDraft): number {
   return d ? d.getTime() : 0;
 }
 
-async function defaultRangeForUser(userId: number): Promise<{ fromIso: string; toIso: string }> {
+function fallbackRange(): SyncRange {
+  const now = new Date();
+  return {
+    fromIso: new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString(),
+    toIso: new Date(now.getFullYear() + 2, now.getMonth(), now.getDate()).toISOString(),
+  };
+}
+
+async function rangesForUser(userId: number): Promise<Record<ExternalProvider, SyncRange>> {
   const res = await query(
     `
-    SELECT MIN(import_from) AS import_from, MAX(import_to) AS import_to
+    SELECT provider, import_from, import_to
     FROM agenda_provider_connections
     WHERE user_id = $1
     `,
     [userId]
   );
-  const now = new Date();
-  const from =
-    res.rows[0]?.import_from instanceof Date
-      ? res.rows[0].import_from
-      : new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-  const to =
-    res.rows[0]?.import_to instanceof Date
-      ? res.rows[0].import_to
-      : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
-  return { fromIso: from.toISOString(), toIso: to.toISOString() };
+  const ranges: Record<ExternalProvider, SyncRange> = {
+    GOOGLE_CALENDAR: fallbackRange(),
+    ICLOUD_CALDAV: fallbackRange(),
+  };
+  for (const row of res.rows as Array<{
+    provider: string;
+    import_from: Date | string | null;
+    import_to: Date | string | null;
+  }>) {
+    if (row.provider !== 'GOOGLE_CALENDAR' && row.provider !== 'ICLOUD_CALDAV') continue;
+    const from = row.import_from instanceof Date ? row.import_from : dateOrNull(row.import_from);
+    const to = row.import_to instanceof Date ? row.import_to : dateOrNull(row.import_to);
+    if (from && to) ranges[row.provider] = { fromIso: from.toISOString(), toIso: to.toISOString() };
+  }
+  return ranges;
 }
 
 async function upsertSyncState(draft: AgendaExternalEventDraft, agendaItemId: number): Promise<void> {
@@ -196,7 +212,48 @@ async function applyExternalEvent(userId: number, draft: AgendaExternalEventDraf
   return 'updated';
 }
 
-async function pushPending(userId: number): Promise<{ pushed: number; deleted: number }> {
+function errorMessage(error: unknown): string {
+  return typeof (error as { message?: unknown })?.message === 'string'
+    ? (error as { message: string }).message
+    : String(error);
+}
+
+async function markOutboundFailure(
+  userId: number,
+  agendaItemId: number,
+  provider: ExternalProvider,
+  message: string
+): Promise<void> {
+  await Promise.all([
+    query(
+      `
+      UPDATE agenda_item_sync_state s SET
+        last_error = $4,
+        updated_at = CURRENT_TIMESTAMP
+      FROM agenda_provider_connections c
+      WHERE s.connection_id = c.id
+        AND c.user_id = $1
+        AND s.agenda_item_id = $2
+        AND c.provider = $3
+      `,
+      [userId, agendaItemId, provider, message.slice(0, 750)]
+    ),
+    query(
+      `
+      UPDATE agenda_provider_connections SET
+        last_error = $3,
+        status = CASE WHEN status = 'CONNECTED' THEN 'ERROR' ELSE status END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1 AND provider = $2 AND status IN ('CONNECTED','ERROR')
+      `,
+      [userId, provider, message.slice(0, 1000)]
+    ),
+  ]);
+}
+
+async function pushPending(
+  userId: number
+): Promise<{ pushed: number; deleted: number; errors: AgendaSyncResult['errors'] }> {
   const res = await query(
     `
     SELECT id, deleted_at
@@ -210,30 +267,46 @@ async function pushPending(userId: number): Promise<{ pushed: number; deleted: n
 
   let pushed = 0;
   let deleted = 0;
+  const errors: AgendaSyncResult['errors'] = [];
   for (const row of res.rows as { id: number; deleted_at: Date | null }[]) {
-    if (row.deleted_at) {
-      await Promise.all([
-        removeAgendaItemFromGoogleCalendar(userId, row.id),
-        removeAgendaItemFromICloudCalDav(userId, row.id),
-      ]);
-      deleted += 1;
-    } else {
-      await Promise.all([
-        syncAgendaItemToGoogleCalendar(userId, row.id),
-        syncAgendaItemToICloudCalDav(userId, row.id),
-      ]);
-      pushed += 1;
+    const operations: Array<{ provider: ExternalProvider; operation: Promise<void> }> = row.deleted_at
+      ? [
+          { provider: 'GOOGLE_CALENDAR', operation: removeAgendaItemFromGoogleCalendar(userId, row.id) },
+          { provider: 'ICLOUD_CALDAV', operation: removeAgendaItemFromICloudCalDav(userId, row.id) },
+        ]
+      : [
+          { provider: 'GOOGLE_CALENDAR', operation: syncAgendaItemToGoogleCalendar(userId, row.id) },
+          { provider: 'ICLOUD_CALDAV', operation: syncAgendaItemToICloudCalDav(userId, row.id) },
+        ];
+    const settled = await Promise.allSettled(operations.map(({ operation }) => operation));
+    let failed = false;
+    for (let index = 0; index < settled.length; index += 1) {
+      const outcome = settled[index];
+      if (outcome.status === 'fulfilled') continue;
+      failed = true;
+      const provider = operations[index].provider;
+      const message = errorMessage(outcome.reason);
+      errors.push({ provider, message });
+      await markOutboundFailure(userId, row.id, provider, message);
+    }
+    if (failed) {
+      continue;
     }
     await query(`UPDATE agenda_items SET sync_status = 'SYNCED' WHERE user_id = $1 AND id = $2`, [
       userId,
       row.id,
     ]);
+    if (row.deleted_at) deleted += 1;
+    else pushed += 1;
   }
 
-  return { pushed, deleted };
+  return { pushed, deleted, errors };
 }
 
-export async function syncAgendaForUser(userId: number): Promise<AgendaSyncResult> {
+async function syncAgendaWithRanges(
+  userId: number,
+  providerRanges: Partial<Record<ExternalProvider, SyncRange>>
+): Promise<AgendaSyncResult> {
   const result: AgendaSyncResult = {
     imported: 0,
     updated: 0,
@@ -242,10 +315,13 @@ export async function syncAgendaForUser(userId: number): Promise<AgendaSyncResul
     errors: [],
   };
 
-  const range = await defaultRangeForUser(userId);
   const [google, icloud] = await Promise.all([
-    pullGoogleAgendaEvents(userId, range),
-    pullICloudAgendaEvents(userId, range),
+    providerRanges.GOOGLE_CALENDAR
+      ? pullGoogleAgendaEvents(userId, providerRanges.GOOGLE_CALENDAR)
+      : Promise.resolve({ events: [], errors: [] }),
+    providerRanges.ICLOUD_CALDAV
+      ? pullICloudAgendaEvents(userId, providerRanges.ICLOUD_CALDAV)
+      : Promise.resolve({ events: [], errors: [] }),
   ]);
 
   for (const message of google.errors) {
@@ -265,8 +341,13 @@ export async function syncAgendaForUser(userId: number): Promise<AgendaSyncResul
   const pushed = await pushPending(userId);
   result.pushed += pushed.pushed;
   result.deleted += pushed.deleted;
+  result.errors.push(...pushed.errors);
 
   return result;
+}
+
+export async function syncAgendaForUser(userId: number): Promise<AgendaSyncResult> {
+  return syncAgendaWithRanges(userId, await rangesForUser(userId));
 }
 
 export async function syncAgendaImportRange(
@@ -295,5 +376,7 @@ export async function syncAgendaImportRange(
   );
   if (res.rows.length === 0) throw new Error('PROVIDER_NOT_CONNECTED');
 
-  return syncAgendaForUser(userId);
+  return syncAgendaWithRanges(userId, {
+    [provider]: { fromIso: from.toISOString(), toIso: to.toISOString() },
+  });
 }

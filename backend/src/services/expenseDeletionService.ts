@@ -14,9 +14,6 @@ export async function removeExpenseForUser(userId: number, expenseId: number): P
     return false;
   }
   const row = pre.rows[0];
-
-  await deletePayablePaymentByExpenseId(userId, expenseId);
-
   if (expenseUsesImmediateBalance(row) && row.bank_account_id) {
     try {
       await applyBalanceDelta(
@@ -29,8 +26,11 @@ export async function removeExpenseForUser(userId: number, expenseId: number): P
       );
     } catch (e) {
       console.error('Reverse balance on expense delete:', e);
+      throw e;
     }
   }
+
+  await deletePayablePaymentByExpenseId(userId, expenseId);
 
   const result = await query('DELETE FROM expenses WHERE id = $1 AND user_id = $2 RETURNING id', [expenseId, userId]);
   if (result.rows.length > 0) {

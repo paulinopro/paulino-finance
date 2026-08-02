@@ -5,6 +5,18 @@ import {
   requireEntityActive,
 } from '../services/entityActivation';
 
+const INACTIVE_ENTITY_MESSAGE =
+  'El registro está inactivo. Habilítalo para realizar esta operación.';
+
+export function respondInactiveEntityError(error: unknown, res: Response): boolean {
+  if (!(error instanceof InactiveEntityError)) {
+    return false;
+  }
+
+  res.status(409).json({ message: INACTIVE_ENTITY_MESSAGE });
+  return true;
+}
+
 export async function ensureActiveEntity(
   entity: ActivatableEntity,
   id: number,
@@ -19,10 +31,7 @@ export async function ensureActiveEntity(
     }
     return true;
   } catch (error) {
-    if (error instanceof InactiveEntityError) {
-      res.status(409).json({ message: 'El registro está inactivo. Habilítalo para realizar esta operación.' });
-      return false;
-    }
+    if (respondInactiveEntityError(error, res)) return false;
     throw error;
   }
 }

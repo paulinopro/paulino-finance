@@ -215,6 +215,8 @@ const getIncome = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get income error:', error);
         res.status(500).json({ message: 'Error fetching income', error: error.message });
     }
@@ -272,6 +274,8 @@ const getIncomeItem = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get income item error:', error);
         res.status(500).json({ message: 'Error fetching income item', error: error.message });
     }
@@ -416,6 +420,8 @@ const createIncome = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create income error:', error);
         res.status(500).json({ message: 'Error creating income', error: error.message });
     }
@@ -596,6 +602,8 @@ const updateIncome = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update income error:', error);
         res.status(500).json({ message: 'Error updating income', error: error.message });
     }
@@ -613,15 +621,16 @@ const deleteIncome = async (req, res) => {
             return res.status(404).json({ message: 'Income item not found' });
         }
         const row = pre.rows[0];
-        await (0, accountsPaymentLinkSync_1.deleteReceivablePaymentByIncomeId)(userId, incomeId);
         if (row.bank_account_id && row.is_received) {
             try {
                 await (0, accountBalance_1.applyBalanceDelta)(userId, row.bank_account_id, row.currency, -parseFloat(row.amount), undefined, { description: `Reversión por eliminación: «${row.description}»` });
             }
             catch (e) {
                 console.error('Reverse balance on income delete:', e);
+                throw e;
             }
         }
+        await (0, accountsPaymentLinkSync_1.deleteReceivablePaymentByIncomeId)(userId, incomeId);
         const del = await (0, database_1.query)('DELETE FROM income WHERE id = $1 AND user_id = $2 RETURNING id', [
             incomeId,
             userId,
@@ -636,6 +645,8 @@ const deleteIncome = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete income error:', error);
         res.status(500).json({ message: 'Error deleting income', error: error.message });
     }
@@ -840,6 +851,8 @@ const updateIncomeReceiptStatus = async (req, res) => {
         }
         catch (error) {
             await client.query('ROLLBACK');
+            if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+                return;
             throw error;
         }
         finally {
@@ -847,6 +860,8 @@ const updateIncomeReceiptStatus = async (req, res) => {
         }
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update income receipt status error:', error);
         res.status(500).json({ message: 'Error updating receipt status', error: error.message });
     }

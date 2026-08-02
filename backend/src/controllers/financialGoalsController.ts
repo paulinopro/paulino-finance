@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { respondInactiveEntityError } from './activeEntityGuard';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { applyBalanceDelta, getAccountRow, isCurrencyAllowedForAccount } from '../services/accountBalance';
@@ -81,6 +82,7 @@ export const getFinancialGoals = async (req: AuthRequest, res: Response) => {
       })),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get financial goals error:', error);
     res.status(500).json({ message: 'Error fetching financial goals', error: error.message });
   }
@@ -146,6 +148,7 @@ export const createFinancialGoal = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create financial goal error:', error);
     res.status(500).json({ message: 'Error creating financial goal', error: error.message });
   }
@@ -245,6 +248,7 @@ export const updateFinancialGoal = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update financial goal error:', error);
     res.status(500).json({ message: 'Error updating financial goal', error: error.message });
   }
@@ -291,6 +295,7 @@ export const deleteFinancialGoal = async (req: AuthRequest, res: Response) => {
         }
       } catch (e: any) {
         await client.query('ROLLBACK');
+        if (respondInactiveEntityError(e, res)) return;
         console.error('Revert goal movements balance:', e);
         return res.status(500).json({ message: 'Error al revertir saldos de la meta' });
       }
@@ -314,6 +319,7 @@ export const deleteFinancialGoal = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete financial goal error:', error);
     res.status(500).json({ message: 'Error deleting financial goal', error: error.message });
   } finally {

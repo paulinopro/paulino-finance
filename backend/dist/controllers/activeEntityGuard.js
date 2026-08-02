@@ -1,7 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.respondInactiveEntityError = respondInactiveEntityError;
 exports.ensureActiveEntity = ensureActiveEntity;
 const entityActivation_1 = require("../services/entityActivation");
+const INACTIVE_ENTITY_MESSAGE = 'El registro está inactivo. Habilítalo para realizar esta operación.';
+function respondInactiveEntityError(error, res) {
+    if (!(error instanceof entityActivation_1.InactiveEntityError)) {
+        return false;
+    }
+    res.status(409).json({ message: INACTIVE_ENTITY_MESSAGE });
+    return true;
+}
 async function ensureActiveEntity(entity, id, userId, res) {
     try {
         const found = await (0, entityActivation_1.requireEntityActive)(entity, id, userId);
@@ -12,10 +21,8 @@ async function ensureActiveEntity(entity, id, userId, res) {
         return true;
     }
     catch (error) {
-        if (error instanceof entityActivation_1.InactiveEntityError) {
-            res.status(409).json({ message: 'El registro está inactivo. Habilítalo para realizar esta operación.' });
+        if (respondInactiveEntityError(error, res))
             return false;
-        }
         throw error;
     }
 }

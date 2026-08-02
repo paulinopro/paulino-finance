@@ -98,6 +98,24 @@ function isVariableRecurrentMonthlyIncome(item: Income): boolean {
   );
 }
 
+function incomeScheduleSortValue(item: Income, referenceDate: Date): number {
+  if (deriveIncomeRecurrence(item) === 'non_recurrent') {
+    return calendarDateToSortableMs(item.date);
+  }
+  const frequency = incomeFrequencyFromApi(item.frequency);
+  if (frequency === 'monthly' && item.receiptDay != null) {
+    return calendarDateToSortableMs(
+      formatRecurringDayForPeriod(
+        item.receiptDay,
+        referenceDate.getFullYear(),
+        referenceDate.getMonth() + 1
+      )
+    );
+  }
+  if (frequency === 'semi_monthly') return 0;
+  return calendarDateToSortableMs(item.date);
+}
+
 type IncomeListSummary = {
   totalDop: number;
   totalUsd: number;
@@ -723,8 +741,9 @@ const IncomePage: React.FC = () => {
                         bValue = deriveIncomeRecurrence(b);
                         break;
                       case 'date':
-                        aValue = a.date ? calendarDateToSortableMs(a.date) : (a.receiptDay || 0);
-                        bValue = b.date ? calendarDateToSortableMs(b.date) : (b.receiptDay || 0);
+                        const incomeScheduleReference = new Date();
+                        aValue = incomeScheduleSortValue(a, incomeScheduleReference);
+                        bValue = incomeScheduleSortValue(b, incomeScheduleReference);
                         break;
                       case 'status':
                         aValue = a.isReceived ? 1 : 0;

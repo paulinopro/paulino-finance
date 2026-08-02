@@ -30,6 +30,8 @@ const listCashAdjustments = async (req, res) => {
         res.json({ success: true, adjustments });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('List cash adjustments error:', error);
         res.status(500).json({ message: 'Error listing adjustments', error: error.message });
     }
@@ -88,6 +90,8 @@ const createCashAdjustment = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Cash adjustment error:', error);
         if (error.message === 'ACCOUNT_NOT_FOUND') {
             return res.status(404).json({ message: 'Account not found' });

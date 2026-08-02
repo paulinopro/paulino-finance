@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -281,6 +281,7 @@ export const getIncome = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get income error:', error);
     res.status(500).json({ message: 'Error fetching income', error: error.message });
   }
@@ -348,6 +349,7 @@ export const getIncomeItem = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get income item error:', error);
     res.status(500).json({ message: 'Error fetching income item', error: error.message });
   }
@@ -506,6 +508,7 @@ export const createIncome = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create income error:', error);
     res.status(500).json({ message: 'Error creating income', error: error.message });
   } finally {
@@ -723,6 +726,7 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update income error:', error);
     res.status(500).json({ message: 'Error updating income', error: error.message });
   } finally {
@@ -744,9 +748,6 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
     }
 
     const row = pre.rows[0];
-
-    await deleteReceivablePaymentByIncomeId(userId, incomeId);
-
     if (row.bank_account_id && row.is_received) {
       try {
         await applyBalanceDelta(
@@ -759,8 +760,11 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
         );
       } catch (e: any) {
         console.error('Reverse balance on income delete:', e);
+        throw e;
       }
     }
+
+    await deleteReceivablePaymentByIncomeId(userId, incomeId);
 
     const del = await query('DELETE FROM income WHERE id = $1 AND user_id = $2 RETURNING id', [
       incomeId,
@@ -778,6 +782,7 @@ export const deleteIncome = async (req: AuthRequest, res: Response) => {
       message: 'Income deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete income error:', error);
     res.status(500).json({ message: 'Error deleting income', error: error.message });
   }
@@ -1026,11 +1031,13 @@ export const updateIncomeReceiptStatus = async (req: AuthRequest, res: Response)
       }
     } catch (error: any) {
       await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
       throw error;
     } finally {
       client.release();
     }
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update income receipt status error:', error);
     res.status(500).json({ message: 'Error updating receipt status', error: error.message });
   }

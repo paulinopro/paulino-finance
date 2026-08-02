@@ -573,7 +573,7 @@ const getComprehensiveReport = async (req, res) => {
         const [expensesResult, loansResult, cardsResult, accountsResult] = await Promise.all([
             (0, database_1.query)(`SELECT id, description, amount, currency, nature, category, is_paid,
                 last_paid_month, last_paid_year, recurrence_type, frequency, created_at
-         FROM expenses WHERE user_id = $1`, [userId]),
+         FROM expenses WHERE user_id = $1 AND is_active = TRUE`, [userId]),
             (0, database_1.query)(`SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.status, l.currency,
                 COALESCE(SUM(lp.amount), 0) as total_paid
          FROM loans l
@@ -582,9 +582,9 @@ const getComprehensiveReport = async (req, res) => {
          GROUP BY l.id`, [userId]),
             (0, database_1.query)(`SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
                 current_debt_dop, current_debt_usd, currency_type
-         FROM credit_cards WHERE user_id = $1`, [userId]),
+         FROM credit_cards WHERE user_id = $1 AND is_active = TRUE`, [userId]),
             (0, database_1.query)(`SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd, currency_type
-         FROM bank_accounts WHERE user_id = $1`, [userId]),
+         FROM bank_accounts WHERE user_id = $1 AND is_active = TRUE`, [userId]),
         ]);
         const ctxReport = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const currentDate = new Date();

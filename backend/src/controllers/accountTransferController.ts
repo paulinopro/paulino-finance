@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -40,6 +40,7 @@ export const listAccountTransfers = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, transfers });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('List transfers error:', error);
     res.status(500).json({ message: 'Error listing transfers', error: error.message });
   }
@@ -117,6 +118,7 @@ export const createAccountTransfer = async (req: AuthRequest, res: Response) => 
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create transfer error:', error);
     if (error.message === 'CURRENCY_MISMATCH') {
       return res.status(400).json({ message: 'Currency does not match one of the accounts' });

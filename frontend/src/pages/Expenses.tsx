@@ -130,6 +130,29 @@ function formatExpenseScheduleDisplay(e: Expense): string {
   return '-';
 }
 
+function expenseScheduleSortValue(e: Expense, referenceDate: Date): number {
+  const { recurrenceType, frequency } = deriveFormFromExpense(e);
+  if (recurrenceType === 'non_recurrent') {
+    return calendarDateToSortableMs(e.date);
+  }
+  const fq = (frequency || 'monthly') as ExpenseFrequency;
+  if (fq === 'monthly' && e.paymentDay != null) {
+    return calendarDateToSortableMs(
+      formatRecurringDayForPeriod(
+        e.paymentDay,
+        referenceDate.getFullYear(),
+        referenceDate.getMonth() + 1
+      )
+    );
+  }
+  if (fq === 'annual' && e.paymentDay != null && e.paymentMonth != null) {
+    return calendarDateToSortableMs(
+      formatRecurringDayForPeriod(e.paymentDay, referenceDate.getFullYear(), e.paymentMonth)
+    );
+  }
+  return calendarDateToSortableMs(e.date);
+}
+
 type ExpenseListSummary = {
   totalDop: number;
   totalUsd: number;
@@ -788,8 +811,9 @@ const Expenses: React.FC = () => {
                         bValue = (b.category || '').toLowerCase();
                         break;
                       case 'date':
-                        aValue = a.date ? calendarDateToSortableMs(a.date) : (a.paymentDay || 0);
-                        bValue = b.date ? calendarDateToSortableMs(b.date) : (b.paymentDay || 0);
+                        const expenseScheduleReference = new Date();
+                        aValue = expenseScheduleSortValue(a, expenseScheduleReference);
+                        bValue = expenseScheduleSortValue(b, expenseScheduleReference);
                         break;
                       case 'status':
                         aValue = a.isPaid ? 1 : 0;

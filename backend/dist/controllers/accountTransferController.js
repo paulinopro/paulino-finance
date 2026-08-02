@@ -31,6 +31,8 @@ const listAccountTransfers = async (req, res) => {
         res.json({ success: true, transfers });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('List transfers error:', error);
         res.status(500).json({ message: 'Error listing transfers', error: error.message });
     }
@@ -99,6 +101,8 @@ const createAccountTransfer = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create transfer error:', error);
         if (error.message === 'CURRENCY_MISMATCH') {
             return res.status(400).json({ message: 'Currency does not match one of the accounts' });

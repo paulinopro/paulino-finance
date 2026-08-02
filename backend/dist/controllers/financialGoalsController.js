@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteFinancialGoal = exports.updateFinancialGoal = exports.createFinancialGoal = exports.getFinancialGoals = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
@@ -66,6 +67,8 @@ const getFinancialGoals = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get financial goals error:', error);
         res.status(500).json({ message: 'Error fetching financial goals', error: error.message });
     }
@@ -122,6 +125,8 @@ const createFinancialGoal = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create financial goal error:', error);
         res.status(500).json({ message: 'Error creating financial goal', error: error.message });
     }
@@ -206,6 +211,8 @@ const updateFinancialGoal = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update financial goal error:', error);
         res.status(500).json({ message: 'Error updating financial goal', error: error.message });
     }
@@ -243,6 +250,8 @@ const deleteFinancialGoal = async (req, res) => {
             }
             catch (e) {
                 await client.query('ROLLBACK');
+                if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
+                    return;
                 console.error('Revert goal movements balance:', e);
                 return res.status(500).json({ message: 'Error al revertir saldos de la meta' });
             }
@@ -263,6 +272,8 @@ const deleteFinancialGoal = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete financial goal error:', error);
         res.status(500).json({ message: 'Error deleting financial goal', error: error.message });
     }

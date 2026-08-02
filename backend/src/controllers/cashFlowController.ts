@@ -357,7 +357,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const expensePunctualByNature = await query(
       `SELECT e.nature AS nat, e.currency, SUM(e.amount) AS total
        FROM expenses e
-       WHERE user_id = $1 AND (${EXPENSE_DATE_IN_RANGE_PUNCTUAL})
+       WHERE e.user_id = $1 AND e.is_active = TRUE AND (${EXPENSE_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY e.nature, e.currency`,
       [userId, start, end]
     );
@@ -485,7 +485,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
       `SELECT l.currency, COALESCE(SUM(a.total_due::numeric), 0) AS total
        FROM amortization_schedule a
        INNER JOIN loans l ON l.id = a.loan_id
-       WHERE l.user_id = $1
+       WHERE l.user_id = $1 AND l.is_active = TRUE
          AND a.due_date::date >= $2::date
          AND a.due_date::date <= $3::date
          AND a.status IN ('PENDING', 'OVERDUE')

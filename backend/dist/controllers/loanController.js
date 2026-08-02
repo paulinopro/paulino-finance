@@ -159,6 +159,8 @@ const getLoans = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get loans error:', error);
         res.status(500).json({ message: 'Error fetching loans', error: error.message });
     }
@@ -244,6 +246,8 @@ const getLoan = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get loan error:', error);
         res.status(500).json({ message: 'Error fetching loan', error: error.message });
     }
@@ -329,6 +333,8 @@ const createLoan = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create loan error:', error);
         res.status(500).json({ message: 'Error creating loan', error: error.message });
     }
@@ -449,6 +455,8 @@ const updateLoan = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update loan error:', error);
         res.status(500).json({ message: 'Error updating loan', error: error.message });
     }
@@ -469,6 +477,8 @@ const deleteLoan = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete loan error:', error);
         res.status(500).json({ message: 'Error deleting loan', error: error.message });
     }
@@ -605,6 +615,8 @@ const recordPayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Record payment error:', error);
         res.status(500).json({ message: 'Error recording payment', error: error.message });
     }
@@ -632,6 +644,7 @@ const deletePayment = async (req, res) => {
             }
             catch (e) {
                 console.error('Revert balance on loan payment delete:', e);
+                throw e;
             }
         }
         await removeLoanPaymentById(paymentId, userId);
@@ -641,6 +654,8 @@ const deletePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete payment error:', error);
         res.status(500).json({ message: 'Error deleting payment', error: error.message });
     }
@@ -697,6 +712,8 @@ const getAmortizationSchedule = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get amortization schedule error:', error);
         res.status(500).json({ message: 'Error fetching amortization schedule', error: error.message });
     }
@@ -734,6 +751,7 @@ const updatePayment = async (req, res) => {
             }
             catch (e) {
                 console.error('Revert balance on loan payment update:', e);
+                throw e;
             }
         }
         const paymentDistribution = await (0, amortizationService_1.processPayment)(loanId, effDate, effAmt, (paymentType || 'COMPLETE'));
@@ -808,6 +826,8 @@ const updatePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update payment error:', error);
         res.status(500).json({ message: 'Error updating payment', error: error.message });
     }

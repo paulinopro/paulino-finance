@@ -1,4 +1,4 @@
-import { ensureActiveEntity } from './activeEntityGuard';
+import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
 import { query } from '../config/database';
 import { getUserCurrencyPair, validateLedgerCurrencyForUser } from '../utils/userCurrencyPair';
@@ -104,6 +104,7 @@ export const getCards = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get cards error:', error);
     res.status(500).json({ message: 'Error fetching cards', error: error.message });
   }
@@ -149,6 +150,7 @@ export const getCard = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Get card error:', error);
     res.status(500).json({ message: 'Error fetching card', error: error.message });
   }
@@ -222,6 +224,7 @@ export const createCard = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Create card error:', error);
     res.status(500).json({ message: 'Error creating card', error: error.message });
   }
@@ -312,6 +315,7 @@ export const updateCard = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Update card error:', error);
     res.status(500).json({ message: 'Error updating card', error: error.message });
   }
@@ -338,6 +342,7 @@ export const deleteCard = async (req: AuthRequest, res: Response) => {
       message: 'Card deleted successfully',
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete card error:', error);
     res.status(500).json({ message: 'Error deleting card', error: error.message });
   }
@@ -379,6 +384,7 @@ export const listCardPayments = async (req: AuthRequest, res: Response) => {
       })),
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('List card payments error:', error);
     res.status(500).json({ message: 'Error listing payments', error: error.message });
   }
@@ -496,6 +502,7 @@ export const recordCardPayment = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Record card payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
   }
@@ -533,6 +540,7 @@ export const deleteCardPayment = async (req: AuthRequest, res: Response) => {
         });
       } catch (e: any) {
         console.error('Revert card payment balance:', e);
+      throw e;
       }
     }
 
@@ -554,6 +562,7 @@ export const deleteCardPayment = async (req: AuthRequest, res: Response) => {
 
     res.json({ success: true, message: 'Payment removed' });
   } catch (error: any) {
+    if (respondInactiveEntityError(error, res)) return;
     console.error('Delete card payment error:', error);
     res.status(500).json({ message: 'Error deleting payment', error: error.message });
   }

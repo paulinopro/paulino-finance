@@ -259,6 +259,7 @@ async function syncAgendaItemToICloudCalDav(userId, agendaItemId) {
         console.warn('iCloud CalDAV push failed', userId, agendaItemId, msg);
         await (0, agendaICloudCaldavService_1.recordICloudConnectionError)(userId, msg);
         await flagICloudSyncSqlError(connectionId, agendaItemId, msg).catch(() => undefined);
+        throw e instanceof Error ? e : new Error(msg);
     }
 }
 async function removeAgendaItemFromICloudCalDav(userId, agendaItemId) {
@@ -273,6 +274,7 @@ async function removeAgendaItemFromICloudCalDav(userId, agendaItemId) {
     `, [agendaItemId, userId, PROVIDER_ICLOUD]);
     if (res.rows.length === 0 || !loaded)
         return;
+    const failures = [];
     for (const r of res.rows) {
         if (!r.external_uid)
             continue;
@@ -282,13 +284,21 @@ async function removeAgendaItemFromICloudCalDav(userId, agendaItemId) {
                 etag: r.etag ?? undefined,
             });
             if (!del.ok && del.status !== 404 && del.status !== 410) {
-                console.warn('iCloud CalDAV delete non-404', del.status, await respErrorHint(del));
+                throw new Error(`CalDAV DELETE ${del.status}: ${await respErrorHint(del)}`);
             }
         }
         catch (e) {
-            const msg = typeof e?.message === 'string' ? e.message : '';
+            const msg = typeof e?.message === 'string'
+                ? e.message
+                : String(e);
             console.warn('iCloud CalDAV delete failed', msg || e);
+            failures.push(msg);
+            await (0, agendaICloudCaldavService_1.recordICloudConnectionError)(userId, msg);
+            await flagICloudSyncSqlError(loaded.connectionId, agendaItemId, msg).catch(() => undefined);
         }
+    }
+    if (failures.length > 0) {
+        throw new Error(failures.join('; '));
     }
 }
 function enqueueAgendaICloudCaldavSync(userId, agendaItemId) {

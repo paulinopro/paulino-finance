@@ -375,6 +375,25 @@ const getCalendarEvents = async (userId, startDate, endDate, filters) => {
         AND ce.show_on_calendar = true
         AND ce.event_date >= $2
         AND ce.event_date <= $3
+        AND (
+          ce.event_type NOT IN ('INCOME', 'EXPENSE', 'RECURRING_EXPENSE', 'LOAN_PAYMENT', 'CARD_PAYMENT')
+          OR (ce.event_type = 'INCOME' AND EXISTS (
+            SELECT 1 FROM income source_income
+            WHERE source_income.id = ce.related_id AND source_income.user_id = ce.user_id AND source_income.is_active = TRUE
+          ))
+          OR (ce.event_type IN ('EXPENSE', 'RECURRING_EXPENSE') AND EXISTS (
+            SELECT 1 FROM expenses source_expense
+            WHERE source_expense.id = ce.related_id AND source_expense.user_id = ce.user_id AND source_expense.is_active = TRUE
+          ))
+          OR (ce.event_type = 'LOAN_PAYMENT' AND EXISTS (
+            SELECT 1 FROM loans source_loan
+            WHERE source_loan.id = ce.related_id AND source_loan.user_id = ce.user_id AND source_loan.is_active = TRUE
+          ))
+          OR (ce.event_type = 'CARD_PAYMENT' AND EXISTS (
+            SELECT 1 FROM credit_cards source_card
+            WHERE source_card.id = ce.related_id AND source_card.user_id = ce.user_id AND source_card.is_active = TRUE
+          ))
+        )
     `;
         const params = [userId, startDate, endDate];
         let paramIndex = 4;

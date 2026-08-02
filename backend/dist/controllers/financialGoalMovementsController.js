@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteGoalMovement = exports.updateGoalMovement = exports.addGoalMovement = exports.getGoalMovements = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
@@ -114,6 +115,8 @@ const getGoalMovements = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get financial goal movements error:', error);
         res.status(500).json({ message: 'Error fetching financial goal movements', error: error.message });
     }
@@ -253,6 +256,8 @@ const addGoalMovement = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Add financial goal movement error:', error);
         res.status(500).json({ message: 'Error adding financial goal movement', error: error.message });
     }
@@ -391,6 +396,8 @@ const updateGoalMovement = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update financial goal movement error:', error);
         res.status(500).json({ message: 'Error updating financial goal movement', error: error.message });
     }
@@ -459,6 +466,8 @@ const deleteGoalMovement = async (req, res) => {
     }
     catch (error) {
         await client.query('ROLLBACK');
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete financial goal movement error:', error);
         res.status(500).json({ message: 'Error deleting financial goal movement', error: error.message });
     }

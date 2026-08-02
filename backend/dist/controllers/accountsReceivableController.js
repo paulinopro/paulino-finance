@@ -61,6 +61,8 @@ const getAccountsReceivable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get accounts receivable error:', error);
         res.status(500).json({ message: 'Error fetching accounts receivable', error: error.message });
     }
@@ -97,6 +99,8 @@ const getAccountReceivablePayments = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Get account receivable payments error:', error);
         res.status(500).json({ message: 'Error fetching payments', error: error.message });
     }
@@ -147,7 +151,8 @@ const addAccountReceivablePayment = async (req, res) => {
                 });
             }
             catch (e) {
-                console.error('AR payment balance:', e);
+                await (0, database_1.query)('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
+                throw e;
             }
         }
         await (0, database_1.query)(`INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
@@ -185,6 +190,8 @@ const addAccountReceivablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Add account receivable payment error:', error);
         res.status(500).json({ message: 'Error recording payment', error: error.message });
     }
@@ -248,6 +255,8 @@ const updateAccountReceivablePayment = async (req, res) => {
                     }
                     catch (e) {
                         await client.query('ROLLBACK');
+                        if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
+                            return;
                         console.error('AR update revert balance:', e);
                         return res.status(500).json({ message: 'Error al ajustar saldo de la cuenta (reversión)' });
                     }
@@ -281,6 +290,8 @@ const updateAccountReceivablePayment = async (req, res) => {
         }
         catch (e) {
             await client.query('ROLLBACK');
+            if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
+                return;
             console.error('Update AR payment tx:', e);
             return res.status(500).json({ message: 'Error al actualizar abono', error: e.message });
         }
@@ -313,6 +324,8 @@ const updateAccountReceivablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update account receivable payment error:', error);
         res.status(500).json({ message: 'Error updating payment', error: error.message });
     }
@@ -362,6 +375,8 @@ const deleteAccountReceivablePayment = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete account receivable payment error:', error);
         res.status(500).json({ message: 'Error deleting payment', error: error.message });
     }
@@ -404,6 +419,8 @@ const createAccountReceivable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Create account receivable error:', error);
         res.status(500).json({ message: 'Error creating account receivable', error: error.message });
     }
@@ -472,6 +489,8 @@ const updateAccountReceivable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Update account receivable error:', error);
         res.status(500).json({ message: 'Error updating account receivable', error: error.message });
     }
@@ -523,7 +542,8 @@ const receiveAccountReceivable = async (req, res) => {
                 });
             }
             catch (e) {
-                console.error('AR receive balance:', e);
+                await (0, database_1.query)('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
+                throw e;
             }
         }
         await (0, database_1.query)(`INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
@@ -556,6 +576,8 @@ const receiveAccountReceivable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Receive account receivable error:', error);
         res.status(500).json({ message: 'Error receiving account receivable', error: error.message });
     }
@@ -582,6 +604,8 @@ const deleteAccountReceivable = async (req, res) => {
         });
     }
     catch (error) {
+        if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
+            return;
         console.error('Delete account receivable error:', error);
         res.status(500).json({ message: 'Error deleting account receivable', error: error.message });
     }

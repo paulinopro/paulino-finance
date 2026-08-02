@@ -6,6 +6,7 @@ exports.parseBalanceForCurrency = parseBalanceForCurrency;
 exports.applyBalanceDelta = applyBalanceDelta;
 exports.recordBankAccountMovement = recordBankAccountMovement;
 const database_1 = require("../config/database");
+const entityActivation_1 = require("./entityActivation");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 /**
  * `currency_type` en BD: DOP = solo primer riel (moneda principal del usuario), USD = solo segundo riel
@@ -29,7 +30,7 @@ async function runQuery(text, params, client) {
     return (0, database_1.query)(text, params);
 }
 async function getAccountRow(userId, accountId, client) {
-    const r = await runQuery(`SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind, bank_name
+    const r = await runQuery(`SELECT id, user_id, balance_dop, balance_usd, currency_type, account_kind, bank_name, is_active
      FROM bank_accounts WHERE id = $1 AND user_id = $2`, [accountId, userId], client);
     return r.rows[0];
 }
@@ -61,18 +62,29 @@ async function applyBalanceDelta(userId, accountId, currency, delta, client, mov
     if (!acc) {
         throw new Error('ACCOUNT_NOT_FOUND');
     }
+    if (acc.is_active !== true) {
+        throw new entityActivation_1.InactiveEntityError('La cuenta bancaria está inactiva');
+    }
     const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
     if (!isCurrencyAllowedForAccount(acc.currency_type, currency, pair)) {
         throw new Error('CURRENCY_MISMATCH');
     }
     const c = currency.trim().toUpperCase();
     if (c === pair.primary) {
-        await runQuery(`UPDATE bank_accounts SET balance_dop = balance_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND user_id = $3`, [delta, accountId, userId], client);
+        const updated = await runQuery(`UPDATE bank_accounts SET balance_dop = balance_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND user_id = $3 AND is_active = TRUE
+       RETURNING id`, [delta, accountId, userId], client);
+        if (updated.rows.length === 0) {
+            throw new entityActivation_1.InactiveEntityError('La cuenta bancaria está inactiva');
+        }
     }
     else if (c === pair.secondary) {
-        await runQuery(`UPDATE bank_accounts SET balance_usd = balance_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND user_id = $3`, [delta, accountId, userId], client);
+        const updated = await runQuery(`UPDATE bank_accounts SET balance_usd = balance_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND user_id = $3 AND is_active = TRUE
+       RETURNING id`, [delta, accountId, userId], client);
+        if (updated.rows.length === 0) {
+            throw new entityActivation_1.InactiveEntityError('La cuenta bancaria está inactiva');
+        }
     }
     else {
         throw new Error('CURRENCY_MISMATCH');
