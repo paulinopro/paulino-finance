@@ -1,3 +1,8 @@
+export interface AmortizationQueryExecutor {
+    query(text: string, params?: any[]): Promise<{
+        rows: any[];
+    }>;
+}
 export interface AmortizationScheduleItem {
     installmentNumber: number;
     dueDate: string;
@@ -34,7 +39,7 @@ export declare const calculateEffectiveAnnualRate: (nominalAnnualRate: number) =
 /**
  * Generate complete amortization schedule for a loan
  */
-export declare const generateAmortizationSchedule: (loanId: number, userId?: number) => Promise<AmortizationScheduleItem[]>;
+export declare const generateAmortizationSchedule: (loanId: number, userId?: number, executor?: AmortizationQueryExecutor) => Promise<AmortizationScheduleItem[]>;
 /**
  * Calculate interest accrued between two dates
  * Uses the specified calculation base: Interés = Saldo × Tasa_anual × (días / base)
@@ -43,7 +48,7 @@ export declare const calculateAccruedInterest: (principal: number, interestRate:
 /**
  * Process a payment and calculate distribution
  */
-export declare const processPayment: (loanId: number, paymentDate: string, amountPaid: number, paymentType?: "COMPLETE" | "PARTIAL" | "ADVANCE" | "INTEREST", installmentNumber?: number) => Promise<{
+export declare const processPayment: (loanId: number, paymentDate: string, amountPaid: number, paymentType?: "COMPLETE" | "PARTIAL" | "ADVANCE" | "INTEREST", installmentNumber?: number, executor?: AmortizationQueryExecutor) => Promise<{
     principalAmount: number;
     interestAmount: number;
     chargeAmount: number;
@@ -54,5 +59,5 @@ export declare const processPayment: (loanId: number, paymentDate: string, amoun
 /**
  * Save or update amortization schedule in database
  */
-export declare const saveAmortizationSchedule: (loanId: number, schedule: AmortizationScheduleItem[]) => Promise<void>;
+export declare const saveAmortizationSchedule: (loanId: number, schedule: AmortizationScheduleItem[], executor?: AmortizationQueryExecutor) => Promise<void>;
 //# sourceMappingURL=amortizationService.d.ts.map

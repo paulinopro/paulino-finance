@@ -634,10 +634,12 @@ export const deleteLoan = async (req: AuthRequest, res: Response) => {
 };
 
 export const recordPayment = async (req: AuthRequest, res: Response) => {
+  let client: Awaited<ReturnType<typeof getClient>> | null = null;
+  let transactionOpen = false;
+
   try {
     const userId = req.userId!;
     const loanId = parseInt(req.params.id);
-    if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
     const { paymentDate, amount, paymentType, notes, installmentNumber } = req.body;
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
 
@@ -645,34 +647,39 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Payment date and amount are required' });
     }
 
-    // Verify loan exists and belongs to user
-    const loanResult = await query(
+    const payAmt = parseFloat(String(amount));
+    client = await getClient();
+    await client.query('BEGIN');
+    transactionOpen = true;
+
+    const loanResult = await client.query(
       `SELECT id, loan_name, paid_installments, total_installments, payment_day, currency, is_active
-       FROM loans WHERE id = $1 AND user_id = $2`,
+       FROM loans
+       WHERE id = $1 AND user_id = $2
+       FOR UPDATE`,
       [loanId, userId]
     );
-
     if (loanResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
       return res.status(404).json({ message: 'Loan not found' });
     }
 
-    const loan = loanResult.rows[0];
-    if (loan.is_active !== true) {
-      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
-    }
-    const loanCurrency = String(loan.currency || 'DOP');
-
-    // Process payment with amortization logic
+    const loanRow = loanResult.rows[0];
+    if (loanRow.is_active !== true) throw new InactiveEntityError();
+    const loanCurrency = String(loanRow.currency || 'DOP');
+    const effectivePaymentType = (paymentType || 'COMPLETE') as 'COMPLETE' | 'PARTIAL' | 'ADVANCE' | 'INTEREST';
+    const parsedInstallment = installmentNumber !== undefined ? parseInt(installmentNumber) : undefined;
     const paymentDistribution = await processPayment(
       loanId,
       paymentDate,
-      parseFloat(amount),
-      paymentType || 'COMPLETE',
-      installmentNumber !== undefined ? parseInt(installmentNumber) : undefined
+      payAmt,
+      effectivePaymentType,
+      parsedInstallment,
+      client
     );
 
-    // Insert payment with detailed breakdown
-    const paymentResult = await query(
+    const paymentResult = await client.query(
       `INSERT INTO loan_payments
        (loan_id, payment_date, amount, principal_amount, interest_amount, charge_amount,
         late_fee, installment_number, outstanding_balance, payment_type, notes, bank_account_id)
@@ -682,111 +689,85 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
       [
         loanId,
         paymentDate,
-        parseFloat(amount),
+        payAmt,
         paymentDistribution.principalAmount,
         paymentDistribution.interestAmount,
         paymentDistribution.chargeAmount,
         paymentDistribution.lateFee,
         paymentDistribution.installmentNumber,
         paymentDistribution.outstandingBalance,
-        paymentType || 'COMPLETE',
+        effectivePaymentType,
         notes || null,
         bankAccountId,
       ]
     );
 
-    const newPaymentId = paymentResult.rows[0].id as number;
-    const payAmt = parseFloat(String(amount));
-
-    // Update loan paid installments if this is a complete payment
-    let newPaidInstallments = loan.paid_installments;
-    if (paymentType === 'COMPLETE' || !paymentType) {
-      // Check if this completes an installment
-      const schedule = await generateAmortizationSchedule(loanId, userId);
-      const installment = schedule.find((item) => item.installmentNumber === paymentDistribution.installmentNumber);
-      if (installment && installment.status === 'PAID') {
+    let newPaidInstallments = loanRow.paid_installments;
+    if (effectivePaymentType === 'COMPLETE') {
+      const scheduleAfterPayment = await generateAmortizationSchedule(loanId, userId, client);
+      const installment = scheduleAfterPayment.find(
+        (item) => item.installmentNumber === paymentDistribution.installmentNumber
+      );
+      if (installment?.status === 'PAID') {
         newPaidInstallments = Math.max(newPaidInstallments, paymentDistribution.installmentNumber);
       }
     }
 
-    // Calculate next payment date
     let nextPaymentDate = null;
-    if (loan.payment_day && newPaidInstallments < loan.total_installments) {
+    if (loanRow.payment_day && newPaidInstallments < loanRow.total_installments) {
       const paymentDateObj = new Date(paymentDate);
-      const currentMonth = paymentDateObj.getMonth();
-      const currentYear = paymentDateObj.getFullYear();
-
-      let nextPayment = new Date(currentYear, currentMonth, loan.payment_day);
+      const nextPayment = new Date(paymentDateObj.getFullYear(), paymentDateObj.getMonth(), loanRow.payment_day);
       nextPayment.setMonth(nextPayment.getMonth() + 1);
       nextPaymentDate = dateToYmdLocal(nextPayment);
     }
 
-    // Update loan
-    const updateStatus = newPaidInstallments >= loan.total_installments ? 'PAID' : 'ACTIVE';
-    const loanUpdate = await query(
+    const updateStatus = newPaidInstallments >= loanRow.total_installments ? 'PAID' : 'ACTIVE';
+    await client.query(
       `UPDATE loans
-       SET paid_installments = $1, status = $2, next_payment_date = COALESCE($3, next_payment_date), updated_at = CURRENT_TIMESTAMP
+       SET paid_installments = $1, status = $2,
+           next_payment_date = COALESCE($3, next_payment_date), updated_at = CURRENT_TIMESTAMP
        WHERE id = $4 AND user_id = $5 AND is_active = TRUE
        RETURNING id`,
       [newPaidInstallments, updateStatus, nextPaymentDate, loanId, userId]
     );
-    if (loanUpdate.rows.length === 0) {
-      await query('DELETE FROM loan_payments WHERE id = $1', [newPaymentId]);
-      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
-      return res.status(404).json({ message: 'Loan not found' });
-    }
 
-    // Regenerate and save amortization schedule
-    const updatedSchedule = await generateAmortizationSchedule(loanId, userId);
-    await saveAmortizationSchedule(loanId, updatedSchedule);
+    const updatedSchedule = await generateAmortizationSchedule(loanId, userId, client);
+    await saveAmortizationSchedule(loanId, updatedSchedule, client);
 
     if (bankAccountId) {
-      try {
-        const loanLabel = String(loan.loan_name ?? '').trim() || `#${loanId}`;
-        const instHint =
-          paymentDistribution.installmentNumber != null
-            ? ` · Cuota ${paymentDistribution.installmentNumber}`
-            : '';
-        await applyBalanceDelta(userId, bankAccountId, loanCurrency, -payAmt, undefined, {
-          description: `[Préstamo «${loanLabel}»] Pago desde cuenta${instHint}`,
-        });
-      } catch (e: any) {
-        await removeLoanPaymentById(newPaymentId, userId);
-        if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
-          return res.status(400).json({
-            message:
-              e.message === 'CURRENCY_MISMATCH'
-                ? 'La moneda de la cuenta no coincide con la moneda del préstamo'
-                : 'Cuenta no encontrada',
-          });
-        }
-        throw e;
-      }
+      const loanLabel = String(loanRow.loan_name ?? '').trim() || `#${loanId}`;
+      const instHint = paymentDistribution.installmentNumber != null
+        ? ` · Cuota ${paymentDistribution.installmentNumber}`
+        : '';
+      await applyBalanceDelta(userId, bankAccountId, loanCurrency, -payAmt, client, {
+        description: `[Préstamo «${loanLabel}»] Pago desde cuenta${instHint}`,
+      });
     }
 
-    // Get next installment info
+    await client.query('COMMIT');
+    transactionOpen = false;
     const nextInstallment = updatedSchedule.find(
       (item) => item.status === 'PENDING' || item.status === 'OVERDUE' || item.status === 'FUTURE'
     );
-
+    const payment = paymentResult.rows[0];
     res.status(201).json({
       success: true,
       message: 'Payment recorded successfully',
       data: {
         payment: {
-          id: paymentResult.rows[0].id,
-          paymentDate: paymentResult.rows[0].payment_date,
-          amount: parseFloat(paymentResult.rows[0].amount),
-          principalAmount: parseFloat(paymentResult.rows[0].principal_amount),
-          interestAmount: parseFloat(paymentResult.rows[0].interest_amount),
-          chargeAmount: parseFloat(paymentResult.rows[0].charge_amount),
-          lateFee: parseFloat(paymentResult.rows[0].late_fee || 0),
-          installmentNumber: paymentResult.rows[0].installment_number,
-          outstandingBalance: parseFloat(paymentResult.rows[0].outstanding_balance),
-          paymentType: paymentResult.rows[0].payment_type,
-          notes: paymentResult.rows[0].notes,
-          bankAccountId: paymentResult.rows[0].bank_account_id != null ? paymentResult.rows[0].bank_account_id : null,
-          createdAt: paymentResult.rows[0].created_at,
+          id: payment.id,
+          paymentDate: payment.payment_date,
+          amount: parseFloat(payment.amount),
+          principalAmount: parseFloat(payment.principal_amount),
+          interestAmount: parseFloat(payment.interest_amount),
+          chargeAmount: parseFloat(payment.charge_amount),
+          lateFee: parseFloat(payment.late_fee || 0),
+          installmentNumber: payment.installment_number,
+          outstandingBalance: parseFloat(payment.outstanding_balance),
+          paymentType: payment.payment_type,
+          notes: payment.notes,
+          bankAccountId: payment.bank_account_id != null ? payment.bank_account_id : null,
+          createdAt: payment.created_at,
         },
         distribution: {
           principal: paymentDistribution.principalAmount,
@@ -804,9 +785,22 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (client && transactionOpen) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
+    }
     if (respondInactiveEntityError(error, res)) return;
+    if (error.message === 'ACCOUNT_NOT_FOUND' || error.message === 'CURRENCY_MISMATCH') {
+      return res.status(400).json({
+        message: error.message === 'CURRENCY_MISMATCH'
+          ? 'La moneda de la cuenta no coincide con la moneda del préstamo'
+          : 'Cuenta no encontrada',
+      });
+    }
     console.error('Record payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
+  } finally {
+    client?.release();
   }
 };
 

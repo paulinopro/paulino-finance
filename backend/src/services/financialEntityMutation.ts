@@ -1,4 +1,4 @@
-export type FinancialEntity = 'cards' | 'loans' | 'income' | 'expenses';
+export type FinancialEntity = 'cards' | 'loans' | 'income' | 'expenses' | 'accountsPayable' | 'accountsReceivable';
 
 const FINANCIAL_UPDATE_FIELDS: Record<FinancialEntity, ReadonlySet<string>> = {
   cards: new Set(['currentDebtDop', 'currentDebtUsd']),
@@ -31,6 +31,8 @@ const FINANCIAL_UPDATE_FIELDS: Record<FinancialEntity, ReadonlySet<string>> = {
     'recurrenceStartDate',
     'recurrenceEndDate',
   ]),
+  accountsPayable: new Set(['amount', 'currency', 'dueDate']),
+  accountsReceivable: new Set(['amount', 'currency', 'dueDate']),
   expenses: new Set([
     'amount',
     'currency',

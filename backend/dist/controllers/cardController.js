@@ -344,11 +344,11 @@ const listCardPayments = async (req, res) => {
 };
 exports.listCardPayments = listCardPayments;
 const recordCardPayment = async (req, res) => {
+    let client = null;
+    let transactionOpen = false;
     try {
         const userId = req.userId;
         const cardId = parseInt(req.params.id);
-        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('cards', cardId, userId, res)))
-            return;
         const { amount, currency, paymentDate, notes } = req.body;
         const bankAccountId = optionalBankAccountId(req.body);
         const amt = parseFloat(String(amount));
@@ -357,74 +357,60 @@ const recordCardPayment = async (req, res) => {
         }
         const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
         const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, String(currency));
-        if (ledErr) {
+        if (ledErr)
             return res.status(400).json({ message: ledErr });
-        }
         const dateStr = paymentDate || new Date().toISOString().slice(0, 10);
-        const cardResult = await (0, database_1.query)(`SELECT id, bank_name, card_name, current_debt_dop, current_debt_usd, currency_type, is_active
-       FROM credit_cards WHERE id = $1 AND user_id = $2`, [cardId, userId]);
+        client = await (0, database_1.getClient)();
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const cardResult = await client.query(`SELECT id, bank_name, card_name, current_debt_dop, current_debt_usd, currency_type, is_active
+       FROM credit_cards
+       WHERE id = $1 AND user_id = $2
+       FOR UPDATE`, [cardId, userId]);
         if (cardResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(404).json({ message: 'Card not found' });
         }
         const c = cardResult.rows[0];
-        if (c.is_active !== true) {
-            if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('cards', cardId, userId, res)))
-                return;
-        }
-        const ct = c.currency_type;
+        if (c.is_active !== true)
+            throw new entityActivation_1.InactiveEntityError();
         const cur = String(currency).trim().toUpperCase();
-        if (ct === 'DOP' && cur !== pair.primary) {
+        if (c.currency_type === 'DOP' && cur !== pair.primary) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(400).json({ message: `This card only tracks ${pair.primary} debt` });
         }
-        if (ct === 'USD' && cur !== pair.secondary) {
+        if (c.currency_type === 'USD' && cur !== pair.secondary) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(400).json({ message: `This card only tracks ${pair.secondary} debt` });
         }
-        const debtDop = parseFloat(c.current_debt_dop || 0);
-        const debtUsd = parseFloat(c.current_debt_usd || 0);
-        const currentDebt = cur === pair.primary ? debtDop : debtUsd;
+        const currentDebt = cur === pair.primary
+            ? parseFloat(c.current_debt_dop || 0)
+            : parseFloat(c.current_debt_usd || 0);
         const payApply = Math.min(amt, currentDebt);
         if (payApply <= 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(400).json({ message: 'No debt to pay in this currency' });
         }
         const cardTag = `[Tarjeta ${String(c.bank_name ?? '').trim() || '?'} · ${String(c.card_name ?? '').trim() || '?'}]`;
-        const ins = await (0, database_1.query)(`INSERT INTO credit_card_payments (user_id, credit_card_id, amount, currency, payment_date, bank_account_id, notes)
+        const ins = await client.query(`INSERT INTO credit_card_payments (user_id, credit_card_id, amount, currency, payment_date, bank_account_id, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, created_at`, [userId, cardId, payApply, currency, dateStr, bankAccountId, notes ?? null]);
-        const debtUpdate = cur === pair.primary
-            ? await (0, database_1.query)(`UPDATE credit_cards SET current_debt_dop = GREATEST(0, current_debt_dop - $1::numeric), updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2 AND user_id = $3 AND is_active = TRUE RETURNING id`, [payApply, cardId, userId])
-            : await (0, database_1.query)(`UPDATE credit_cards SET current_debt_usd = GREATEST(0, current_debt_usd - $1::numeric), updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2 AND user_id = $3 AND is_active = TRUE RETURNING id`, [payApply, cardId, userId]);
-        if (debtUpdate.rows.length === 0) {
-            await (0, database_1.query)('DELETE FROM credit_card_payments WHERE id = $1', [ins.rows[0].id]);
-            if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('cards', cardId, userId, res)))
-                return;
-            return res.status(404).json({ message: 'Card not found' });
-        }
+       RETURNING id, created_at`, [userId, cardId, payApply, cur, dateStr, bankAccountId, notes ?? null]);
+        const debtColumn = cur === pair.primary ? 'current_debt_dop' : 'current_debt_usd';
+        await client.query(`UPDATE credit_cards
+       SET ${debtColumn} = GREATEST(0, ${debtColumn} - $1::numeric), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND user_id = $3 AND is_active = TRUE
+       RETURNING id`, [payApply, cardId, userId]);
         if (bankAccountId) {
-            try {
-                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -payApply, undefined, {
-                    description: `${cardTag} Abono desde cuenta`,
-                });
-            }
-            catch (e) {
-                await (0, database_1.query)('DELETE FROM credit_card_payments WHERE id = $1', [ins.rows[0].id]);
-                if (cur === pair.primary) {
-                    await (0, database_1.query)(`UPDATE credit_cards SET current_debt_dop = current_debt_dop + $1::numeric, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3`, [payApply, cardId, userId]);
-                }
-                else {
-                    await (0, database_1.query)(`UPDATE credit_cards SET current_debt_usd = current_debt_usd + $1::numeric, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3`, [payApply, cardId, userId]);
-                }
-                if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
-                    return res.status(400).json({
-                        message: e.message === 'CURRENCY_MISMATCH'
-                            ? 'La moneda no coincide con la cuenta seleccionada'
-                            : 'Cuenta no encontrada',
-                    });
-                }
-                throw e;
-            }
+            await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, cur, -payApply, client, {
+                description: `${cardTag} Abono desde cuenta`,
+            });
         }
+        await client.query('COMMIT');
+        transactionOpen = false;
         res.status(201).json({
             success: true,
             message: 'Payment recorded',
@@ -439,10 +425,24 @@ const recordCardPayment = async (req, res) => {
         });
     }
     catch (error) {
+        if (client && transactionOpen) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
+        }
         if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
             return;
+        if (error.message === 'ACCOUNT_NOT_FOUND' || error.message === 'CURRENCY_MISMATCH') {
+            return res.status(400).json({
+                message: error.message === 'CURRENCY_MISMATCH'
+                    ? 'La moneda no coincide con la cuenta seleccionada'
+                    : 'Cuenta no encontrada',
+            });
+        }
         console.error('Record card payment error:', error);
         res.status(500).json({ message: 'Error recording payment', error: error.message });
+    }
+    finally {
+        client?.release();
     }
 };
 exports.recordCardPayment = recordCardPayment;

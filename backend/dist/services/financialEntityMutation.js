@@ -32,6 +32,8 @@ const FINANCIAL_UPDATE_FIELDS = {
         'recurrenceStartDate',
         'recurrenceEndDate',
     ]),
+    accountsPayable: new Set(['amount', 'currency', 'dueDate']),
+    accountsReceivable: new Set(['amount', 'currency', 'dueDate']),
     expenses: new Set([
         'amount',
         'currency',

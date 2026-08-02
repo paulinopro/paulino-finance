@@ -1,6 +1,13 @@
 import { query, getClient } from '../config/database';
 import { getUserTimezone, formatDateForTimezone } from '../utils/dateUtils';
 
+export interface AmortizationQueryExecutor {
+  query(text: string, params?: any[]): Promise<{ rows: any[] }>;
+}
+
+const amortizationQuery = (executor: AmortizationQueryExecutor | undefined, text: string, params?: any[]) =>
+  executor ? executor.query(text, params) : query(text, params);
+
 export interface AmortizationScheduleItem {
   installmentNumber: number;
   dueDate: string;
@@ -141,12 +148,16 @@ const getBaseDenominator = (base: 'ACTUAL_360' | 'ACTUAL_365' | '30_360' | '30_3
 /**
  * Generate complete amortization schedule for a loan
  */
-export const generateAmortizationSchedule = async (loanId: number, userId?: number): Promise<AmortizationScheduleItem[]> => {
+export const generateAmortizationSchedule = async (
+  loanId: number,
+  userId?: number,
+  executor?: AmortizationQueryExecutor
+): Promise<AmortizationScheduleItem[]> => {
   // Get user timezone if userId is provided
   const userTimezone = userId ? await getUserTimezone(userId) : 'America/Santo_Domingo';
   
   // Get loan details
-  const loanResult = await query(
+  const loanResult = await amortizationQuery(executor,
     `SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
             installment_amount, fixed_charge, start_date, payment_day, currency,
             interest_calculation_base
@@ -173,7 +184,7 @@ export const generateAmortizationSchedule = async (loanId: number, userId?: numb
   };
 
   // Get existing payments to track what's been paid
-  const paymentsResult = await query(
+  const paymentsResult = await amortizationQuery(executor,
     `SELECT id, payment_date, principal_amount, interest_amount, charge_amount, 
             installment_number, outstanding_balance
      FROM loan_payments 
@@ -434,7 +445,8 @@ export const processPayment = async (
   paymentDate: string,
   amountPaid: number,
   paymentType: 'COMPLETE' | 'PARTIAL' | 'ADVANCE' | 'INTEREST' = 'COMPLETE',
-  installmentNumber?: number
+  installmentNumber?: number,
+  executor?: AmortizationQueryExecutor
 ): Promise<{
   principalAmount: number;
   interestAmount: number;
@@ -444,7 +456,7 @@ export const processPayment = async (
   installmentNumber: number;
 }> => {
   // Get loan details
-  const loanResult = await query(
+  const loanResult = await amortizationQuery(executor,
     `SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
             installment_amount, fixed_charge, start_date, payment_day, currency,
             interest_calculation_base
@@ -471,7 +483,7 @@ export const processPayment = async (
   };
 
   // Get current outstanding balance
-  const balanceResult = await query(
+  const balanceResult = await amortizationQuery(executor,
     `SELECT COALESCE(outstanding_balance, $1) as balance
      FROM loan_payments 
      WHERE loan_id = $2 
@@ -485,7 +497,7 @@ export const processPayment = async (
     : loan.totalAmount;
 
   // Get last payment date to calculate accrued interest
-  const lastPaymentResult = await query(
+  const lastPaymentResult = await amortizationQuery(executor,
     `SELECT payment_date 
      FROM loan_payments 
      WHERE loan_id = $1 
@@ -521,7 +533,7 @@ export const processPayment = async (
       // Allow interest payments for any date
     } else {
       // For regular payments without specific installment, check if there's a conflict
-      const laterPaymentResult = await query(
+      const laterPaymentResult = await amortizationQuery(executor,
         `SELECT installment_number, payment_date 
          FROM loan_payments 
          WHERE loan_id = $1 AND payment_date > $2
@@ -551,7 +563,7 @@ export const processPayment = async (
   }
 
   // Determine which installment this payment is for
-  const schedule = await generateAmortizationSchedule(loanId);
+  const schedule = await generateAmortizationSchedule(loanId, undefined, executor);
   let targetInstallmentNumber: number;
   
   if (installmentNumber !== undefined) {
@@ -704,24 +716,19 @@ export const processPayment = async (
  */
 export const saveAmortizationSchedule = async (
   loanId: number,
-  schedule: AmortizationScheduleItem[]
+  schedule: AmortizationScheduleItem[],
+  executor?: AmortizationQueryExecutor
 ): Promise<void> => {
-  const client = await getClient();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Delete existing schedule
-    await client.query('DELETE FROM amortization_schedule WHERE loan_id = $1', [loanId]);
-    
-    // Insert new schedule
+  const persist = async (sqlExecutor: AmortizationQueryExecutor) => {
+    await sqlExecutor.query('DELETE FROM amortization_schedule WHERE loan_id = $1', [loanId]);
+
     for (const item of schedule) {
-      await client.query(
-        `INSERT INTO amortization_schedule 
-         (loan_id, installment_number, due_date, principal_amount, interest_amount, 
+      await sqlExecutor.query(
+        `INSERT INTO amortization_schedule
+         (loan_id, installment_number, due_date, principal_amount, interest_amount,
           charge_amount, total_due, outstanding_balance, status, payment_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (loan_id, installment_number) 
+         ON CONFLICT (loan_id, installment_number)
          DO UPDATE SET
            principal_amount = EXCLUDED.principal_amount,
            interest_amount = EXCLUDED.interest_amount,
@@ -745,7 +752,17 @@ export const saveAmortizationSchedule = async (
         ]
       );
     }
-    
+  };
+
+  if (executor) {
+    await persist(executor);
+    return;
+  }
+
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    await persist(client);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

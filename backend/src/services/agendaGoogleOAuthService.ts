@@ -194,10 +194,15 @@ export async function loadGoogleOAuthForUser(userId: number): Promise<LoadedGoog
       }
     | undefined;
 
-  if (!row || !row.oauth_refresh_token) return null;
+  if (!row) return null;
+  if (!row.oauth_refresh_token) {
+    throw new Error('Google Calendar connection has no refresh token');
+  }
 
   const decryptedRefresh = decryptAgendaSecret(row.oauth_refresh_token);
-  if (!decryptedRefresh) return null;
+  if (!decryptedRefresh) {
+    throw new Error('Google Calendar refresh token could not be decrypted');
+  }
 
   const client = buildOAuth2Client();
   client.setCredentials({ refresh_token: decryptedRefresh });

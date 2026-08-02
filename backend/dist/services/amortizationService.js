@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveAmortizationSchedule = exports.processPayment = exports.calculateAccruedInterest = exports.generateAmortizationSchedule = exports.calculateEffectiveAnnualRate = void 0;
 const database_1 = require("../config/database");
 const dateUtils_1 = require("../utils/dateUtils");
+const amortizationQuery = (executor, text, params) => executor ? executor.query(text, params) : (0, database_1.query)(text, params);
 /**
  * Calculate monthly interest rate from annual or monthly rate
  *
@@ -106,11 +107,11 @@ const getBaseDenominator = (base) => {
 /**
  * Generate complete amortization schedule for a loan
  */
-const generateAmortizationSchedule = async (loanId, userId) => {
+const generateAmortizationSchedule = async (loanId, userId, executor) => {
     // Get user timezone if userId is provided
     const userTimezone = userId ? await (0, dateUtils_1.getUserTimezone)(userId) : 'America/Santo_Domingo';
     // Get loan details
-    const loanResult = await (0, database_1.query)(`SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
+    const loanResult = await amortizationQuery(executor, `SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
             installment_amount, fixed_charge, start_date, payment_day, currency,
             interest_calculation_base
      FROM loans WHERE id = $1`, [loanId]);
@@ -131,10 +132,10 @@ const generateAmortizationSchedule = async (loanId, userId) => {
         interestCalculationBase: loanResult.rows[0].interest_calculation_base || 'ACTUAL_360',
     };
     // Get existing payments to track what's been paid
-    const paymentsResult = await (0, database_1.query)(`SELECT id, payment_date, principal_amount, interest_amount, charge_amount, 
+    const paymentsResult = await amortizationQuery(executor, `SELECT id, payment_date, principal_amount, interest_amount, charge_amount,
             installment_number, outstanding_balance
-     FROM loan_payments 
-     WHERE loan_id = $1 
+     FROM loan_payments
+     WHERE loan_id = $1
      ORDER BY payment_date ASC`, [loanId]);
     const payments = paymentsResult.rows.map((p) => ({
         id: p.id,
@@ -347,9 +348,9 @@ exports.calculateAccruedInterest = calculateAccruedInterest;
 /**
  * Process a payment and calculate distribution
  */
-const processPayment = async (loanId, paymentDate, amountPaid, paymentType = 'COMPLETE', installmentNumber) => {
+const processPayment = async (loanId, paymentDate, amountPaid, paymentType = 'COMPLETE', installmentNumber, executor) => {
     // Get loan details
-    const loanResult = await (0, database_1.query)(`SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
+    const loanResult = await amortizationQuery(executor, `SELECT id, total_amount, interest_rate, interest_rate_type, total_installments,
             installment_amount, fixed_charge, start_date, payment_day, currency,
             interest_calculation_base
      FROM loans WHERE id = $1`, [loanId]);
@@ -370,19 +371,19 @@ const processPayment = async (loanId, paymentDate, amountPaid, paymentType = 'CO
         interestCalculationBase: loanResult.rows[0].interest_calculation_base || 'ACTUAL_360',
     };
     // Get current outstanding balance
-    const balanceResult = await (0, database_1.query)(`SELECT COALESCE(outstanding_balance, $1) as balance
-     FROM loan_payments 
-     WHERE loan_id = $2 
-     ORDER BY payment_date DESC, id DESC 
+    const balanceResult = await amortizationQuery(executor, `SELECT COALESCE(outstanding_balance, $1) as balance
+     FROM loan_payments
+     WHERE loan_id = $2
+     ORDER BY payment_date DESC, id DESC
      LIMIT 1`, [loan.totalAmount, loanId]);
     let currentBalance = balanceResult.rows.length > 0
         ? parseFloat(balanceResult.rows[0].balance)
         : loan.totalAmount;
     // Get last payment date to calculate accrued interest
-    const lastPaymentResult = await (0, database_1.query)(`SELECT payment_date 
-     FROM loan_payments 
-     WHERE loan_id = $1 
-     ORDER BY payment_date DESC 
+    const lastPaymentResult = await amortizationQuery(executor, `SELECT payment_date
+     FROM loan_payments
+     WHERE loan_id = $1
+     ORDER BY payment_date DESC
      LIMIT 1`, [loanId]);
     const lastPaymentDate = lastPaymentResult.rows.length > 0
         ? new Date(lastPaymentResult.rows[0].payment_date)
@@ -410,8 +411,8 @@ const processPayment = async (loanId, paymentDate, amountPaid, paymentType = 'CO
         }
         else {
             // For regular payments without specific installment, check if there's a conflict
-            const laterPaymentResult = await (0, database_1.query)(`SELECT installment_number, payment_date 
-         FROM loan_payments 
+            const laterPaymentResult = await amortizationQuery(executor, `SELECT installment_number, payment_date
+         FROM loan_payments
          WHERE loan_id = $1 AND payment_date > $2
          ORDER BY payment_date ASC
          LIMIT 1`, [loanId, paymentDate]);
@@ -426,7 +427,7 @@ const processPayment = async (loanId, paymentDate, amountPaid, paymentType = 'CO
         throw new Error('Error al calcular intereses devengados');
     }
     // Determine which installment this payment is for
-    const schedule = await (0, exports.generateAmortizationSchedule)(loanId);
+    const schedule = await (0, exports.generateAmortizationSchedule)(loanId, undefined, executor);
     let targetInstallmentNumber;
     if (installmentNumber !== undefined) {
         // If installment number is provided, use it (for cuota 0 or specific installment)
@@ -557,19 +558,15 @@ exports.processPayment = processPayment;
 /**
  * Save or update amortization schedule in database
  */
-const saveAmortizationSchedule = async (loanId, schedule) => {
-    const client = await (0, database_1.getClient)();
-    try {
-        await client.query('BEGIN');
-        // Delete existing schedule
-        await client.query('DELETE FROM amortization_schedule WHERE loan_id = $1', [loanId]);
-        // Insert new schedule
+const saveAmortizationSchedule = async (loanId, schedule, executor) => {
+    const persist = async (sqlExecutor) => {
+        await sqlExecutor.query('DELETE FROM amortization_schedule WHERE loan_id = $1', [loanId]);
         for (const item of schedule) {
-            await client.query(`INSERT INTO amortization_schedule 
-         (loan_id, installment_number, due_date, principal_amount, interest_amount, 
+            await sqlExecutor.query(`INSERT INTO amortization_schedule
+         (loan_id, installment_number, due_date, principal_amount, interest_amount,
           charge_amount, total_due, outstanding_balance, status, payment_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (loan_id, installment_number) 
+         ON CONFLICT (loan_id, installment_number)
          DO UPDATE SET
            principal_amount = EXCLUDED.principal_amount,
            interest_amount = EXCLUDED.interest_amount,
@@ -591,6 +588,15 @@ const saveAmortizationSchedule = async (loanId, schedule) => {
                 item.paymentId || null,
             ]);
         }
+    };
+    if (executor) {
+        await persist(executor);
+        return;
+    }
+    const client = await (0, database_1.getClient)();
+    try {
+        await client.query('BEGIN');
+        await persist(client);
         await client.query('COMMIT');
     }
     catch (error) {

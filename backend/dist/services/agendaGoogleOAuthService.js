@@ -151,11 +151,15 @@ async function loadGoogleOAuthForUser(userId) {
     LIMIT 1
     `, [userId, PROVIDER_GOOGLE]);
     const row = res.rows[0];
-    if (!row || !row.oauth_refresh_token)
+    if (!row)
         return null;
+    if (!row.oauth_refresh_token) {
+        throw new Error('Google Calendar connection has no refresh token');
+    }
     const decryptedRefresh = (0, agendaTokenVault_1.decryptAgendaSecret)(row.oauth_refresh_token);
-    if (!decryptedRefresh)
-        return null;
+    if (!decryptedRefresh) {
+        throw new Error('Google Calendar refresh token could not be decrypted');
+    }
     const client = buildOAuth2Client();
     client.setCredentials({ refresh_token: decryptedRefresh });
     const calendarId = row.external_default_calendar_id && row.external_default_calendar_id.trim()

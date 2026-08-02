@@ -8,6 +8,7 @@ const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
 const calendarService_1 = require("../services/calendarService");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
+const financialEntityMutation_1 = require("../services/financialEntityMutation");
 function optionalBankAccountId(body) {
     const v = body.bankAccountId;
     if (v == null || v === '')
@@ -19,6 +20,28 @@ function parseBankAccountIdUpdate(body, previous) {
     if (!('bankAccountId' in body))
         return previous;
     return optionalBankAccountId(body);
+}
+async function recalculatePayableWithinTransaction(client, accountPayableId, userId, totalDue) {
+    const totalResult = await client.query(`SELECT COALESCE(SUM(amount), 0)::numeric AS total
+     FROM accounts_payable_payments
+     WHERE account_payable_id = $1 AND user_id = $2`, [accountPayableId, userId]);
+    const totalPaid = (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(totalResult.rows[0].total));
+    const isPaid = totalPaid >= totalDue - 0.005;
+    let paidDate = null;
+    if (isPaid) {
+        const maxDate = await client.query(`SELECT MAX(payment_date)::date AS d
+       FROM accounts_payable_payments
+       WHERE account_payable_id = $1 AND user_id = $2`, [accountPayableId, userId]);
+        paidDate = maxDate.rows[0]?.d ?? null;
+    }
+    const rowResult = await client.query(`UPDATE accounts_payable
+     SET status = $1, paid_date = $2, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $3 AND user_id = $4 AND is_active = TRUE
+     RETURNING id, description, amount, currency, due_date, status, category, notes,
+               paid_date, created_at, updated_at`, [isPaid ? 'PAID' : 'PENDING', paidDate, accountPayableId, userId]);
+    if (rowResult.rows.length === 0)
+        throw new entityActivation_1.InactiveEntityError();
+    return { totalPaid, row: rowResult.rows[0] };
 }
 const getAccountsPayable = async (req, res) => {
     try {
@@ -224,9 +247,12 @@ const addAccountPayablePayment = async (req, res) => {
 };
 exports.addAccountPayablePayment = addAccountPayablePayment;
 const updateAccountPayablePayment = async (req, res) => {
+    let client = null;
+    let transactionOpen = false;
     try {
         const userId = req.userId;
-        const { id, paymentId } = req.params;
+        const accountId = Number(req.params.id);
+        const paymentId = Number(req.params.paymentId);
         const { amount, paymentDate } = req.body;
         if (amount == null || paymentDate == null || paymentDate === '') {
             return res.status(400).json({ message: 'amount and paymentDate are required' });
@@ -235,187 +261,172 @@ const updateAccountPayablePayment = async (req, res) => {
         if (payAmount <= 0 || isNaN(payAmount)) {
             return res.status(400).json({ message: 'amount must be greater than zero' });
         }
-        const accountResult = await (0, database_1.query)(`SELECT id, description, amount, currency, category
-       FROM accounts_payable WHERE id = $1 AND user_id = $2`, [id, userId]);
-        if (accountResult.rows.length === 0) {
-            return res.status(404).json({ message: 'Account payable not found' });
-        }
-        const account = accountResult.rows[0];
-        const payRow = await (0, database_1.query)(`SELECT id, amount, expense_id FROM accounts_payable_payments
-       WHERE id = $1 AND account_payable_id = $2 AND user_id = $3`, [paymentId, id, userId]);
-        if (payRow.rows.length === 0) {
+        client = await (0, database_1.getClient)();
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const locked = await client.query(`SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status,
+              ap.category, ap.notes, ap.paid_date, ap.is_active, ap.created_at, ap.updated_at,
+              p.amount AS payment_amount, p.payment_date, p.expense_id AS derived_id
+       FROM accounts_payable ap
+       INNER JOIN accounts_payable_payments p
+         ON p.account_payable_id = ap.id AND p.user_id = ap.user_id
+       WHERE ap.id = $1 AND ap.user_id = $2 AND p.id = $3
+       FOR UPDATE OF ap, p`, [accountId, userId, paymentId]);
+        if (locked.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(404).json({ message: 'Payment not found' });
         }
-        const prev = payRow.rows[0];
-        const prevAmt = (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(prev.amount));
+        const account = locked.rows[0];
+        if (account.is_active !== true)
+            throw new entityActivation_1.InactiveEntityError();
+        const prevAmt = (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(account.payment_amount));
         const totalDue = (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(account.amount));
-        const totalPaid = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
-        const otherSum = (0, accountsPaymentLinkSync_1.roundMoney)(totalPaid - prevAmt);
+        const otherResult = await client.query(`SELECT COALESCE(SUM(amount), 0)::numeric AS total
+       FROM accounts_payable_payments
+       WHERE account_payable_id = $1 AND user_id = $2 AND id <> $3`, [accountId, userId, paymentId]);
+        const otherSum = (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(otherResult.rows[0].total));
         if (otherSum + payAmount > totalDue + 0.005) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(400).json({
                 message: `El monto excede el saldo pendiente (${(0, accountsPaymentLinkSync_1.roundMoney)(totalDue - otherSum)})`,
             });
         }
-        const expenseId = prev.expense_id;
-        let prevExpenseBank = null;
+        const expenseId = account.derived_id;
+        let previousBankId = null;
+        let derivedDescription = '';
         if (expenseId) {
-            const er = await (0, database_1.query)(`SELECT bank_account_id FROM expenses WHERE id = $1 AND user_id = $2`, [
-                expenseId,
-                userId,
-            ]);
-            prevExpenseBank = er.rows[0]?.bank_account_id != null ? er.rows[0].bank_account_id : null;
+            const derived = await client.query('SELECT bank_account_id, description FROM expenses WHERE id = $1 AND user_id = $2 FOR UPDATE', [expenseId, userId]);
+            previousBankId = derived.rows[0]?.bank_account_id ?? null;
+            derivedDescription = String(derived.rows[0]?.description ?? '');
         }
-        const newBankId = parseBankAccountIdUpdate(req.body, prevExpenseBank);
-        const client = await (0, database_1.getClient)();
-        try {
-            await client.query('BEGIN');
-            await client.query(`UPDATE accounts_payable_payments
-         SET amount = $1, payment_date = $2
-         WHERE id = $3 AND account_payable_id = $4 AND user_id = $5`, [payAmount, paymentDate, paymentId, id, userId]);
-            if (expenseId) {
-                const cur = String(account.currency);
-                if (prevExpenseBank) {
-                    try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, prevExpenseBank, cur, prevAmt, client, {
-                            description: `[CxP] Ajuste de abono · reversión «${account.description}»`,
-                        });
-                    }
-                    catch (e) {
-                        await client.query('ROLLBACK');
-                        if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
-                            return;
-                        console.error('AP update revert balance:', e);
-                        return res.status(500).json({ message: 'Error al ajustar saldo de la cuenta (reversión)' });
-                    }
-                }
-                const desc = await (0, accountsPaymentLinkSync_1.expenseDescriptionForPayable)(expenseId, userId, account.description);
-                await client.query(`UPDATE expenses
-           SET amount = $1, date = $2, description = $3, currency = $4,
-               category = COALESCE($5, category),
-               bank_account_id = $6,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $7 AND user_id = $8`, [
-                    payAmount,
-                    paymentDate,
-                    desc,
-                    account.currency,
-                    account.category || 'Cuentas por Pagar',
-                    newBankId,
-                    expenseId,
-                    userId,
-                ]);
-                if (newBankId) {
-                    try {
-                        await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, cur, -payAmount, client, {
-                            description: `[CxP] Ajuste de abono · nuevo cargo «${account.description}»`,
-                        });
-                    }
-                    catch (e) {
-                        await client.query('ROLLBACK');
-                        if (e?.message === 'ACCOUNT_NOT_FOUND' || e?.message === 'CURRENCY_MISMATCH') {
-                            return res.status(400).json({
-                                message: e.message === 'CURRENCY_MISMATCH'
-                                    ? 'La moneda no coincide con la cuenta seleccionada'
-                                    : 'Cuenta no encontrada',
-                            });
-                        }
-                        throw e;
-                    }
-                }
+        const newBankId = parseBankAccountIdUpdate(req.body, previousBankId);
+        await client.query(`UPDATE accounts_payable_payments
+       SET amount = $1, payment_date = $2
+       WHERE id = $3 AND account_payable_id = $4 AND user_id = $5`, [payAmount, paymentDate, paymentId, accountId, userId]);
+        if (expenseId) {
+            if (previousBankId) {
+                await (0, accountBalance_1.applyBalanceDelta)(userId, previousBankId, account.currency, prevAmt, client, {
+                    description: `[CxP] Ajuste de abono · reversión «${account.description}»`,
+                });
             }
-            await client.query('COMMIT');
+            const prefix = derivedDescription.trimStart().startsWith('Pago:') ? 'Pago' : 'Abono';
+            await client.query(`UPDATE expenses
+         SET amount = $1, date = $2, description = $3, currency = $4,
+             category = COALESCE($5, category), bank_account_id = $6,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7 AND user_id = $8`, [payAmount, paymentDate, `${prefix}: ${account.description}`, account.currency,
+                account.category || 'Cuentas por Pagar', newBankId, expenseId, userId]);
+            if (newBankId) {
+                await (0, accountBalance_1.applyBalanceDelta)(userId, newBankId, account.currency, -payAmount, client, {
+                    description: `[CxP] Ajuste de abono · nuevo cargo «${account.description}»`,
+                });
+            }
         }
-        catch (e) {
-            await client.query('ROLLBACK');
-            if ((0, activeEntityGuard_1.respondInactiveEntityError)(e, res))
-                return;
-            console.error('Update AP payment tx:', e);
-            return res.status(500).json({ message: 'Error al actualizar abono', error: e.message });
-        }
-        finally {
-            client.release();
-        }
-        await (0, accountsPaymentLinkSync_1.recalculatePayableStatus)(Number(id), userId);
-        const totalPaidAfter = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
-        const rowResult = await (0, database_1.query)(`SELECT id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at
-       FROM accounts_payable WHERE id = $1 AND user_id = $2`, [id, userId]);
-        const ar = rowResult.rows[0];
+        const recalculated = await recalculatePayableWithinTransaction(client, accountId, userId, totalDue);
+        await client.query('COMMIT');
+        transactionOpen = false;
+        const row = recalculated.row;
         res.json({
             success: true,
             message: 'Abono actualizado; gasto sincronizado',
-            totalPaid: totalPaidAfter,
+            totalPaid: recalculated.totalPaid,
             accountPayable: {
-                id: ar.id,
-                description: ar.description,
-                amount: parseFloat(ar.amount),
-                currency: ar.currency,
-                dueDate: ar.due_date,
-                status: ar.status,
-                category: ar.category,
-                notes: ar.notes,
-                paidDate: ar.paid_date,
-                totalPaid: totalPaidAfter,
-                createdAt: ar.created_at,
-                updatedAt: ar.updated_at,
+                id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+                dueDate: row.due_date, status: row.status, category: row.category, notes: row.notes,
+                paidDate: row.paid_date, totalPaid: recalculated.totalPaid,
+                createdAt: row.created_at, updatedAt: row.updated_at,
             },
         });
     }
     catch (error) {
+        if (client && transactionOpen)
+            await client.query('ROLLBACK');
         if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
             return;
+        if (error.message === 'ACCOUNT_NOT_FOUND' || error.message === 'CURRENCY_MISMATCH') {
+            return res.status(400).json({
+                message: error.message === 'CURRENCY_MISMATCH'
+                    ? 'La moneda no coincide con la cuenta seleccionada'
+                    : 'Cuenta no encontrada',
+            });
+        }
         console.error('Update account payable payment error:', error);
         res.status(500).json({ message: 'Error updating payment', error: error.message });
+    }
+    finally {
+        client?.release();
     }
 };
 exports.updateAccountPayablePayment = updateAccountPayablePayment;
 const deleteAccountPayablePayment = async (req, res) => {
+    let client = null;
+    let transactionOpen = false;
     try {
         const userId = req.userId;
-        const { id, paymentId } = req.params;
-        const payRow = await (0, database_1.query)(`SELECT expense_id FROM accounts_payable_payments
-       WHERE id = $1 AND account_payable_id = $2 AND user_id = $3`, [paymentId, id, userId]);
-        if (payRow.rows.length === 0) {
+        const accountId = Number(req.params.id);
+        const paymentId = Number(req.params.paymentId);
+        client = await (0, database_1.getClient)();
+        await client.query('BEGIN');
+        transactionOpen = true;
+        const locked = await client.query(`SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status,
+              ap.category, ap.notes, ap.paid_date, ap.is_active, ap.created_at, ap.updated_at,
+              p.amount AS payment_amount, p.payment_date, p.expense_id AS derived_id
+       FROM accounts_payable ap
+       INNER JOIN accounts_payable_payments p
+         ON p.account_payable_id = ap.id AND p.user_id = ap.user_id
+       WHERE ap.id = $1 AND ap.user_id = $2 AND p.id = $3
+       FOR UPDATE OF ap, p`, [accountId, userId, paymentId]);
+        if (locked.rows.length === 0) {
+            await client.query('ROLLBACK');
+            transactionOpen = false;
             return res.status(404).json({ message: 'Payment not found' });
         }
-        const expenseId = payRow.rows[0].expense_id;
+        const account = locked.rows[0];
+        if (account.is_active !== true)
+            throw new entityActivation_1.InactiveEntityError();
+        const expenseId = account.derived_id;
         if (expenseId) {
-            await (0, database_1.query)(`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
-            await (0, calendarService_1.deleteCalendarEventsForRelated)(userId, expenseId, ['RECURRING_EXPENSE', 'EXPENSE']);
+            const derived = await client.query('SELECT bank_account_id FROM expenses WHERE id = $1 AND user_id = $2 FOR UPDATE', [expenseId, userId]);
+            const bankAccountId = derived.rows[0]?.bank_account_id ?? null;
+            if (bankAccountId) {
+                await (0, accountBalance_1.applyBalanceDelta)(userId, bankAccountId, account.currency, parseFloat(account.payment_amount), client, { description: `[CxP] Eliminación de abono · reversión «${account.description}»` });
+            }
+            await client.query(`UPDATE calendar_events
+         SET show_on_calendar = false, updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $1 AND related_id = $2
+           AND event_type = ANY($3::varchar[])`, [userId, expenseId, ['RECURRING_EXPENSE', 'EXPENSE']]);
+            await client.query('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [expenseId, userId]);
         }
-        await (0, database_1.query)(`DELETE FROM accounts_payable_payments WHERE id = $1 AND account_payable_id = $2 AND user_id = $3`, [paymentId, id, userId]);
-        await (0, accountsPaymentLinkSync_1.recalculatePayableStatus)(Number(id), userId);
-        const totalPaidAfter = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
-        const rowResult = await (0, database_1.query)(`SELECT id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at
-       FROM accounts_payable WHERE id = $1 AND user_id = $2`, [id, userId]);
-        if (rowResult.rows.length === 0) {
-            return res.json({ success: true, message: 'Abono eliminado', totalPaid: 0 });
-        }
-        const ar = rowResult.rows[0];
+        await client.query(`DELETE FROM accounts_payable_payments
+       WHERE id = $1 AND account_payable_id = $2 AND user_id = $3`, [paymentId, accountId, userId]);
+        const recalculated = await recalculatePayableWithinTransaction(client, accountId, userId, (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(account.amount)));
+        await client.query('COMMIT');
+        transactionOpen = false;
+        const row = recalculated.row;
         res.json({
             success: true,
             message: 'Abono eliminado; gasto eliminado en el módulo de gastos',
-            totalPaid: totalPaidAfter,
+            totalPaid: recalculated.totalPaid,
             accountPayable: {
-                id: ar.id,
-                description: ar.description,
-                amount: parseFloat(ar.amount),
-                currency: ar.currency,
-                dueDate: ar.due_date,
-                status: ar.status,
-                category: ar.category,
-                notes: ar.notes,
-                paidDate: ar.paid_date,
-                totalPaid: totalPaidAfter,
-                createdAt: ar.created_at,
-                updatedAt: ar.updated_at,
+                id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+                dueDate: row.due_date, status: row.status, category: row.category, notes: row.notes,
+                paidDate: row.paid_date, totalPaid: recalculated.totalPaid,
+                createdAt: row.created_at, updatedAt: row.updated_at,
             },
         });
     }
     catch (error) {
+        if (client && transactionOpen)
+            await client.query('ROLLBACK');
         if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
             return;
         console.error('Delete account payable payment error:', error);
         res.status(500).json({ message: 'Error deleting payment', error: error.message });
+    }
+    finally {
+        client?.release();
     }
 };
 exports.deleteAccountPayablePayment = deleteAccountPayablePayment;
@@ -469,13 +480,12 @@ const updateAccountPayable = async (req, res) => {
         const { id } = req.params;
         const { description, amount, currency, dueDate, category, notes } = req.body;
         const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
-        const prevRow = await (0, database_1.query)(`SELECT currency FROM accounts_payable WHERE id = $1 AND user_id = $2`, [
-            id,
-            userId,
-        ]);
-        if (prevRow.rows.length === 0) {
+        const prevRow = await (0, database_1.query)('SELECT currency, is_active FROM accounts_payable WHERE id = $1 AND user_id = $2', [id, userId]);
+        if (prevRow.rows.length === 0)
             return res.status(404).json({ message: 'Account payable not found' });
-        }
+        const financialUpdate = (0, financialEntityMutation_1.financialEntityUpdateRequiresActive)('accountsPayable', req.body);
+        if (financialUpdate && prevRow.rows[0].is_active !== true)
+            throw new entityActivation_1.InactiveEntityError();
         const mergedCur = currency !== undefined && currency !== null && String(currency).trim() !== ''
             ? String(currency).trim().toUpperCase()
             : String(prevRow.rows[0].currency || '').trim().toUpperCase();
@@ -487,43 +497,30 @@ const updateAccountPayable = async (req, res) => {
         if (amount != null) {
             const paid = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
             if ((0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(String(amount))) < paid - 0.005) {
-                return res.status(400).json({
-                    message: `Amount cannot be less than total paid (${paid})`,
-                });
+                return res.status(400).json({ message: `Amount cannot be less than total paid (${paid})` });
             }
         }
         const result = await (0, database_1.query)(`UPDATE accounts_payable
-       SET description = COALESCE($1, description),
-           amount = COALESCE($2, amount),
-           currency = COALESCE($3, currency),
-           due_date = COALESCE($4, due_date),
-           category = COALESCE($5, category),
-           notes = COALESCE($6, notes),
+       SET description = COALESCE($1, description), amount = COALESCE($2, amount),
+           currency = COALESCE($3, currency), due_date = COALESCE($4, due_date),
+           category = COALESCE($5, category), notes = COALESCE($6, notes),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 AND user_id = $8
-       RETURNING id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at`, [description, amount, currency, dueDate, category, notes, id, userId]);
+       WHERE id = $7 AND user_id = $8 AND (is_active = TRUE OR $9::boolean = FALSE)
+       RETURNING id, description, amount, currency, due_date, status, category, notes,
+                 paid_date, created_at, updated_at`, [description, amount, currency, dueDate, category, notes, id, userId, financialUpdate]);
         if (result.rows.length === 0) {
+            if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accountsPayable', Number(id), userId, res)))
+                return;
             return res.status(404).json({ message: 'Account payable not found' });
         }
         const account = result.rows[0];
         const totalPaid = await (0, accountsPaymentLinkSync_1.getTotalPaidPayable)(Number(id));
-        res.json({
-            success: true,
-            accountPayable: {
-                id: account.id,
-                description: account.description,
-                amount: parseFloat(account.amount),
-                currency: account.currency,
-                dueDate: account.due_date,
-                status: account.status,
-                category: account.category,
-                notes: account.notes,
-                paidDate: account.paid_date,
-                totalPaid,
-                createdAt: account.created_at,
-                updatedAt: account.updated_at,
-            },
-        });
+        res.json({ success: true, accountPayable: {
+                id: account.id, description: account.description, amount: parseFloat(account.amount),
+                currency: account.currency, dueDate: account.due_date, status: account.status,
+                category: account.category, notes: account.notes, paidDate: account.paid_date,
+                totalPaid, createdAt: account.created_at, updatedAt: account.updated_at,
+            } });
     }
     catch (error) {
         if ((0, activeEntityGuard_1.respondInactiveEntityError)(error, res))
