@@ -19,6 +19,7 @@ import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
 import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 function buildBankAccountCopyText(
@@ -214,7 +215,7 @@ const Accounts: React.FC = () => {
   const accountsForTransfer = useMemo(
     () =>
       accounts.filter((a) =>
-        bankAccountSupportsLedgerCurrency(a, transferForm.currency, primaryCurrency, secondaryCurrency)
+        a.isActive && bankAccountSupportsLedgerCurrency(a, transferForm.currency, primaryCurrency, secondaryCurrency)
       ),
     [accounts, transferForm.currency, primaryCurrency, secondaryCurrency]
   );
@@ -222,7 +223,7 @@ const Accounts: React.FC = () => {
   const accountsForAdjust = useMemo(
     () =>
       accounts.filter((a) =>
-        bankAccountSupportsLedgerCurrency(a, adjustForm.currency, primaryCurrency, secondaryCurrency)
+        a.isActive && bankAccountSupportsLedgerCurrency(a, adjustForm.currency, primaryCurrency, secondaryCurrency)
       ),
     [accounts, adjustForm.currency, primaryCurrency, secondaryCurrency]
   );
@@ -584,6 +585,13 @@ const Accounts: React.FC = () => {
                     >
                       <Edit className="h-5 w-5" />
                     </button>
+                    <EntityActiveToggle
+                      resourcePath="accounts"
+                      entityId={account.id}
+                      isActive={account.isActive}
+                      entityLabel={account.bankName}
+                      onChanged={fetchAccounts}
+                    />
                     <button
                       type="button"
                       onClick={() => handleDelete(account.id)}

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCashAdjustment = exports.listCashAdjustments = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
@@ -37,6 +38,8 @@ exports.listCashAdjustments = listCashAdjustments;
 const createCashAdjustment = async (req, res) => {
     const userId = req.userId;
     const accountId = parseInt(req.params.id, 10);
+    if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accounts', accountId, userId, res)))
+        return;
     const { amountDelta, currency, reason, countedTotal } = req.body;
     if (amountDelta == null || !currency) {
         return res.status(400).json({ message: 'amountDelta and currency are required' });

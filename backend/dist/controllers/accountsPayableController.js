@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAccountPayable = exports.payAccountPayable = exports.updateAccountPayable = exports.createAccountPayable = exports.deleteAccountPayablePayment = exports.updateAccountPayablePayment = exports.addAccountPayablePayment = exports.getAccountPayablePayments = exports.getAccountsPayable = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
@@ -23,7 +24,7 @@ const getAccountsPayable = async (req, res) => {
         const userId = req.userId;
         const { status } = req.query;
         let queryText = `
-      SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status, ap.category, ap.notes, ap.paid_date, ap.created_at, ap.updated_at,
+      SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status, ap.category, ap.notes, ap.paid_date, ap.is_active, ap.created_at, ap.updated_at,
              COALESCE(pay.total_paid, 0)::numeric as total_paid
       FROM accounts_payable ap
       LEFT JOIN (
@@ -52,6 +53,7 @@ const getAccountsPayable = async (req, res) => {
                 category: row.category,
                 notes: row.notes,
                 paidDate: row.paid_date,
+                isActive: row.is_active === true,
                 totalPaid: (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(row.total_paid)),
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
@@ -104,6 +106,8 @@ const addAccountPayablePayment = async (req, res) => {
     try {
         const userId = req.userId;
         const { id } = req.params;
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accountsPayable', Number(id), userId, res)))
+            return;
         const { amount, paymentDate } = req.body;
         if (amount == null || paymentDate == null || paymentDate === '') {
             return res.status(400).json({ message: 'amount and paymentDate are required' });
@@ -497,6 +501,8 @@ const payAccountPayable = async (req, res) => {
     try {
         const userId = req.userId;
         const { id } = req.params;
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accountsPayable', Number(id), userId, res)))
+            return;
         const { paidDate, paymentDate, notes } = req.body;
         const dateStr = paymentDate ?? paidDate;
         if (!dateStr || String(dateStr).trim() === '') {

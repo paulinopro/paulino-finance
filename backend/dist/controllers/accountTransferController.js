@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAccountTransfer = exports.listAccountTransfers = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
@@ -42,6 +43,10 @@ const createAccountTransfer = async (req, res) => {
     if (!fromAccountId || !toAccountId || !currency || amount == null || isNaN(amt) || amt <= 0) {
         return res.status(400).json({ message: 'fromAccountId, toAccountId, amount (>0) and currency are required' });
     }
+    if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accounts', Number(fromAccountId), userId, res)))
+        return;
+    if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accounts', Number(toAccountId), userId, res)))
+        return;
     const pair = await (0, userCurrencyPair_1.getUserCurrencyPair)(userId);
     const ledErr = (0, userCurrencyPair_1.validateLedgerCurrencyForUser)(pair, String(currency));
     if (ledErr) {

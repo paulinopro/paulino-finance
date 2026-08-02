@@ -20,7 +20,7 @@ const getProjections = async (req, res) => {
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM income
-         WHERE user_id = $1
+         WHERE user_id = $1 AND is_active = TRUE
            AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
@@ -30,7 +30,7 @@ const getProjections = async (req, res) => {
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM expenses
-         WHERE user_id = $1
+         WHERE user_id = $1 AND is_active = TRUE
            AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
@@ -39,14 +39,14 @@ const getProjections = async (req, res) => {
         // Ingresos recurrentes: equivalente mensual según frequency (alineado con flujo de caja / taxonomía)
         const recurrentIncomeRows = await (0, database_1.query)(`SELECT amount, currency, frequency
        FROM income
-       WHERE user_id = $1 AND recurrence_type = 'recurrent'`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'recurrent'`, [userId]);
         // Gastos recurrentes: todas las frecuencias con equivalente mensual (antes solo «monthly»)
         const recurrentExpenseRows = await (0, database_1.query)(`SELECT amount, currency, frequency
        FROM expenses
-       WHERE user_id = $1 AND recurrence_type = 'recurrent'`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'recurrent'`, [userId]);
         const accountsResult = await (0, database_1.query)(`SELECT SUM(balance_dop) as total_dop, SUM(balance_usd) as total_usd
        FROM bank_accounts
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const accounts = accountsResult.rows[0];
         const currentBalance = (0, userCurrencyConversion_1.bankBalancesToPrimary)(parseFloat(accounts.total_dop || 0), parseFloat(accounts.total_usd || 0), ctx);
         let avgMonthlyIncomeDop = 0;

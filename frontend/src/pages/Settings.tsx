@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
+import ExternalCalendarSettings from '../components/ExternalCalendarSettings';
 import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -397,6 +398,8 @@ const Settings: React.FC = () => {
             </button>
           </div>
         </motion.div>
+
+        <ExternalCalendarSettings />
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}

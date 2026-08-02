@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteCardPayment = exports.recordCardPayment = exports.listCardPayments = exports.deleteCard = exports.updateCard = exports.createCard = exports.getCard = exports.getCards = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const userCurrencyPair_1 = require("../utils/userCurrencyPair");
 const calendarService_1 = require("../services/calendarService");
@@ -19,7 +20,7 @@ const getCards = async (req, res) => {
         let queryText = `
       SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
               current_debt_dop, current_debt_usd, minimum_payment_dop, minimum_payment_usd,
-              cut_off_day, payment_due_day, currency_type, created_at, updated_at
+              cut_off_day, payment_due_day, currency_type, is_active, created_at, updated_at
        FROM credit_cards
        WHERE user_id = $1
     `;
@@ -50,29 +51,31 @@ const getCards = async (req, res) => {
             cutOffDay: row.cut_off_day,
             paymentDueDay: row.payment_due_day,
             currencyType: row.currency_type,
+            isActive: row.is_active === true,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         }));
         // Calculate totals
-        const totalDebtDop = cards.reduce((sum, c) => {
+        const activeCards = cards.filter((card) => card.isActive);
+        const totalDebtDop = activeCards.reduce((sum, c) => {
             if (c.currencyType === 'DOP' || c.currencyType === 'DUAL') {
                 return sum + c.currentDebtDop;
             }
             return sum;
         }, 0);
-        const totalDebtUsd = cards.reduce((sum, c) => {
+        const totalDebtUsd = activeCards.reduce((sum, c) => {
             if (c.currencyType === 'USD' || c.currencyType === 'DUAL') {
                 return sum + c.currentDebtUsd;
             }
             return sum;
         }, 0);
-        const totalMinPaymentDop = cards.reduce((sum, c) => {
+        const totalMinPaymentDop = activeCards.reduce((sum, c) => {
             if (c.currencyType === 'DOP' || c.currencyType === 'DUAL') {
                 return sum + c.minimumPaymentDop;
             }
             return sum;
         }, 0);
-        const totalMinPaymentUsd = cards.reduce((sum, c) => {
+        const totalMinPaymentUsd = activeCards.reduce((sum, c) => {
             if (c.currencyType === 'USD' || c.currencyType === 'DUAL') {
                 return sum + c.minimumPaymentUsd;
             }
@@ -86,7 +89,7 @@ const getCards = async (req, res) => {
                 totalDebtUsd,
                 totalMinPaymentDop,
                 totalMinPaymentUsd,
-                totalCards: cards.length,
+                totalCards: activeCards.length,
             },
         });
     }
@@ -102,7 +105,7 @@ const getCard = async (req, res) => {
         const cardId = parseInt(req.params.id);
         const result = await (0, database_1.query)(`SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
               current_debt_dop, current_debt_usd, minimum_payment_dop, minimum_payment_usd,
-              cut_off_day, payment_due_day, currency_type, created_at, updated_at
+              cut_off_day, payment_due_day, currency_type, is_active, created_at, updated_at
        FROM credit_cards
        WHERE id = $1 AND user_id = $2`, [cardId, userId]);
         if (result.rows.length === 0) {
@@ -124,6 +127,7 @@ const getCard = async (req, res) => {
                 cutOffDay: row.cut_off_day,
                 paymentDueDay: row.payment_due_day,
                 currencyType: row.currency_type,
+                isActive: row.is_active === true,
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
             },
@@ -317,6 +321,8 @@ const recordCardPayment = async (req, res) => {
     try {
         const userId = req.userId;
         const cardId = parseInt(req.params.id);
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('cards', cardId, userId, res)))
+            return;
         const { amount, currency, paymentDate, notes } = req.body;
         const bankAccountId = optionalBankAccountId(req.body);
         const amt = parseFloat(String(amount));

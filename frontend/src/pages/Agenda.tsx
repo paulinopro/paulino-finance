@@ -1,44 +1,35 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import listPlugin from '@fullcalendar/list';
+import { DateSelectArg, EventClickArg, EventDropArg, EventInput } from '@fullcalendar/core';
+import { EventResizeDoneArg } from '@fullcalendar/interaction';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { AlertCircle, CalendarRange, Check, Link2, Loader2, Plug, Plus, Trash2, Calendar as CalendarGlyph } from 'lucide-react';
+import {
+  AlertCircle,
+  CalendarDays,
+  CheckCircle2,
+  Cloud,
+  Loader2,
+  MapPin,
+  RefreshCw,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 import PageHeader from '../components/PageHeader';
 
 type AgendaKind = 'EVENT' | 'TASK' | 'REMINDER' | 'APPOINTMENT' | 'NOTE';
 
-interface AgendaConnDto {
-  id: number;
-  provider: string;
-  status: string;
-  accountLabel?: string;
-  lastError?: string;
-  externalDefaultCalendarId?: string;
-}
-
-function syncEngineAvailable(
-  syncEngines: { provider?: string; available?: boolean }[] | undefined,
-  provider: string
-): boolean {
-  if (!Array.isArray(syncEngines)) return false;
-  return Boolean(syncEngines.find((x) => x.provider === provider)?.available);
-}
-
-function pickGoogleAvailability(syncEngines?: { provider?: string; available?: boolean }[]): boolean {
-  return syncEngineAvailable(syncEngines, 'GOOGLE_CALENDAR');
-}
-
-function pickICloudAvailability(syncEngines?: { provider?: string; available?: boolean }[]): boolean {
-  return syncEngineAvailable(syncEngines, 'ICLOUD_CALDAV');
-}
-
-type OutboundPushHint = 'none' | 'ok' | 'err';
-
 interface AgendaOutboundSyncHintsDto {
-  google: OutboundPushHint;
-  icloud: OutboundPushHint;
+  google: 'none' | 'ok' | 'err';
+  icloud: 'none' | 'ok' | 'err';
 }
 
 interface AgendaItemDto {
@@ -46,937 +37,443 @@ interface AgendaItemDto {
   kind: AgendaKind;
   title: string;
   description?: string;
+  location?: string;
   startsAt: string;
   endsAt?: string;
   allDay: boolean;
   status: string;
   syncToExternal: boolean;
+  syncStatus?: string;
+  recurrenceRule?: string;
   outboundSync?: AgendaOutboundSyncHintsDto;
 }
 
-function startOfMonthIso(d: Date): string {
-  return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0).toISOString();
+interface AgendaConnDto {
+  id: number;
+  provider: 'GOOGLE_CALENDAR' | 'ICLOUD_CALDAV' | string;
+  status: string;
+  accountLabel?: string;
+  lastError?: string;
 }
 
-function endOfMonthIso(d: Date): string {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+interface AgendaDraft {
+  id?: number;
+  title: string;
+  description: string;
+  location: string;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  syncToExternal: boolean;
 }
 
-/** Value for input[type=datetime-local] in local time (no TZ suffix). */
-function toDatetimeLocalValue(iso: string): string {
-  const d = new Date(iso);
+const blankDraft = (): AgendaDraft => ({
+  title: '',
+  description: '',
+  location: '',
+  startsAt: toDatetimeLocalValue(new Date()),
+  endsAt: toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000)),
+  allDay: false,
+  syncToExternal: true,
+});
+
+function toDatetimeLocalValue(value: Date | string): string {
+  const d = value instanceof Date ? value : new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Build ISO from datetime-local assuming local interpretation. */
-function fromDatetimeLocalValue(v: string): string {
-  return new Date(v).toISOString();
+function toIsoFromLocal(value: string): string {
+  return new Date(value).toISOString();
 }
 
-interface GoogleWritableCalDto {
-  id: string;
-  summary: string;
-  primary: boolean;
+function providerConnection(connections: AgendaConnDto[], provider: string) {
+  return connections.find((c) => c.provider === provider);
 }
 
-function AgendaOutboundSyncRowChips(props: {
-  t: (key: string) => string;
-  syncToExternal: boolean;
-  googleOnline: boolean;
-  icloudOnline: boolean;
-  outbound?: AgendaOutboundSyncHintsDto;
-}) {
-  const { t, syncToExternal, googleOnline, icloudOnline, outbound } = props;
-
-  if (!syncToExternal) {
-    return (
-      <span className="inline-flex rounded-md bg-dark-800/55 px-1.5 py-0.5 text-[10px] font-medium text-dark-500 ring-1 ring-white/[0.04]">
-        {t('pages.agenda.syncLocalOnlyBadge')}
-      </span>
-    );
-  }
-
-  const anyProv = googleOnline || icloudOnline;
-  if (!anyProv) {
-    return (
-      <span className="inline-flex rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-200/95 ring-1 ring-amber-500/25">
-        {t('pages.agenda.syncOutboundNoProviders')}
-      </span>
-    );
-  }
-
-  const rows: React.ReactNode[] = [];
-
-  const renderOne = (
-    providerKey: 'google' | 'icloud',
-    label: string,
-    online: boolean,
-    hintRaw: OutboundPushHint | undefined,
-    labels: { ok: string; err: string; pending: string }
-  ) => {
-    if (!online) return;
-    const hint = hintRaw ?? 'none';
-    const palette =
-      hint === 'ok'
-        ? 'bg-emerald-500/14 text-emerald-200 ring-emerald-500/25'
-        : hint === 'err'
-          ? 'bg-red-500/14 text-red-200 ring-red-500/26'
-          : 'bg-dark-900/90 text-dark-300 ring-dark-600/45';
-    const aria =
-      hint === 'ok' ? labels.ok : hint === 'err' ? labels.err : labels.pending;
-    const Ico =
-      hint === 'ok'
-        ? Check
-        : hint === 'err'
-          ? AlertCircle
-          : Loader2;
-
-    rows.push(
-      <span
-        key={`sync-${providerKey}`}
-        role="status"
-        className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${palette}`}
-        title={aria}
-        aria-label={aria}
-      >
-        <Ico className={`h-3 w-3 shrink-0 opacity-95 ${hint === 'none' ? 'animate-spin' : ''}`} aria-hidden />
-        <span>{label}</span>
-      </span>
-    );
-  };
-
-  renderOne(
-    'google',
-    'Google',
-    googleOnline,
-    outbound?.google,
-    {
-      ok: t('pages.agenda.syncOutboundGoogleAriaOk'),
-      err: t('pages.agenda.syncOutboundGoogleAriaErr'),
-      pending: t('pages.agenda.syncOutboundGoogleAriaPending'),
-    }
-  );
-  renderOne(
-    'icloud',
-    'iCloud',
-    icloudOnline,
-    outbound?.icloud,
-    {
-      ok: t('pages.agenda.syncOutboundICloudAriaOk'),
-      err: t('pages.agenda.syncOutboundICloudAriaErr'),
-      pending: t('pages.agenda.syncOutboundICloudAriaPending'),
-    }
-  );
-
-  return <div className="mt-1 flex flex-wrap items-center gap-1">{rows}</div>;
+function providerOnline(connections: AgendaConnDto[], provider: string): boolean {
+  return providerConnection(connections, provider)?.status === 'CONNECTED';
 }
 
 const Agenda: React.FC = () => {
   const { t } = useTranslation();
-  const anchor = useMemo(() => new Date(), []);
-  const range = useMemo(
-    () => ({ from: startOfMonthIso(anchor), to: endOfMonthIso(anchor) }),
-    [anchor]
-  );
-
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const label = useCallback((key: string, fallback: string) => t(key, { defaultValue: fallback }), [t]);
 
   const [items, setItems] = useState<AgendaItemDto[]>([]);
   const [connections, setConnections] = useState<AgendaConnDto[]>([]);
-  const [googleAvailable, setGoogleAvailable] = useState(false);
-  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
-  const [googleWritableCals, setGoogleWritableCals] = useState<GoogleWritableCalDto[]>([]);
-  const [googleCalLoading, setGoogleCalLoading] = useState(false);
-  const [googleCalSaving, setGoogleCalSaving] = useState(false);
-  const [googleCalSel, setGoogleCalSel] = useState('primary');
-  const [icloudAvailable, setIcloudAvailable] = useState(false);
-  const [icloudBusy, setIcloudBusy] = useState(false);
-  const [icloudWritableCals, setIcloudWritableCals] = useState<GoogleWritableCalDto[]>([]);
-  const [icloudCalLoading, setIcloudCalLoading] = useState(false);
-  const [icloudCalSaving, setIcloudCalSaving] = useState(false);
-  const [icloudCalSel, setIcloudCalSel] = useState('');
-  const [icloudAppleId, setIcloudAppleId] = useState('');
-  const [icloudAppPassword, setIcloudAppPassword] = useState('');
-  const [icloudShowCredentialForm, setIcloudShowCredentialForm] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [range, setRange] = useState(() => {
+    const now = new Date();
+    return {
+      from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+      to: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
+    };
+  });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState<AgendaDraft>(() => blankDraft());
 
-  const kindOptions = useMemo(() => ['EVENT', 'TASK', 'REMINDER', 'APPOINTMENT', 'NOTE'] as AgendaKind[], []);
+  const googleConn = providerConnection(connections, 'GOOGLE_CALENDAR');
+  const icloudConn = providerConnection(connections, 'ICLOUD_CALDAV');
+  const googleConnected = providerOnline(connections, 'GOOGLE_CALENDAR');
+  const icloudConnected = providerOnline(connections, 'ICLOUD_CALDAV');
 
-  const googleConn = useMemo(
-    () => connections.find((c) => c.provider === 'GOOGLE_CALENDAR'),
-    [connections]
-  );
+  const fetchConnections = useCallback(async () => {
+    const res = await api.get('/agenda/connections');
+    setConnections(res.data.connections || []);
+  }, []);
 
-  const icloudConn = useMemo(
-    () => connections.find((c) => c.provider === 'ICLOUD_CALDAV'),
-    [connections]
-  );
-
-  const [formKind, setFormKind] = useState<AgendaKind>('EVENT');
-  const [formTitle, setFormTitle] = useState('');
-  const [formStarts, setFormStarts] = useState(() => toDatetimeLocalValue(new Date().toISOString()));
-
-  const fetchAll = useCallback(async () => {
+  const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
-      const [itemsRes, connRes] = await Promise.all([
-        api.get('/agenda/items', {
-          params: { from: range.from, to: range.to },
-        }),
-        api.get('/agenda/connections'),
-      ]);
-      setItems(itemsRes.data.items || []);
-      const conns = (connRes.data.connections || []) as AgendaConnDto[];
-      setConnections(conns);
-      setGoogleAvailable(pickGoogleAvailability(connRes.data.syncEngines));
-      setIcloudAvailable(pickICloudAvailability(connRes.data.syncEngines));
-    } catch (e: unknown) {
-      toast.error(t('pages.agenda.toast.loadError'));
+      const res = await api.get('/agenda/items', { params: range });
+      setItems(res.data.items || []);
+    } catch (e) {
       console.error(e);
+      toast.error(label('pages.agenda.toast.loadError', 'No se pudo cargar la Agenda.'));
     } finally {
       setLoading(false);
     }
-  }, [range.from, range.to, t]);
+  }, [label, range]);
 
-  useEffect(() => {
-    const g = searchParams.get('google');
-    if (!g) return;
-    const msgs: Record<string, string> = {
-      connected: t('pages.agenda.oauth.toast.connected'),
-      cancel: t('pages.agenda.oauth.toast.cancel'),
-      state_invalid: t('pages.agenda.oauth.toast.stateInvalid'),
-      not_configured: t('pages.agenda.oauth.toast.notConfigured'),
-      error: t('pages.agenda.oauth.toast.error'),
-    };
-    if (g === 'connected') toast.success(msgs.connected);
-    else if (msgs[g]) toast.error(msgs[g]);
-    navigate('/agenda', { replace: true });
-  }, [navigate, searchParams, t]);
+  const fetchAll = useCallback(async () => {
+    await Promise.all([fetchItems(), fetchConnections()]);
+  }, [fetchConnections, fetchItems]);
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
 
-  const handleConnectGoogle = async () => {
-    if (!googleAvailable) return;
-    setGoogleAuthBusy(true);
-    try {
-      const res = await api.get<{ authorizationUrl?: string }>('/agenda/connect/google/start');
-      const url = res.data?.authorizationUrl;
-      if (typeof url !== 'string' || !url) {
-        toast.error(t('pages.agenda.oauth.toast.badStart'));
-        return;
-      }
-      window.location.assign(url);
-    } catch {
-      toast.error(t('pages.agenda.oauth.toast.startDenied'));
-    } finally {
-      setGoogleAuthBusy(false);
-    }
+  const calendarEvents: EventInput[] = useMemo(
+    () =>
+      items.map((it) => ({
+        id: `${it.id}-${it.startsAt}`,
+        title: it.title,
+        start: it.startsAt,
+        end: it.endsAt,
+        allDay: it.allDay,
+        editable: !it.recurrenceRule,
+        durationEditable: !it.recurrenceRule,
+        startEditable: !it.recurrenceRule,
+        classNames: [
+          it.syncStatus === 'PENDING' ? 'pf-agenda-event-pending' : '',
+          it.outboundSync?.google === 'err' || it.outboundSync?.icloud === 'err' ? 'pf-agenda-event-error' : '',
+        ].filter(Boolean),
+        extendedProps: it,
+      })),
+    [items]
+  );
+
+  const openNew = (seed?: Partial<AgendaDraft>) => {
+    setDraft({ ...blankDraft(), ...seed });
+    setModalOpen(true);
   };
 
-  const handleDisconnectGoogle = async () => {
-    if (!googleConn) return;
-    if (!globalThis.confirm(t('pages.agenda.oauth.confirmDisconnectGoogle'))) return;
-    setGoogleAuthBusy(true);
-    try {
-      await api.delete('/agenda/connect/google');
-      toast.success(t('pages.agenda.oauth.toast.disconnected'));
-      await fetchAll();
-    } catch {
-      toast.error(t('pages.agenda.oauth.toast.disconnectFail'));
-    } finally {
-      setGoogleAuthBusy(false);
-    }
+  const openExisting = (item: AgendaItemDto) => {
+    setDraft({
+      id: item.id,
+      title: item.title,
+      description: item.description || '',
+      location: item.location || '',
+      startsAt: toDatetimeLocalValue(item.startsAt),
+      endsAt: item.endsAt ? toDatetimeLocalValue(item.endsAt) : toDatetimeLocalValue(new Date(new Date(item.startsAt).getTime() + 60 * 60 * 1000)),
+      allDay: item.allDay,
+      syncToExternal: item.syncToExternal,
+    });
+    setModalOpen(true);
   };
 
-  const calendarPickOptions = useMemo(() => {
-    const primaryRow = googleWritableCals.find((c) => c.primary);
-    const nonPrimary = googleWritableCals.filter((c) => !c.primary);
-    const opts: GoogleWritableCalDto[] = [
-      {
-        id: 'primary',
-        summary: primaryRow?.summary ?? 'primary',
-        primary: true,
-      },
-      ...nonPrimary,
-    ];
-    if (googleCalSel && googleCalSel !== 'primary' && !opts.some((o) => o.id === googleCalSel)) {
-      opts.push({ id: googleCalSel, summary: googleCalSel, primary: false });
-    }
-    return opts;
-  }, [googleWritableCals, googleCalSel]);
+  const handleDatesSet = (arg: { start: Date; end: Date }) => {
+    const next = { from: arg.start.toISOString(), to: arg.end.toISOString() };
+    setRange((prev) => (prev.from === next.from && prev.to === next.to ? prev : next));
+  };
 
-  useEffect(() => {
-    if (!googleConn || googleConn.status !== 'CONNECTED') {
-      setGoogleWritableCals([]);
-      setGoogleCalSel('primary');
+  const handleSelect = (arg: DateSelectArg) => {
+    openNew({
+      startsAt: toDatetimeLocalValue(arg.start),
+      endsAt: toDatetimeLocalValue(arg.end),
+      allDay: arg.allDay,
+    });
+  };
+
+  const patchEventTime = async (id: string, startsAt: Date, endsAt: Date | null, allDay: boolean) => {
+    await api.patch(`/agenda/items/${id}`, {
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt ? endsAt.toISOString() : null,
+      allDay,
+      syncStatus: 'PENDING',
+      lastChangeOrigin: 'LOCAL',
+    });
+    await fetchItems();
+  };
+
+  const handleEventDrop = async (arg: EventDropArg) => {
+    const it = arg.event.extendedProps as AgendaItemDto;
+    if (it.recurrenceRule) {
+      arg.revert();
+      toast.error('Los eventos recurrentes se editan desde la serie completa.');
       return;
     }
-
-    const rawStored = googleConn.externalDefaultCalendarId?.trim() || 'primary';
-
-    let cancelled = false;
-    const run = async () => {
-      setGoogleCalLoading(true);
-      try {
-        const res = await api.get<{ calendars?: GoogleWritableCalDto[] }>('/agenda/connect/google/calendars');
-        if (cancelled) return;
-        const calendars = res.data.calendars ?? [];
-        setGoogleWritableCals(calendars);
-
-        const primaryId = calendars.find((c) => c.primary)?.id;
-        let normalized = rawStored === '' ? 'primary' : rawStored;
-        if (normalized !== 'primary' && primaryId && normalized === primaryId) normalized = 'primary';
-        setGoogleCalSel(normalized);
-      } catch {
-        if (!cancelled) {
-          setGoogleWritableCals([]);
-          toast.error(t('pages.agenda.oauth.toast.calendarListFail'));
-          setGoogleCalSel(rawStored === '' ? 'primary' : rawStored);
-        }
-      } finally {
-        if (!cancelled) setGoogleCalLoading(false);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [googleConn?.id, googleConn?.status, googleConn?.externalDefaultCalendarId, t]);
-
-  const googleStoredCalId = googleConn?.externalDefaultCalendarId?.trim() || 'primary';
-  const normalizedGoogleStored = useMemo(() => {
-    const raw = googleStoredCalId.trim() === '' ? 'primary' : googleStoredCalId.trim();
-    const primaryId = googleWritableCals.find((c) => c.primary)?.id;
-    if (raw !== 'primary' && primaryId && raw === primaryId) return 'primary';
-    return raw;
-  }, [googleStoredCalId, googleWritableCals]);
-
-  const googleCalDirty =
-    !!googleConn &&
-    googleConn.status === 'CONNECTED' &&
-    googleCalSel !== normalizedGoogleStored;
-
-  const handleSaveGoogleCalendarTarget = async () => {
-    if (!googleConn || googleConn.status !== 'CONNECTED' || googleCalSaving) return;
-    setGoogleCalSaving(true);
     try {
-      await api.patch('/agenda/connect/google', { calendarId: googleCalSel });
-      toast.success(t('pages.agenda.oauth.toast.calendarSaved'));
-      await fetchAll();
-    } catch {
-      toast.error(t('pages.agenda.oauth.toast.calendarSaveFail'));
-    } finally {
-      setGoogleCalSaving(false);
+      await patchEventTime(String(it.id), arg.event.start!, arg.event.end, arg.event.allDay);
+      toast.success(label('pages.agenda.toast.updated', 'Evento actualizado.'));
+    } catch (e) {
+      arg.revert();
+      console.error(e);
+      toast.error(label('pages.agenda.toast.updateError', 'No se pudo actualizar el evento.'));
     }
   };
 
-  const icloudPickOptions = useMemo(() => {
-    const opts = [...icloudWritableCals];
-    if (icloudCalSel && !opts.some((o) => o.id === icloudCalSel)) {
-      opts.push({
-        id: icloudCalSel,
-        summary: icloudCalSel.slice(0, 80),
-        primary: false,
-      });
-    }
-    return opts;
-  }, [icloudWritableCals, icloudCalSel]);
-
-  useEffect(() => {
-    if (!icloudConn || icloudConn.status !== 'CONNECTED') {
-      setIcloudWritableCals([]);
-      setIcloudCalSel('');
+  const handleEventResize = async (arg: EventResizeDoneArg) => {
+    const it = arg.event.extendedProps as AgendaItemDto;
+    if (it.recurrenceRule) {
+      arg.revert();
+      toast.error('Los eventos recurrentes se editan desde la serie completa.');
       return;
     }
-
-    const rawStored = icloudConn.externalDefaultCalendarId?.trim() || '';
-
-    let cancelled = false;
-    const run = async () => {
-      setIcloudCalLoading(true);
-      try {
-        const res = await api.get<{ calendars?: GoogleWritableCalDto[] }>(
-          '/agenda/connect/icloud/calendars'
-        );
-        if (cancelled) return;
-        const calendars = res.data.calendars ?? [];
-        setIcloudWritableCals(calendars);
-        const pick =
-          (rawStored ? calendars.find((c) => c.id === rawStored) : undefined) ??
-          calendars.find((c) => c.primary) ??
-          calendars[0];
-        setIcloudCalSel(pick ? pick.id : rawStored);
-      } catch {
-        if (!cancelled) {
-          setIcloudWritableCals([]);
-          toast.error(t('pages.agenda.icloud.toast.calendarListFail'));
-          setIcloudCalSel(rawStored);
-        }
-      } finally {
-        if (!cancelled) setIcloudCalLoading(false);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    icloudConn?.id,
-    icloudConn?.status,
-    icloudConn?.externalDefaultCalendarId,
-    t,
-  ]);
-
-  const icloudStoredTarget = icloudConn?.externalDefaultCalendarId?.trim() || '';
-  const icloudCalDirty =
-    !!icloudConn && icloudConn.status === 'CONNECTED' && icloudCalSel !== icloudStoredTarget;
-
-  const handleDisconnectICloud = async () => {
-    if (!icloudConn) return;
-    if (!globalThis.confirm(t('pages.agenda.icloud.confirmDisconnect'))) return;
-    setIcloudBusy(true);
     try {
-      await api.delete('/agenda/connect/icloud');
-      toast.success(t('pages.agenda.icloud.toast.disconnected'));
-      setIcloudAppleId('');
-      setIcloudAppPassword('');
-      setIcloudShowCredentialForm(false);
-      await fetchAll();
-    } catch {
-      toast.error(t('pages.agenda.icloud.toast.disconnectFail'));
-    } finally {
-      setIcloudBusy(false);
+      await patchEventTime(String(it.id), arg.event.start!, arg.event.end, arg.event.allDay);
+      toast.success(label('pages.agenda.toast.updated', 'Evento actualizado.'));
+    } catch (e) {
+      arg.revert();
+      console.error(e);
+      toast.error(label('pages.agenda.toast.updateError', 'No se pudo actualizar el evento.'));
     }
   };
 
-  const icloudCredentialOpen =
-    icloudAvailable &&
-    (!icloudConn ||
-      icloudConn.status === 'ERROR' ||
-      (icloudConn.status === 'CONNECTED' && icloudShowCredentialForm));
-
-  const handleSubmitICloud = async () => {
-    const emailFinal =
-      icloudConn?.status === 'ERROR'
-        ? icloudConn.accountLabel?.trim() || icloudAppleId.trim()
-        : icloudAppleId.trim();
-    const pw = icloudAppPassword.trim();
-    if (!icloudAvailable || !emailFinal || !pw) {
-      toast.error(t('pages.agenda.icloud.toast.needAppleIdPassword'));
-      return;
-    }
-    setIcloudBusy(true);
-    try {
-      await api.post('/agenda/connect/icloud', {
-        appleId: emailFinal,
-        appPassword: pw,
-      });
-      toast.success(t('pages.agenda.icloud.toast.connected'));
-      setIcloudAppPassword('');
-      setIcloudShowCredentialForm(false);
-      await fetchAll();
-    } catch {
-      toast.error(t('pages.agenda.icloud.toast.connectFail'));
-      await fetchAll();
-    } finally {
-      setIcloudBusy(false);
-    }
-  };
-
-  const handleSaveICloudCalendarTarget = async () => {
-    if (!icloudConn || icloudConn.status !== 'CONNECTED' || icloudCalSaving) return;
-    setIcloudCalSaving(true);
-    try {
-      await api.patch('/agenda/connect/icloud', { calendarId: icloudCalSel });
-      toast.success(t('pages.agenda.icloud.toast.calendarSaved'));
-      await fetchAll();
-    } catch {
-      toast.error(t('pages.agenda.icloud.toast.calendarSaveFail'));
-    } finally {
-      setIcloudCalSaving(false);
-    }
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const saveDraft = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim()) {
-      toast.error(t('pages.agenda.toast.titleRequired'));
+    if (!draft.title.trim()) {
+      toast.error(label('pages.agenda.toast.titleRequired', 'El título es obligatorio.'));
       return;
     }
-    setCreating(true);
+    const payload = {
+      kind: 'EVENT',
+      title: draft.title.trim(),
+      description: draft.description.trim() || null,
+      location: draft.location.trim() || null,
+      startsAt: toIsoFromLocal(draft.startsAt),
+      endsAt: draft.endsAt ? toIsoFromLocal(draft.endsAt) : null,
+      allDay: draft.allDay,
+      syncToExternal: draft.syncToExternal,
+      syncStatus: 'PENDING',
+      lastChangeOrigin: 'LOCAL',
+    };
     try {
-      await api.post('/agenda/items', {
-        kind: formKind,
-        title: formTitle.trim(),
-        startsAt: fromDatetimeLocalValue(formStarts),
-        allDay: false,
-        syncToExternal: true,
-      });
-      toast.success(t('pages.agenda.toast.created'));
-      setFormTitle('');
-      await fetchAll();
-    } catch (err: unknown) {
-      toast.error(t('pages.agenda.toast.createError'));
+      if (draft.id) await api.patch(`/agenda/items/${draft.id}`, payload);
+      else await api.post('/agenda/items', payload);
+      toast.success(label('pages.agenda.toast.saved', 'Evento guardado.'));
+      setModalOpen(false);
+      await fetchItems();
+    } catch (err) {
       console.error(err);
-    } finally {
-      setCreating(false);
+      toast.error(label('pages.agenda.toast.saveError', 'No se pudo guardar el evento.'));
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!globalThis.confirm(t('pages.agenda.confirmDelete'))) return;
+  const deleteDraft = async () => {
+    if (!draft.id) return;
+    if (!globalThis.confirm(label('pages.agenda.confirmDelete', '¿Eliminar este evento?'))) return;
     try {
-      await api.delete(`/agenda/items/${id}`);
-      toast.success(t('pages.agenda.toast.deleted'));
-      setItems((prev) => prev.filter((x) => x.id !== id));
-    } catch (err: unknown) {
-      toast.error(t('pages.agenda.toast.deleteError'));
-      console.error(err);
+      await api.delete(`/agenda/items/${draft.id}`);
+      toast.success(label('pages.agenda.toast.deleted', 'Evento eliminado.'));
+      setModalOpen(false);
+      await fetchItems();
+    } catch (e) {
+      console.error(e);
+      toast.error(label('pages.agenda.toast.deleteError', 'No se pudo eliminar el evento.'));
+    }
+  };
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.post('/agenda/sync');
+      const r = res.data.result;
+      toast.success(`Sincronización lista: ${r.imported} importados, ${r.updated} actualizados, ${r.pushed} enviados.`);
+      await fetchAll();
+    } catch (e) {
+      console.error(e);
+      toast.error(label('pages.agenda.toast.syncError', 'No se pudo sincronizar la Agenda.'));
+    } finally {
+      setSyncing(false);
     }
   };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <div className="max-w-[1200px] mx-auto space-y-8 px-1 sm:px-0 pb-28 md:pb-10">
+      <div className="mx-auto max-w-[1440px] space-y-5 px-1 pb-28 md:pb-10">
         <PageHeader
-          title={t('pages.agenda.title')}
-          subtitle={t('pages.agenda.subtitle')}
+          title={label('pages.agenda.title', 'Agenda')}
+          subtitle={label('pages.agenda.subtitle', 'Eventos personales sincronizados con Google Calendar e iCloud Calendar.')}
           actions={
-            <Link
-              to="/calendar"
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-dark-600 bg-dark-800/60 px-4 py-2 text-sm font-medium text-dark-100 ring-1 ring-white/[0.04] hover:bg-dark-700/80 transition-colors"
-            >
-              <CalendarGlyph className="h-4 w-4 shrink-0 text-primary-400" aria-hidden />
-              {t('pages.agenda.linkFinancialCalendar')}
-            </Link>
+            <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-3">
+              <button type="button" onClick={() => openNew()} className="btn-primary">
+                <CalendarDays className="h-4 w-4" aria-hidden />
+                {label('pages.agenda.newEvent', 'Nuevo evento')}
+              </button>
+              <button type="button" onClick={() => void syncNow()} disabled={syncing} className="btn-secondary">
+                {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {label('pages.agenda.syncNow', 'Sincronizar')}
+              </button>
+              <Link to="/settings" className="btn-secondary">
+                <Settings className="h-4 w-4" />
+                Configuración
+              </Link>
+            </div>
           }
         />
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section
-            className="rounded-xl border border-dark-600/50 bg-dark-800/40 p-4 sm:p-5 ring-1 ring-white/[0.04] space-y-4"
-            aria-labelledby="agenda-sync-heading"
-          >
-            <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300">
-                <Link2 className="h-5 w-5" aria-hidden />
-              </span>
-              <div className="min-w-0 space-y-1">
-                <h2 id="agenda-sync-heading" className="text-base font-semibold text-dark-100">
-                  {t('pages.agenda.syncCardTitle')}
-                </h2>
-                <p className="text-sm text-dark-400 leading-relaxed">{t('pages.agenda.syncCardBody')}</p>
-              </div>
-            </div>
-            <ul className="space-y-2 text-sm">
-              <li className="rounded-lg border border-dark-600/40 bg-dark-900/35 px-3 py-3 space-y-2">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-medium text-dark-200">{t('pages.agenda.providers.googleCalendar')}</p>
-                    {!googleConn && googleAvailable && (
-                      <p className="text-[11px] text-dark-500 mt-1">{t('pages.agenda.googlePushHint')}</p>
-                    )}
-                    {googleConn?.accountLabel && (
-                      <p className="text-xs text-dark-400 truncate mt-0.5">{googleConn.accountLabel}</p>
-                    )}
-                    {googleConn?.lastError && (
-                      <p className="text-[11px] text-red-400/90 mt-1 break-words">{googleConn.lastError}</p>
-                    )}
-                  </div>
-                  <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                    {!googleAvailable ? (
-                      <span className="rounded-md bg-dark-700/90 px-2 py-0.5 text-[11px] uppercase tracking-wide text-dark-400">
-                        {t('pages.agenda.badgeSoon')}
-                      </span>
-                    ) : googleConn?.status === 'CONNECTED' ? (
-                      <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
-                        {t('pages.agenda.oauth.statusConnected')}
-                      </span>
-                    ) : googleConn ? (
-                      <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
-                        {googleConn.status}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                {googleAvailable && (
-                  <div className="w-full space-y-3 pt-1">
-                    <div className="flex flex-wrap gap-2">
-                      {(!googleConn || googleConn.status !== 'CONNECTED') && (
-                        <button
-                          type="button"
-                          onClick={() => void handleConnectGoogle()}
-                          disabled={googleAuthBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                        >
-                          <Plug className="h-3.5 w-3.5" aria-hidden />
-                          {t('pages.agenda.oauth.connect')}
-                        </button>
-                      )}
-                      {googleConn && (
-                        <button
-                          type="button"
-                          onClick={() => void handleDisconnectGoogle()}
-                          disabled={googleAuthBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-dark-600 bg-dark-800/70 hover:bg-dark-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-dark-200 transition-colors"
-                        >
-                          {t('pages.agenda.oauth.disconnect')}
-                        </button>
-                      )}
+        <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="calendar-container min-h-[620px] rounded-xl border border-dark-600/50 bg-dark-900/70 p-2 ring-1 ring-white/[0.04] sm:p-3">
+            <FullCalendar
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
+              initialView="dayGridMonth"
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+              }}
+              buttonText={{
+                today: label('pages.agenda.today', 'Hoy'),
+                month: label('pages.agenda.month', 'Mes'),
+                week: label('pages.agenda.week', 'Semana'),
+                day: label('pages.agenda.day', 'Día'),
+                list: label('pages.agenda.list', 'Lista'),
+              }}
+              height="auto"
+              selectable
+              editable
+              nowIndicator
+              eventResizableFromStart
+              events={calendarEvents}
+              datesSet={handleDatesSet}
+              select={handleSelect}
+              eventClick={(arg: EventClickArg) => openExisting(arg.event.extendedProps as AgendaItemDto)}
+              eventDrop={handleEventDrop}
+              eventResize={handleEventResize}
+              eventContent={(arg) => {
+                const it = arg.event.extendedProps as AgendaItemDto;
+                const hasError = it.outboundSync?.google === 'err' || it.outboundSync?.icloud === 'err';
+                return (
+                  <div className="min-w-0 px-1 py-0.5">
+                    <div className="truncate text-[12px] font-semibold">{arg.event.title}</div>
+                    <div className="mt-0.5 flex items-center gap-1 text-[10px] opacity-80">
+                      {hasError ? <AlertCircle className="h-3 w-3" /> : it.syncStatus === 'PENDING' ? <Cloud className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+                      <span>{it.syncStatus === 'PENDING' ? label('pages.agenda.pending', 'Pendiente') : label('pages.agenda.synced', 'Sync')}</span>
                     </div>
-                    {googleConn?.status === 'CONNECTED' && (
-                      <div className="space-y-2 rounded-lg border border-dark-600/35 bg-dark-950/45 px-3 py-2.5">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-dark-400" htmlFor="agenda-google-calendar-target">
-                          {t('pages.agenda.oauth.calendarTarget')}
-                        </label>
-                        <p className="text-[11px] leading-relaxed text-dark-500">{t('pages.agenda.oauth.calendarHint')}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {googleCalLoading ? (
-                            <span className="text-[11px] text-dark-500">{t('pages.agenda.oauth.loadingCalendars')}</span>
-                          ) : null}
-                          <select
-                            id="agenda-google-calendar-target"
-                            className="max-w-[min(100%,20rem)] flex-1 rounded-md border border-dark-600 bg-dark-900 px-2 py-1.5 text-xs text-dark-100 outline-none focus:border-emerald-500/60 disabled:opacity-55"
-                            value={googleCalSel}
-                            onChange={(e) => setGoogleCalSel(e.target.value)}
-                            disabled={googleCalLoading || googleCalSaving || googleAuthBusy}
-                            aria-busy={googleCalLoading}
-                          >
-                            {calendarPickOptions.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.summary}
-                                {c.primary ? ` (${t('pages.agenda.oauth.primaryCalendarTag')})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => void handleSaveGoogleCalendarTarget()}
-                            disabled={
-                              !googleCalDirty || googleCalLoading || googleCalSaving || googleAuthBusy
-                            }
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                          >
-                            {googleCalSaving ? t('pages.agenda.oauth.savingCalendar') : t('pages.agenda.oauth.saveCalendar')}
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
-                )}
-              </li>
-              <li className="rounded-lg border border-dark-600/40 bg-dark-900/35 px-3 py-3 space-y-2">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-medium text-dark-200">{t('pages.agenda.providers.icloudCalendar')}</p>
-                    {icloudAvailable && (!icloudConn || icloudConn.status === 'ERROR') ? (
-                      <p className="text-[11px] text-dark-500 mt-1">{t('pages.agenda.icloudConnectHint')}</p>
-                    ) : null}
-                    {icloudConn?.accountLabel && (
-                      <p className="text-xs text-dark-400 truncate mt-0.5">{icloudConn.accountLabel}</p>
-                    )}
-                    {icloudConn?.lastError && (
-                      <p className="text-[11px] text-red-400/90 mt-1 break-words">{icloudConn.lastError}</p>
-                    )}
-                  </div>
-                  <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                    {!icloudAvailable ? (
-                      <span className="rounded-md bg-dark-700/90 px-2 py-0.5 text-[11px] uppercase tracking-wide text-dark-400">
-                        {t('pages.agenda.badgeSoon')}
-                      </span>
-                    ) : icloudConn?.status === 'CONNECTED' ? (
-                      <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-300">
-                        {t('pages.agenda.icloud.statusConnected')}
-                      </span>
-                    ) : icloudConn ? (
-                      <span className="rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
-                        {icloudConn.status}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
+                );
+              }}
+            />
+            {loading && <p className="mt-3 text-sm text-dark-400">{label('pages.agenda.loading', 'Cargando...')}</p>}
+          </div>
 
-                {icloudAvailable && (
-                  <div className="w-full space-y-3 pt-1">
-                    {icloudCredentialOpen && (
-                      <form
-                        className="space-y-2 rounded-lg border border-dark-600/35 bg-dark-950/45 px-3 py-2.5"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void handleSubmitICloud();
-                        }}
-                      >
-                        <p className="text-xs font-semibold uppercase tracking-wide text-dark-400">
-                          {t('pages.agenda.icloud.credentialPanelTitle')}
-                        </p>
-                        {icloudConn?.status !== 'ERROR' ? (
-                          <label className="block space-y-1">
-                            <span className="text-[11px] text-dark-500">{t('pages.agenda.icloud.appleId')}</span>
-                            <input
-                              type="email"
-                              autoComplete="username"
-                              value={icloudAppleId}
-                              onChange={(e) => setIcloudAppleId(e.target.value)}
-                              placeholder={t('pages.agenda.icloud.appleIdPlaceholder')}
-                              disabled={icloudBusy}
-                              required
-                              className="w-full rounded-md border border-dark-600 bg-dark-900 px-2 py-1.5 text-xs text-dark-100 outline-none focus:border-emerald-500/60 disabled:opacity-55"
-                            />
-                          </label>
-                        ) : (
-                          icloudConn.accountLabel ? (
-                            <p className="rounded-md bg-dark-800/60 px-2 py-1.5 text-[11px] text-dark-300">
-                              Apple ID:&nbsp;<span className="font-mono">{icloudConn.accountLabel}</span>
-                            </p>
-                          ) : null
-                        )}
-                        <label className="block space-y-1">
-                          <span className="text-[11px] text-dark-500">{t('pages.agenda.icloud.appPassword')}</span>
-                          <input
-                            type="password"
-                            autoComplete="current-password"
-                            value={icloudAppPassword}
-                            onChange={(e) => setIcloudAppPassword(e.target.value)}
-                            placeholder={t('pages.agenda.icloud.appPasswordPlaceholder')}
-                            disabled={icloudBusy}
-                            required
-                            className="w-full rounded-md border border-dark-600 bg-dark-900 px-2 py-1.5 text-xs text-dark-100 outline-none focus:border-emerald-500/60 disabled:opacity-55"
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          disabled={icloudBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                        >
-                          <Plug className="h-3.5 w-3.5" aria-hidden />
-                          {t('pages.agenda.icloud.connect')}
-                        </button>
-                      </form>
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                      {icloudConn?.status === 'CONNECTED' && icloudCredentialOpen && (
-                        <button
-                          type="button"
-                          onClick={() => setIcloudShowCredentialForm(false)}
-                          disabled={icloudBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-dark-600 bg-dark-800/70 hover:bg-dark-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-dark-200 transition-colors"
-                        >
-                          {t('pages.agenda.icloud.hideCredentialPanel')}
-                        </button>
-                      )}
-                      {icloudConn?.status === 'CONNECTED' && !icloudCredentialOpen ? (
-                        <button
-                          type="button"
-                          onClick={() => setIcloudShowCredentialForm(true)}
-                          disabled={icloudBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-dark-600 bg-dark-800/70 hover:bg-dark-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-dark-200 transition-colors"
-                        >
-                          {t('pages.agenda.icloud.showCredentialPanel')}
-                        </button>
-                      ) : null}
-                      {icloudConn && (
-                        <button
-                          type="button"
-                          onClick={() => void handleDisconnectICloud()}
-                          disabled={icloudBusy}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-dark-600 bg-dark-800/70 hover:bg-dark-700 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-dark-200 transition-colors"
-                        >
-                          {t('pages.agenda.icloud.disconnect')}
-                        </button>
-                      )}
-                    </div>
-
-                    {icloudConn?.status === 'CONNECTED' && (
-                      <div className="space-y-2 rounded-lg border border-dark-600/35 bg-dark-950/45 px-3 py-2.5">
-                        <label
-                          className="block text-xs font-semibold uppercase tracking-wide text-dark-400"
-                          htmlFor="agenda-icloud-calendar-target"
-                        >
-                          {t('pages.agenda.icloud.calendarTarget')}
-                        </label>
-                        <p className="text-[11px] leading-relaxed text-dark-500">
-                          {t('pages.agenda.icloud.calendarHint')}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {icloudCalLoading ? (
-                            <span className="text-[11px] text-dark-500">
-                              {t('pages.agenda.icloud.loadingCalendars')}
-                            </span>
-                          ) : null}
-                          <select
-                            id="agenda-icloud-calendar-target"
-                            className="max-w-[min(100%,24rem)] flex-1 rounded-md border border-dark-600 bg-dark-900 px-2 py-1.5 text-xs text-dark-100 outline-none focus:border-emerald-500/60 disabled:opacity-55"
-                            value={icloudCalSel}
-                            onChange={(e) => setIcloudCalSel(e.target.value)}
-                            disabled={
-                              icloudCalLoading || icloudCalSaving || icloudBusy || icloudPickOptions.length === 0
-                            }
-                            aria-busy={icloudCalLoading}
-                          >
-                            {icloudPickOptions.length === 0 ? (
-                              <option value="">—</option>
-                            ) : (
-                              icloudPickOptions.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.summary}
-                                  {c.primary ? ` (${t('pages.agenda.icloud.primaryCalendarTag')})` : ''}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => void handleSaveICloudCalendarTarget()}
-                            disabled={
-                              !icloudCalDirty ||
-                              icloudCalLoading ||
-                              icloudCalSaving ||
-                              icloudBusy ||
-                              icloudCalSel.trim() === '' ||
-                              icloudPickOptions.length === 0
-                            }
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                          >
-                            {icloudCalSaving
-                              ? t('pages.agenda.icloud.savingCalendar')
-                              : t('pages.agenda.icloud.saveCalendar')}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </li>
-            </ul>
-            <p className="text-xs text-dark-400">{t('pages.agenda.connectionsHint')}</p>
-          </section>
-
-          <section
-            className="rounded-xl border border-dark-600/50 bg-dark-800/40 p-4 sm:p-5 ring-1 ring-white/[0.04]"
-            aria-labelledby="agenda-new-heading"
-          >
-            <div className="flex items-start gap-3 mb-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-300">
-                <CalendarRange className="h-5 w-5" aria-hidden />
-              </span>
-              <div>
-                <h2 id="agenda-new-heading" className="text-base font-semibold text-dark-100">
-                  {t('pages.agenda.newItemTitle')}
-                </h2>
-                <p className="text-sm text-dark-400">{t('pages.agenda.rangeHint')}</p>
-              </div>
+          <aside className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 xl:content-start">
+            <ConnectionStatus title="Google Calendar" connected={googleConnected} account={googleConn?.accountLabel} error={googleConn?.lastError} />
+            <ConnectionStatus title="iCloud Calendar" connected={icloudConnected} account={icloudConn?.accountLabel} error={icloudConn?.lastError} />
+            <div className="rounded-xl border border-dark-600/50 bg-dark-800/35 p-4 text-sm leading-6 text-dark-300 sm:col-span-2 xl:col-span-1">
+              <p className="font-semibold text-dark-100">Estado de sincronización</p>
+              <p className="mt-2">
+                {googleConnected || icloudConnected
+                  ? 'Los eventos se sincronizan con los proveedores conectados. Para cambiar cuentas o calendarios, entra a Configuración.'
+                  : 'Puedes crear eventos ahora. Quedarán pendientes hasta conectar Google o iCloud desde Configuración.'}
+              </p>
             </div>
-            <form onSubmit={handleCreate} className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1 text-sm">
-                  <span className="text-dark-400">{t('pages.agenda.fieldKind')}</span>
-                  <select
-                    value={formKind}
-                    onChange={(e) => setFormKind(e.target.value as AgendaKind)}
-                    className="w-full rounded-lg border border-dark-600 bg-dark-900 px-3 py-2 text-dark-100"
-                  >
-                    {kindOptions.map((k) => (
-                      <option key={k} value={k}>
-                        {t(`pages.agenda.kindLabels.${k}`)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block space-y-1 text-sm">
-                  <span className="text-dark-400">{t('pages.agenda.fieldStarts')}</span>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={formStarts}
-                    onChange={(e) => setFormStarts(e.target.value)}
-                    className="w-full rounded-lg border border-dark-600 bg-dark-900 px-3 py-2 text-dark-100"
-                  />
-                </label>
-              </div>
-              <label className="block space-y-1 text-sm">
-                <span className="text-dark-400">{t('pages.agenda.fieldTitle')}</span>
-                <input
-                  type="text"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="w-full rounded-lg border border-dark-600 bg-dark-900 px-3 py-2 text-dark-100"
-                  placeholder={t('pages.agenda.fieldTitlePlaceholder')}
-                  maxLength={512}
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={creating}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition-colors"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                {t('pages.agenda.create')}
-              </button>
-            </form>
-          </section>
-        </div>
-
-        <section aria-labelledby="agenda-list-heading" className="space-y-3">
-          <h2 id="agenda-list-heading" className="text-lg font-semibold text-dark-100">
-            {t('pages.agenda.thisMonth')} ({anchor.toLocaleString(undefined, { month: 'long', year: 'numeric' })})
-          </h2>
-          {loading ? (
-            <p className="text-sm text-dark-500">{t('pages.agenda.loading')}</p>
-          ) : items.length === 0 ? (
-            <p className="text-sm text-dark-500">{t('pages.agenda.empty')}</p>
-          ) : (
-            <ul className="space-y-2">
-              {items.map((it) => (
-                <li
-                  key={it.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dark-600/40 bg-dark-800/30 px-4 py-3 ring-1 ring-white/[0.03]"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium text-dark-100 truncate">{it.title}</p>
-                    <p className="text-xs text-dark-500">
-                      {t(`pages.agenda.kindLabels.${it.kind}`)} ·{' '}
-                      {new Date(it.startsAt).toLocaleString(undefined, {
-                        dateStyle: 'medium',
-                        timeStyle: it.allDay ? undefined : 'short',
-                      })}
-                    </p>
-                    <AgendaOutboundSyncRowChips
-                      t={t}
-                      syncToExternal={it.syncToExternal}
-                      googleOnline={
-                        !!(googleConn?.status === 'CONNECTED' && googleAvailable)
-                      }
-                      icloudOnline={
-                        !!(icloudConn?.status === 'CONNECTED' && icloudAvailable)
-                      }
-                      outbound={it.outboundSync}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(it.id)}
-                    className={[
-                      'inline-flex items-center gap-1 rounded-lg border border-red-500/35 bg-red-500/10',
-                      'px-2.5 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-500/20 transition-colors',
-                    ].join(' ')}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    {t('pages.agenda.delete')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          </aside>
         </section>
       </div>
+
+      {modalOpen && (
+        <div className="modal-overlay">
+          <form onSubmit={saveDraft} className="modal-sheet card max-w-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <h2 className="text-lg font-semibold text-dark-100">
+                {draft.id ? label('pages.agenda.editEvent', 'Editar evento') : label('pages.agenda.createEvent', 'Nuevo evento')}
+              </h2>
+              <button type="button" aria-label="Cerrar" onClick={() => setModalOpen(false)} className="rounded-lg p-2 text-dark-400 hover:bg-dark-700 hover:text-dark-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label>
+                <span className="label">Título</span>
+                <input value={draft.title} onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))} className="input" />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label>
+                  <span className="label">{label('pages.agenda.fieldStarts', 'Inicio')}</span>
+                  <input type="datetime-local" value={draft.startsAt} onChange={(e) => setDraft((p) => ({ ...p, startsAt: e.target.value }))} className="input" />
+                </label>
+                <label>
+                  <span className="label">{label('pages.agenda.fieldEnds', 'Fin')}</span>
+                  <input type="datetime-local" value={draft.endsAt} onChange={(e) => setDraft((p) => ({ ...p, endsAt: e.target.value }))} className="input" />
+                </label>
+              </div>
+              <label className="flex min-h-[44px] items-center gap-2 text-sm text-dark-300">
+                <input type="checkbox" checked={draft.allDay} onChange={(e) => setDraft((p) => ({ ...p, allDay: e.target.checked }))} className="h-4 w-4 rounded border-dark-600 bg-dark-900" />
+                {label('pages.agenda.allDay', 'Todo el día')}
+              </label>
+              <label>
+                <span className="label">{label('pages.agenda.location', 'Ubicación')}</span>
+                <div className="flex min-h-[44px] items-center gap-2 rounded-lg border border-dark-700 bg-dark-800 px-4 py-2 focus-within:ring-2 focus-within:ring-primary-500">
+                  <MapPin className="h-4 w-4 shrink-0 text-dark-500" />
+                  <input value={draft.location} onChange={(e) => setDraft((p) => ({ ...p, location: e.target.value }))} className="min-w-0 flex-1 bg-transparent text-base text-white outline-none sm:text-sm" />
+                </div>
+              </label>
+              <label>
+                <span className="label">{label('pages.agenda.description', 'Descripción')}</span>
+                <textarea value={draft.description} onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))} rows={4} className="input min-h-[112px]" />
+              </label>
+              <label className="flex min-h-[44px] items-center gap-2 text-sm text-dark-300">
+                <input type="checkbox" checked={draft.syncToExternal} onChange={(e) => setDraft((p) => ({ ...p, syncToExternal: e.target.checked }))} className="h-4 w-4 rounded border-dark-600 bg-dark-900" />
+                {label('pages.agenda.syncToExternal', 'Sincronizar con calendarios conectados')}
+              </label>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+              {draft.id ? (
+                <button type="button" onClick={() => void deleteDraft()} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/20">
+                  <Trash2 className="h-4 w-4" />
+                  {label('pages.agenda.delete', 'Eliminar')}
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="grid gap-2 sm:flex">
+                <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
+                  {label('common.cancel', 'Cancelar')}
+                </button>
+                <button type="submit" className="btn-primary">
+                  {label('common.save', 'Guardar')}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
     </motion.div>
   );
 };
+
+function ConnectionStatus(props: { title: string; connected: boolean; account?: string; error?: string }) {
+  const { title, connected, account, error } = props;
+  return (
+    <div className="rounded-xl border border-dark-600/50 bg-dark-800/50 p-4 ring-1 ring-white/[0.04]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-dark-100">{title}</p>
+          <p className="mt-1 truncate text-sm text-dark-400">{account || (connected ? 'Cuenta conectada' : 'Configurar en Ajustes')}</p>
+        </div>
+        <span className={`inline-flex min-h-[28px] shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold ${connected ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200' : 'border-dark-600 bg-dark-900 text-dark-300'}`}>
+          {connected ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+          {connected ? 'Conectado' : 'Sin conectar'}
+        </span>
+      </div>
+      {error && <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-200">{error}</p>}
+    </div>
+  );
+}
 
 export default Agenda;

@@ -29,6 +29,7 @@ import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
 import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 function loanListAccent(loan: Loan): string {
@@ -170,7 +171,7 @@ const Loans: React.FC = () => {
     if (!selectedLoan) return [];
     const c = (selectedLoan.currency && String(selectedLoan.currency).trim()) || primaryCurrency;
     return bankAccounts.filter((a: BankAccount) =>
-      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, selectedLoan, primaryCurrency, secondaryCurrency]);
 
@@ -621,6 +622,13 @@ const Loans: React.FC = () => {
                       <DollarSign className="h-[18px] w-[18px]" />
                     </button>
                     <button type="button" onClick={() => handleEdit(loan)} className={listCardBtnEdit} title={t('pages.loans.editTitle')} aria-label={t('pages.loans.editAria')}>
+                    <EntityActiveToggle
+                      resourcePath="loans"
+                      entityId={loan.id}
+                      isActive={loan.isActive}
+                      entityLabel={loan.loanName}
+                      onChanged={fetchLoans}
+                    />
                       <Edit className="h-5 w-5" />
                     </button>
                     <button type="button" onClick={() => handleDelete(loan.id)} className={listCardBtnDanger} title={t('pages.loans.deleteTitle')} aria-label={t('pages.loans.deleteAria')}>

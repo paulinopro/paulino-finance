@@ -22,6 +22,7 @@ import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
 import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 interface AccountPayable {
@@ -35,6 +36,7 @@ interface AccountPayable {
   notes?: string;
   paidDate?: string;
   totalPaid?: number;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -143,7 +145,7 @@ const AccountsPayable: React.FC = () => {
     if (!abonoTarget) return [];
     const cur = abonoTarget.currency;
     return bankAccounts.filter((a: BankAccount) =>
-      bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, abonoTarget, primaryCurrency, secondaryCurrency]);
 
@@ -151,7 +153,7 @@ const AccountsPayable: React.FC = () => {
     if (!historyTarget) return [];
     const cur = historyTarget.currency;
     return bankAccounts.filter((a: BankAccount) =>
-      bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, cur, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, historyTarget, primaryCurrency, secondaryCurrency]);
 
@@ -438,7 +440,7 @@ const AccountsPayable: React.FC = () => {
     const s = secondaryCurrency;
     let primaryTotal = 0;
     let secondaryTotal = 0;
-    for (const a of orderedFiltered) {
+    for (const a of orderedFiltered.filter((item) => item.isActive)) {
       const rem = Math.max(0, a.amount - (a.totalPaid ?? 0));
       if (a.status === 'PAID' || rem <= 0.0001) continue;
       const c = String(a.currency || p).toUpperCase();
@@ -448,7 +450,7 @@ const AccountsPayable: React.FC = () => {
       else if (c === 'USD') secondaryTotal += rem;
       else primaryTotal += rem;
     }
-    return { count: orderedFiltered.length, primaryTotal, secondaryTotal };
+    return { count: orderedFiltered.filter((item) => item.isActive).length, primaryTotal, secondaryTotal };
   }, [orderedFiltered, primaryCurrency, secondaryCurrency]);
 
   const getStatusColor = (status: string) => {
@@ -645,6 +647,13 @@ const AccountsPayable: React.FC = () => {
                       >
                         <History className="h-5 w-5" />
                       </button>
+                      <EntityActiveToggle
+                        resourcePath="accounts-payable"
+                        entityId={account.id}
+                        isActive={account.isActive}
+                        entityLabel={account.description}
+                        onChanged={fetchAccounts}
+                      />
                       {account.status !== 'PAID' && (
                         <button type="button" onClick={() => openEditModal(account)} className={listCardBtnEdit} title={t('common.actions.edit')} aria-label={t('common.actions.edit')}>
                           <Edit className="h-5 w-5" />

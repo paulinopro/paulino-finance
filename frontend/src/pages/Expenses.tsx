@@ -32,13 +32,14 @@ import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
-import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
+import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs, formatRecurringDayForPeriod } from '../utils/dateUtils';
 import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { useAuth } from '../context/AuthContext';
 import { useIntlFormatting } from '../context/IntlFormattingContext';
 import { useTranslation } from 'react-i18next';
 import FinancialHistoryModal from '../components/FinancialHistoryModal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 const EXPENSE_NATURE_LABELS: Record<ExpenseNature, string> = {
@@ -116,11 +117,14 @@ function formatExpenseScheduleDisplay(e: Expense): string {
     return e.date ? formatDateDdMmYyyy(e.date) : '-';
   }
   const fq = (frequency || 'monthly') as ExpenseFrequency;
+  const today = new Date();
   if (fq === 'monthly') {
-    return e.paymentDay != null ? `#${e.paymentDay}` : '-';
+    return e.paymentDay != null
+      ? formatRecurringDayForPeriod(e.paymentDay, today.getFullYear(), today.getMonth() + 1) : '-';
   }
   if (fq === 'annual') {
-    return e.paymentMonth != null ? `#${e.paymentMonth}` : '-';
+    return e.paymentDay != null && e.paymentMonth != null
+      ? formatRecurringDayForPeriod(e.paymentDay, today.getFullYear(), e.paymentMonth) : '-';
   }
   if (e.date) return formatDateDdMmYyyy(e.date);
   return '-';
@@ -434,7 +438,7 @@ const Expenses: React.FC = () => {
   const accountsForExpense = useMemo(() => {
     const c = formData.currency;
     return bankAccounts.filter((a) =>
-      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, formData.currency, primaryCurrency, secondaryCurrency]);
 
@@ -889,6 +893,13 @@ const Expenses: React.FC = () => {
                               <History size={18} />
                             </button>
                             <button type="button" onClick={() => handleDelete(expense.id)} className="p-2 text-red-400 hover:text-red-300"><Trash2 size={18} /></button>
+                            <EntityActiveToggle
+                              resourcePath="expenses"
+                              entityId={expense.id}
+                              isActive={expense.isActive}
+                              entityLabel={expense.description}
+                              onChanged={fetchExpenses}
+                            />
                           </div>
                         </span>
                       </td>

@@ -168,7 +168,7 @@ const checkAndSendNotifications = async () => {
                   minimum_payment_dop, minimum_payment_usd,
                   cut_off_day, payment_due_day
            FROM credit_cards
-           WHERE user_id = $1`,
+           WHERE user_id = $1 AND is_active = TRUE`,
           [userId]
         );
 
@@ -187,7 +187,7 @@ const checkAndSendNotifications = async () => {
             ) {
               const template = await getTemplate(userId, 'CARD_PAYMENT');
               const titleTemplate = template?.titleTemplate || 'Recordatorio de Pago de Tarjeta';
-              const messageTemplate = template?.messageTemplate || 
+              const messageTemplate = template?.messageTemplate ||
                 `🔔 <b>Recordatorio de Pago de Tarjeta</b> 🔔
 
 <b>Banco:</b> {bankName}
@@ -241,7 +241,7 @@ const checkAndSendNotifications = async () => {
         const loansResult = await query(
           `SELECT id, loan_name, installment_amount, paid_installments, total_installments, currency
            FROM loans
-           WHERE user_id = $1 AND status = 'ACTIVE'`,
+           WHERE user_id = $1 AND is_active = TRUE AND status = 'ACTIVE'`,
           [userId]
         );
 
@@ -264,7 +264,7 @@ const checkAndSendNotifications = async () => {
               // Get template and render message
               const template = await getTemplate(userId, 'LOAN_PAYMENT');
               const titleTemplate = template?.titleTemplate || 'Recordatorio de Pago de Préstamo';
-              const messageTemplate = template?.messageTemplate || 
+              const messageTemplate = template?.messageTemplate ||
                 '🔔 <b>Recordatorio de Pago de Préstamo</b> 🔔\n\n<b>Préstamo:</b> {loanName}\n<b>Monto de cuota:</b> {installmentAmountFormatted}\n<b>Progreso:</b> {paidInstallments}/{totalInstallments} cuotas\n<b>Próximo pago:</b> {nextPaymentDate}\n<b>Días restantes:</b> {days}';
 
               const loanCurRaw = String(loan.currency ?? '').trim().toUpperCase();
@@ -319,11 +319,11 @@ const checkAndSendNotifications = async () => {
           `SELECT id, description, amount, currency, payment_day, last_paid_month, last_paid_year,
                   nature, category, frequency, recurrence_type
            FROM expenses
-           WHERE user_id = $1 
+           WHERE user_id = $1 AND is_active = TRUE
              AND recurrence_type = 'recurrent'
              AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
-             AND (last_paid_month IS NULL 
-                  OR last_paid_month != $2 
+             AND (last_paid_month IS NULL
+                  OR last_paid_month != $2
                   OR last_paid_year != $3)`,
           [userId, currentMonth, currentYear]
         );
@@ -344,7 +344,7 @@ const checkAndSendNotifications = async () => {
               // Get template and render message
               const template = await getTemplate(userId, 'RECURRING_EXPENSE');
               const titleTemplate = template?.titleTemplate || 'Recordatorio de Gasto Recurrente';
-              const messageTemplate = template?.messageTemplate || 
+              const messageTemplate = template?.messageTemplate ||
                 `🔔 <b>Recordatorio de Gasto Recurrente</b> 🔔
 
 <b>Calendario:</b> {expenseScheduleLabel}

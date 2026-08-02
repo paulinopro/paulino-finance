@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -67,7 +68,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.interest_rate, l.interest_rate_type,
               l.total_installments, l.paid_installments, l.start_date, l.end_date,
               l.installment_amount, l.fixed_charge, l.payment_day, l.next_payment_date, l.currency, l.status,
-              l.interest_calculation_base, l.created_at, l.updated_at, 
+              l.interest_calculation_base, l.is_active, l.created_at, l.updated_at,
               COALESCE(SUM(lp.amount), 0) as total_paid,
               COALESCE(SUM(lp.principal_amount), 0) as total_principal_paid
        FROM loans l
@@ -158,6 +159,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
         nextPaymentDate: nextPaymentDate || row.next_payment_date,
         currency: row.currency,
         status: row.status,
+        isActive: row.is_active === true,
         interestCalculationBase: row.interest_calculation_base || 'ACTUAL_360',
         totalPaid: parseFloat(row.total_paid),
         remainingBalance: parseFloat(row.total_amount) - parseFloat(row.total_principal_paid || 0),
@@ -170,7 +172,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
     const ctx = await getConversionContextForUser(userId);
 
     const totalRemaining = loans
-      .filter((l) => l.status === 'ACTIVE')
+      .filter((l) => l.status === 'ACTIVE' && l.isActive)
       .reduce(
         (sum, l) =>
           sum + amountToPrimary(l.remainingBalance || 0, String(l.currency || 'DOP'), ctx),
@@ -178,7 +180,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       );
 
     const totalInstallment = loans
-      .filter((l) => l.status === 'ACTIVE')
+      .filter((l) => l.status === 'ACTIVE' && l.isActive)
       .reduce(
         (sum, l) => sum + amountToPrimary(l.installmentAmount, String(l.currency || 'DOP'), ctx),
         0
@@ -190,7 +192,7 @@ export const getLoans = async (req: AuthRequest, res: Response) => {
       summary: {
         totalRemaining,
         totalInstallment,
-        totalLoans: loans.length,
+        totalLoans: loans.filter((loan) => loan.isActive).length,
       },
     });
   } catch (error: any) {
@@ -208,7 +210,7 @@ export const getLoan = async (req: AuthRequest, res: Response) => {
       `SELECT id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
               total_installments, paid_installments, start_date, end_date,
               installment_amount, fixed_charge, payment_day, next_payment_date, currency, status,
-              interest_calculation_base, created_at, updated_at
+              interest_calculation_base, is_active, created_at, updated_at
        FROM loans
        WHERE id = $1 AND user_id = $2`,
       [loanId, userId]
@@ -272,6 +274,7 @@ export const getLoan = async (req: AuthRequest, res: Response) => {
         nextPaymentDate: nextPaymentDate,
         currency: loan.currency,
         status: loan.status,
+        isActive: loan.is_active === true,
         interestCalculationBase: loan.interest_calculation_base || 'ACTUAL_360',
         remainingBalance: remainingBalance,
         progress: (loan.paid_installments / loan.total_installments) * 100,
@@ -593,6 +596,7 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const loanId = parseInt(req.params.id);
+    if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
     const { paymentDate, amount, paymentType, notes, installmentNumber } = req.body;
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
 

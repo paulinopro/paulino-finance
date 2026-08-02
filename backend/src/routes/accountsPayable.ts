@@ -10,6 +10,7 @@ import {
   payAccountPayable,
   deleteAccountPayable,
 } from '../controllers/accountsPayableController';
+import { createEntityActiveStatusHandler } from '../controllers/entityActiveStatus';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -19,6 +20,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('accounts_payable'));
 
 router.get('/', getAccountsPayable);
+router.patch('/:id/active-status', createEntityActiveStatusHandler('accountsPayable'));
 router.get('/:id/payments', getAccountPayablePayments);
 router.post('/:id/payments', addAccountPayablePayment);
 router.put('/:id/payments/:paymentId', updateAccountPayablePayment);

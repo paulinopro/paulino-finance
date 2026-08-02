@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateExpensePaymentStatus = exports.deleteExpense = exports.updateExpense = exports.createExpense = exports.getExpense = exports.getExpenses = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
@@ -144,7 +145,7 @@ const getExpenses = async (req, res) => {
       SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
              e.category,
              e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-             e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
+             e.bank_account_id, e.is_active, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
              (SELECT epa.amount FROM expense_period_amounts epa
               WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
@@ -182,6 +183,7 @@ const getExpenses = async (req, res) => {
                 date: row.date,
                 isPaid: isPaid,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                isActive: row.is_active === true,
                 vehicleId: row.vehicle_id != null ? row.vehicle_id : null,
                 vehicleLabel: row.vehicle_id != null
                     ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
@@ -194,7 +196,7 @@ const getExpenses = async (req, res) => {
         });
         // Calculate totals for all expenses (not just current page)
         // Use params without limit and offset
-        const allExpensesResult = await (0, database_1.query)(`SELECT e.amount, e.currency FROM expenses e ${whereClause}`, paramsBeforePagination);
+        const allExpensesResult = await (0, database_1.query)(`SELECT e.amount, e.currency FROM expenses e ${whereClause} AND e.is_active = TRUE`, paramsBeforePagination);
         const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const totalsByCurrency = {};
         let totalInPrimary = 0;
@@ -220,7 +222,7 @@ const getExpenses = async (req, res) => {
                 exchangeRate: ctx.pairRateSecondaryPerPrimary,
                 totalDop: totalsByCurrency.DOP ?? 0,
                 totalUsd: totalsByCurrency.USD ?? 0,
-                totalExpenses: total,
+                totalExpenses: allExpensesResult.rows.length,
             },
             pagination: {
                 page: pageNum,
@@ -246,7 +248,7 @@ const getExpense = async (req, res) => {
         const result = await (0, database_1.query)(`SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
               e.category,
               e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-              e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
+              e.bank_account_id, e.is_active, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
               v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
               (SELECT epa.amount FROM expense_period_amounts epa
                WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
@@ -283,6 +285,7 @@ const getExpense = async (req, res) => {
                 date: row.date,
                 isPaid: isPaid,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                isActive: row.is_active === true,
                 vehicleId: row.vehicle_id != null ? row.vehicle_id : null,
                 vehicleLabel: row.vehicle_id != null
                     ? `${row.vehicle_make || ''} ${row.vehicle_model || ''}`.trim() || null
@@ -676,6 +679,8 @@ const updateExpensePaymentStatus = async (req, res) => {
     try {
         const userId = req.userId;
         const expenseId = parseInt(req.params.id);
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('expenses', expenseId, userId, res)))
+            return;
         const { isPaid } = req.body;
         const actualAmountRaw = req.body.actualAmount;
         if (typeof isPaid !== 'boolean') {

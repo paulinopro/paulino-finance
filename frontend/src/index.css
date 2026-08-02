@@ -512,6 +512,7 @@
   padding: 2px 6px;
   margin: 1px 0;
   font-size: 0.875rem;
+  touch-action: manipulation;
 }
 
 .calendar-container .fc-event-title {
@@ -629,6 +630,16 @@
 
 .calendar-container .fc-list-event:hover {
   background-color: var(--fc-neutral-bg-color);
+}
+
+.calendar-container .pf-agenda-event-pending {
+  --fc-event-bg-color: #f59e0b;
+  --fc-event-border-color: #f59e0b;
+}
+
+.calendar-container .pf-agenda-event-error {
+  --fc-event-bg-color: #ef4444;
+  --fc-event-border-color: #ef4444;
 }
 
 /* Tablets: barra de FullCalendar con wrap sin forzar una sola columna como en móvil */

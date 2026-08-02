@@ -10,6 +10,7 @@ import {
   getAmortizationSchedule,
   updatePayment,
 } from '../controllers/loanController';
+import { createEntityActiveStatusHandler } from '../controllers/entityActiveStatus';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -19,6 +20,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('loans'));
 
 router.get('/', getLoans);
+router.patch('/:id/active-status', createEntityActiveStatusHandler('loans'));
 router.get('/:id', getLoan);
 router.get('/:id/amortization', getAmortizationSchedule);
 router.post('/', createLoan);

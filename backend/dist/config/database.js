@@ -334,6 +334,7 @@ const createTables = async () => {
       cut_off_day INTEGER NOT NULL,
       payment_due_day INTEGER NOT NULL,
       currency_type VARCHAR(10) NOT NULL CHECK (currency_type IN ('DOP', 'USD', 'DUAL')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -410,6 +411,7 @@ const createTables = async () => {
       currency VARCHAR(3) NOT NULL DEFAULT 'DOP',
       status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAID', 'DEFAULTED')),
       interest_calculation_base VARCHAR(20) DEFAULT 'ACTUAL_360' CHECK (interest_calculation_base IN ('ACTUAL_360', 'ACTUAL_365', '30_360', '30_365')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -570,6 +572,7 @@ const createTables = async () => {
       frequency VARCHAR(32),
       receipt_day INTEGER,
       date DATE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -592,6 +595,7 @@ const createTables = async () => {
       is_paid BOOLEAN DEFAULT false,
       last_paid_month INTEGER,
       last_paid_year INTEGER,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -618,6 +622,7 @@ const createTables = async () => {
       balance_dop DECIMAL(15, 2) DEFAULT 0,
       balance_usd DECIMAL(15, 2) DEFAULT 0,
       currency_type VARCHAR(10) NOT NULL CHECK (currency_type IN ('DOP', 'USD', 'DUAL')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -907,6 +912,51 @@ const createTables = async () => {
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_items_user_id ON agenda_items(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_items_starts ON agenda_items(user_id, starts_at)`);
     await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'location'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN location TEXT;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'timezone'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN timezone VARCHAR(80);
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'external_updated_at'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN external_updated_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'last_change_origin'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN last_change_origin VARCHAR(40) DEFAULT 'LOCAL';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'sync_status'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN sync_status VARCHAR(24) DEFAULT 'PENDING';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_items' AND column_name = 'deleted_at'
+      ) THEN
+        ALTER TABLE agenda_items ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE INDEX IF NOT EXISTS idx_agenda_items_user_deleted_starts
+    ON agenda_items(user_id, deleted_at, starts_at)
+  `);
+    await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS agenda_provider_connections (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -928,6 +978,35 @@ const createTables = async () => {
   `);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_provider_connections_user ON agenda_provider_connections(user_id)`);
     await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_provider_connections' AND column_name = 'sync_token'
+      ) THEN
+        ALTER TABLE agenda_provider_connections ADD COLUMN sync_token TEXT;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_provider_connections' AND column_name = 'last_synced_at'
+      ) THEN
+        ALTER TABLE agenda_provider_connections ADD COLUMN last_synced_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_provider_connections' AND column_name = 'import_from'
+      ) THEN
+        ALTER TABLE agenda_provider_connections ADD COLUMN import_from TIMESTAMP WITH TIME ZONE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_provider_connections' AND column_name = 'import_to'
+      ) THEN
+        ALTER TABLE agenda_provider_connections ADD COLUMN import_to TIMESTAMP WITH TIME ZONE;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
     CREATE TABLE IF NOT EXISTS agenda_item_sync_state (
       id SERIAL PRIMARY KEY,
       agenda_item_id INTEGER NOT NULL REFERENCES agenda_items(id) ON DELETE CASCADE,
@@ -942,6 +1021,33 @@ const createTables = async () => {
     )
   `);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_agenda_sync_connection ON agenda_item_sync_state(connection_id)`);
+    await (0, exports.query)(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_item_sync_state' AND column_name = 'external_updated_at'
+      ) THEN
+        ALTER TABLE agenda_item_sync_state ADD COLUMN external_updated_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_item_sync_state' AND column_name = 'deleted_at'
+      ) THEN
+        ALTER TABLE agenda_item_sync_state ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'agenda_item_sync_state' AND column_name = 'last_pulled_at'
+      ) THEN
+        ALTER TABLE agenda_item_sync_state ADD COLUMN last_pulled_at TIMESTAMP WITH TIME ZONE;
+      END IF;
+    END $$;
+  `);
+    await (0, exports.query)(`
+    CREATE INDEX IF NOT EXISTS idx_agenda_sync_external_uid
+    ON agenda_item_sync_state(connection_id, external_uid)
+  `);
     // Create indexes for better performance
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_credit_cards_user_id ON credit_cards(user_id)`);
     await (0, exports.query)(`CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)`);
@@ -958,6 +1064,7 @@ const createTables = async () => {
       category VARCHAR(100),
       notes TEXT,
       paid_date DATE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -975,9 +1082,40 @@ const createTables = async () => {
       category VARCHAR(100),
       notes TEXT,
       received_date DATE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+    // Reversible activation for financial entities (idempotent for existing installations)
+    await (0, exports.query)(`
+    DO $$
+    DECLARE entity_table text;
+    BEGIN
+      FOREACH entity_table IN ARRAY ARRAY[
+        'bank_accounts',
+        'income',
+        'expenses',
+        'credit_cards',
+        'loans',
+        'accounts_payable',
+        'accounts_receivable'
+      ]
+      LOOP
+        IF NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = entity_table
+            AND column_name = 'is_active'
+        ) THEN
+          EXECUTE format(
+            'ALTER TABLE %I ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE',
+            entity_table
+          );
+        END IF;
+      END LOOP;
+    END $$;
   `);
     // Abonos parciales — cuentas por pagar (cada fila genera un gasto NON_RECURRING)
     await (0, exports.query)(`

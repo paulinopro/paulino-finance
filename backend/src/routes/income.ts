@@ -8,6 +8,7 @@ import {
   updateIncomeReceiptStatus,
 } from '../controllers/incomeController';
 import { getIncomeTimeline } from '../controllers/financialTimelineController';
+import { createEntityActiveStatusHandler } from '../controllers/entityActiveStatus';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -17,6 +18,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('income'));
 
 router.get('/', getIncome);
+router.patch('/:id/active-status', createEntityActiveStatusHandler('income'));
 router.get('/:id/timeline', getIncomeTimeline);
 router.get('/:id', getIncomeItem);
 router.post('/', createIncome);

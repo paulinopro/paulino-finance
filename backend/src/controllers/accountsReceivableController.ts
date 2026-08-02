@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -29,7 +30,7 @@ export const getAccountsReceivable = async (req: AuthRequest, res: Response) => 
     const { status } = req.query;
 
     let queryText = `
-      SELECT ar.id, ar.description, ar.amount, ar.currency, ar.due_date, ar.status, ar.category, ar.notes, ar.received_date, ar.created_at, ar.updated_at,
+      SELECT ar.id, ar.description, ar.amount, ar.currency, ar.due_date, ar.status, ar.category, ar.notes, ar.received_date, ar.is_active, ar.created_at, ar.updated_at,
              COALESCE(rec.total_received, 0)::numeric as total_received
       FROM accounts_receivable ar
       LEFT JOIN (
@@ -62,6 +63,7 @@ export const getAccountsReceivable = async (req: AuthRequest, res: Response) => 
         category: row.category,
         notes: row.notes,
         receivedDate: row.received_date,
+        isActive: row.is_active === true,
         totalReceived: roundMoney(parseFloat(row.total_received)),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -121,6 +123,7 @@ export const addAccountReceivablePayment = async (req: AuthRequest, res: Respons
   try {
     const userId = req.userId!;
     const { id } = req.params;
+    if (!(await ensureActiveEntity('accountsReceivable', Number(id), userId, res))) return;
     const { amount, paymentDate } = req.body;
 
     if (amount == null || paymentDate == null || paymentDate === '') {
@@ -582,6 +585,7 @@ export const receiveAccountReceivable = async (req: AuthRequest, res: Response) 
   try {
     const userId = req.userId!;
     const { id } = req.params;
+    if (!(await ensureActiveEntity('accountsReceivable', Number(id), userId, res))) return;
     const { receivedDate, paymentDate, notes } = req.body;
     const dateStr = paymentDate ?? receivedDate;
 

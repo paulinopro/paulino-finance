@@ -68,6 +68,15 @@
   "offlineBanner": {
     "message": "Sie sind offline. Daten laden eventuell erst, wenn Sie wieder online sind."
   },
+  "activation": {
+    "active": "Aktiv",
+    "inactive": "Inaktiv",
+    "enableEntity": "{{entity}} aktivieren",
+    "disableEntity": "{{entity}} deaktivieren",
+    "enabled": "Eintrag aktiviert",
+    "disabled": "Eintrag deaktiviert",
+    "error": "Status konnte nicht geändert werden"
+  },
   "iconSelect": {
     "searchPlaceholder": "Symbol suchen (z. B. Wallet, Zap, Home)…",
     "loading": "Symbole werden geladen…",

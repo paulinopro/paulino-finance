@@ -4,6 +4,8 @@ import {
   getItems,
   getOneItem,
   patchItem,
+  postImportRange,
+  postSync,
   postItem,
   removeItem,
 } from '../controllers/agendaController';
@@ -48,5 +50,7 @@ router.patch('/items/:id', patchItem);
 router.delete('/items/:id', removeItem);
 
 router.get('/connections', getConnections);
+router.post('/sync', postSync);
+router.post('/sync/import-range', postImportRange);
 
 export default router;

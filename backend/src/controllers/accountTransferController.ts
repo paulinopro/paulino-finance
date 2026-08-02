@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -52,6 +53,8 @@ export const createAccountTransfer = async (req: AuthRequest, res: Response) => 
   if (!fromAccountId || !toAccountId || !currency || amount == null || isNaN(amt) || amt <= 0) {
     return res.status(400).json({ message: 'fromAccountId, toAccountId, amount (>0) and currency are required' });
   }
+  if (!(await ensureActiveEntity('accounts', Number(fromAccountId), userId, res))) return;
+  if (!(await ensureActiveEntity('accounts', Number(toAccountId), userId, res))) return;
   const pair = await getUserCurrencyPair(userId);
   const ledErr = validateLedgerCurrencyForUser(pair, String(currency));
   if (ledErr) {

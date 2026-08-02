@@ -120,7 +120,7 @@ const getSummary = async (req, res) => {
         // Total assets (bank accounts)
         const accountsResult = await (0, database_1.query)(`SELECT SUM(balance_dop) as total_dop, SUM(balance_usd) as total_usd
        FROM bank_accounts
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const accounts = accountsResult.rows[0];
         const totalAssetsDop = parseFloat(accounts.total_dop || 0);
         const totalAssetsUsd = parseFloat(accounts.total_usd || 0);
@@ -130,7 +130,7 @@ const getSummary = async (req, res) => {
         COALESCE(SUM(CASE WHEN account_kind IN ('cash', 'wallet') THEN balance_dop ELSE 0 END), 0)::numeric AS cash_dop,
         COALESCE(SUM(CASE WHEN account_kind IN ('cash', 'wallet') THEN balance_usd ELSE 0 END), 0)::numeric AS cash_usd
        FROM bank_accounts
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const bk = byKindResult.rows[0];
         const bankDop = parseFloat(bk.bank_dop || 0);
         const bankUsd = parseFloat(bk.bank_usd || 0);
@@ -141,14 +141,14 @@ const getSummary = async (req, res) => {
         // Total debts (credit cards + loans)
         const cardsResult = await (0, database_1.query)(`SELECT SUM(current_debt_dop) as total_dop, SUM(current_debt_usd) as total_usd
        FROM credit_cards
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const cards = cardsResult.rows[0];
         const totalCardDebtDop = parseFloat(cards.total_dop || 0);
         const totalCardDebtUsd = parseFloat(cards.total_usd || 0);
         const loansResult = await (0, database_1.query)(`SELECT l.total_amount, COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.total_amount, l.currency`, [userId]);
         let totalLoanDebtDop = 0;
         let totalLoanDebtUsd = 0;
@@ -174,7 +174,7 @@ const getSummary = async (req, res) => {
         // Accounts Payable (Pending)
         const accountsPayableResult = await (0, database_1.query)(`SELECT COUNT(*) as count, SUM(amount) as total, currency
        FROM accounts_payable
-       WHERE user_id = $1 AND status = 'PENDING'
+       WHERE user_id = $1 AND is_active = TRUE AND status = 'PENDING'
        GROUP BY currency`, [userId]);
         let accountsPayableCount = 0;
         let accountsPayableTotalDop = 0;
@@ -186,7 +186,7 @@ const getSummary = async (req, res) => {
         // Accounts Receivable (Pending)
         const accountsReceivableResult = await (0, database_1.query)(`SELECT COUNT(*) as count, SUM(amount) as total, currency
        FROM accounts_receivable
-       WHERE user_id = $1 AND status = 'PENDING'
+       WHERE user_id = $1 AND is_active = TRUE AND status = 'PENDING'
        GROUP BY currency`, [userId]);
         let accountsReceivableCount = 0;
         let accountsReceivableTotalDop = 0;
@@ -299,7 +299,7 @@ const getStats = async (req, res) => {
         // Expenses by category for the month (puntual + recurrente mensual/anual legacy + taxonomía)
         const expensesResult = await (0, database_1.query)(`SELECT category, SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_STATS_MONTH_OR} )
        GROUP BY category, currency`, [userId, currentMonth, currentYear]);
         const expensesByCategory = {};
@@ -311,12 +311,12 @@ const getStats = async (req, res) => {
         });
         const otherFreqStats = await (0, database_1.query)(`SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
         mergeCategoryTotals(expensesByCategory, otherFreqExpenseTotalsInPeriod(otherFreqStats.rows, monthStart, monthEnd, ctx).byCategory);
         // Ingreso del mes: puntual en el mes + recurrentes expandidos
         const incomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`, [userId, currentMonth, currentYear]);
         let totalIncomeDop = 0;
@@ -326,7 +326,7 @@ const getStats = async (req, res) => {
         });
         const fixedIncomeStatsResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
         fixedIncomeStatsResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, row.currency, ctx);
@@ -344,7 +344,7 @@ const getStats = async (req, res) => {
               l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.loan_name, l.bank_name, l.total_amount, l.paid_installments, l.total_installments, l.currency`, [userId]);
         const debtProgress = loansResult.rows.map((loan) => {
             const totalPaid = parseFloat(loan.total_paid);
@@ -402,7 +402,7 @@ const getMonthlyHealth = async (req, res) => {
         // Ingreso puntual del mes
         const incomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`, [userId, currentMonth, currentYear]);
         let totalIncomeDop = 0;
@@ -412,7 +412,7 @@ const getMonthlyHealth = async (req, res) => {
         });
         const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, row.currency, ctx);
@@ -421,7 +421,7 @@ const getMonthlyHealth = async (req, res) => {
         });
         const expensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_STATS_MONTH_OR} )
        GROUP BY currency`, [userId, currentMonth, currentYear]);
         let totalExpensesDop = 0;
@@ -431,12 +431,12 @@ const getMonthlyHealth = async (req, res) => {
         });
         const otherFreqMonth = await (0, database_1.query)(`SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
         const otherMonthTotals = otherFreqExpenseTotalsInPeriod(otherFreqMonth.rows, monthStart, monthEnd, ctx);
         totalExpensesDop += otherMonthTotals.totalDop;
         const expensesByCategoryResult = await (0, database_1.query)(`SELECT category, SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_STATS_MONTH_OR} )
        GROUP BY category, currency`, [userId, currentMonth, currentYear]);
         const expensesByCategory = {};
@@ -450,14 +450,14 @@ const getMonthlyHealth = async (req, res) => {
         // Total debts
         const cardsResult = await (0, database_1.query)(`SELECT SUM(current_debt_dop) as total_dop, SUM(current_debt_usd) as total_usd
        FROM credit_cards
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const cards = cardsResult.rows[0];
         const totalCardDebtDop = parseFloat(cards.total_dop || 0);
         const totalCardDebtUsd = parseFloat(cards.total_usd || 0);
         const loansResult = await (0, database_1.query)(`SELECT l.total_amount, COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.total_amount, l.currency`, [userId]);
         let totalLoanDebtDop = 0;
         let totalLoanDebtUsd = 0;
@@ -482,7 +482,7 @@ const getMonthlyHealth = async (req, res) => {
         prevMonthEnd.setHours(23, 59, 59, 999);
         const prevIncomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_MONTH} )
        GROUP BY currency`, [userId, prevMonth, prevYear]);
         let prevIncomeDop = 0;
@@ -499,7 +499,7 @@ const getMonthlyHealth = async (req, res) => {
         });
         const prevExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_STATS_MONTH_OR} )
        GROUP BY currency`, [userId, prevMonth, prevYear]);
         let prevExpensesDop = 0;
@@ -556,12 +556,12 @@ const getAnnualHealth = async (req, res) => {
         // Get user's exchange rate
         const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const exchangeRate = ctx.pairRateSecondaryPerPrimary;
-        const incomeResult = await (0, database_1.query)(`SELECT 
+        const incomeResult = await (0, database_1.query)(`SELECT
          EXTRACT(MONTH FROM date) as month,
-         SUM(amount) as total, 
+         SUM(amount) as total,
          currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_YEAR} )
        GROUP BY EXTRACT(MONTH FROM date), currency
        ORDER BY month`, [userId, currentYear]);
@@ -579,7 +579,7 @@ const getAnnualHealth = async (req, res) => {
         yearEnd.setHours(23, 59, 59, 999);
         const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, row.currency, ctx);
@@ -592,12 +592,12 @@ const getAnnualHealth = async (req, res) => {
             });
             totalIncomeDop += amountDop * dates.length;
         });
-        const expensesResult = await (0, database_1.query)(`SELECT 
+        const expensesResult = await (0, database_1.query)(`SELECT
          EXTRACT(MONTH FROM date) as month,
-         SUM(amount) as total, 
+         SUM(amount) as total,
          currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (
            ( ${recurrenceSql_1.EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
            OR ( ${recurrenceSql_1.EXPENSE_ANNUAL_ROW_IN_YEAR} )
@@ -615,7 +615,7 @@ const getAnnualHealth = async (req, res) => {
         });
         const recurringExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.EXPENSE_RECURRING_MONTHLY} )
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.EXPENSE_RECURRING_MONTHLY} )
        GROUP BY currency`, [userId]);
         recurringExpensesResult.rows.forEach((row) => {
             const amount = parseFloat(row.total || 0);
@@ -627,7 +627,7 @@ const getAnnualHealth = async (req, res) => {
         });
         const expensesByCategoryResult = await (0, database_1.query)(`SELECT category, SUM(amount) as total, currency, frequency, recurrence_type
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (
            ( ${recurrenceSql_1.EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
            OR ( ${recurrenceSql_1.EXPENSE_RECURRING_MONTHLY} )
@@ -645,7 +645,7 @@ const getAnnualHealth = async (req, res) => {
         });
         const otherFreqAnnual = await (0, database_1.query)(`SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
         for (let m = 1; m <= 12; m++) {
             const ms = new Date(currentYear, m - 1, 1);
             const me = new Date(currentYear, m, 0);
@@ -658,14 +658,14 @@ const getAnnualHealth = async (req, res) => {
         // Total debts
         const cardsResult = await (0, database_1.query)(`SELECT SUM(current_debt_dop) as total_dop, SUM(current_debt_usd) as total_usd
        FROM credit_cards
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const cards = cardsResult.rows[0];
         const totalCardDebtDop = parseFloat(cards.total_dop || 0);
         const totalCardDebtUsd = parseFloat(cards.total_usd || 0);
         const loansResult = await (0, database_1.query)(`SELECT l.total_amount, COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.total_amount, l.currency`, [userId]);
         let totalLoanDebtDop = 0;
         let totalLoanDebtUsd = 0;
@@ -696,7 +696,7 @@ const getAnnualHealth = async (req, res) => {
         const prevYear = currentYear - 1;
         const prevIncomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_YEAR} )
        GROUP BY currency`, [userId, prevYear]);
         let prevIncomeDop = 0;
@@ -716,7 +716,7 @@ const getAnnualHealth = async (req, res) => {
         });
         const prevExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (
            ( ${recurrenceSql_1.EXPENSE_PUNCTUAL_CALENDAR_YEAR} )
            OR ( ${recurrenceSql_1.EXPENSE_ANNUAL_ROW_IN_YEAR} )
@@ -792,7 +792,7 @@ const getDailyHealth = async (req, res) => {
         const dayRangeEnd = new Date(targetYear, targetMonth - 1, targetDay, 23, 59, 59, 999);
         const incomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_DAY} )
        GROUP BY currency`, [userId, targetYear, targetMonth, targetDay]);
         let totalIncomeDop = 0;
@@ -802,7 +802,7 @@ const getDailyHealth = async (req, res) => {
         });
         const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, row.currency, ctx);
@@ -815,7 +815,7 @@ const getDailyHealth = async (req, res) => {
         });
         const expensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DAILY_MATCH} )
        GROUP BY currency`, [userId, targetYear, targetMonth, targetDay]);
         let totalExpensesDop = 0;
@@ -825,7 +825,7 @@ const getDailyHealth = async (req, res) => {
         });
         const expensesByCategoryResult = await (0, database_1.query)(`SELECT category, SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DAILY_MATCH} )
        GROUP BY category, currency`, [userId, targetYear, targetMonth, targetDay]);
         const expensesByCategory = {};
@@ -837,21 +837,21 @@ const getDailyHealth = async (req, res) => {
         });
         const otherFreqDayRows = await (0, database_1.query)(`SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.EXPENSE_RECURRING_OTHER_FREQ} )`, [userId]);
         const otherDay = otherFreqExpenseTotalsInPeriod(otherFreqDayRows.rows, dayRangeStart, dayRangeEnd, ctx);
         totalExpensesDop += otherDay.totalDop;
         mergeCategoryTotals(expensesByCategory, otherDay.byCategory);
         // Total debts
         const cardsResult = await (0, database_1.query)(`SELECT SUM(current_debt_dop) as total_dop, SUM(current_debt_usd) as total_usd
        FROM credit_cards
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const cards = cardsResult.rows[0];
         const totalCardDebtDop = parseFloat(cards.total_dop || 0);
         const totalCardDebtUsd = parseFloat(cards.total_usd || 0);
         const loansResult = await (0, database_1.query)(`SELECT l.total_amount, COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.total_amount, l.currency`, [userId]);
         let totalLoanDebtDop = 0;
         let totalLoanDebtUsd = 0;
@@ -875,7 +875,7 @@ const getDailyHealth = async (req, res) => {
         const prevDay = prevDate.getDate();
         const prevIncomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_PUNCTUAL_CALENDAR_DAY} )
        GROUP BY currency`, [userId, prevYear, prevMonth, prevDay]);
         let prevIncomeDop = 0;
@@ -899,7 +899,7 @@ const getDailyHealth = async (req, res) => {
         const prevDayRangeEnd = new Date(prevYear, prevMonth - 1, prevDay, 23, 59, 59, 999);
         const prevExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DAILY_MATCH} )
        GROUP BY currency`, [userId, prevYear, prevMonth, prevDay]);
         let prevExpensesDop = 0;
@@ -971,7 +971,7 @@ const getWeeklyHealth = async (req, res) => {
         const exchangeRate = ctx.pairRateSecondaryPerPrimary;
         const incomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`, [userId, startDate, endDate]);
         let totalIncomeDop = 0;
@@ -981,7 +981,7 @@ const getWeeklyHealth = async (req, res) => {
         });
         const fixedIncomeResult = await (0, database_1.query)(`SELECT amount, currency, frequency, receipt_day, date, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE AND ( ${recurrenceSql_1.INCOME_RECURRENT_ROWS} )`, [userId]);
         fixedIncomeResult.rows.forEach((row) => {
             const amount = parseFloat(row.amount);
             const amountDop = (0, userCurrencyConversion_1.amountToPrimary)(amount, row.currency, ctx);
@@ -990,7 +990,7 @@ const getWeeklyHealth = async (req, res) => {
         });
         const expensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`, [userId, startDate, endDate]);
         let totalExpensesDop = 0;
@@ -1000,7 +1000,7 @@ const getWeeklyHealth = async (req, res) => {
         });
         const recurringAllWeek = await (0, database_1.query)(`SELECT category, amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (
            ( ${recurrenceSql_1.EXPENSE_RECURRING_MONTHLY} )
            OR ( ${recurrenceSql_1.EXPENSE_RECURRING_ANNUAL} )
@@ -1010,7 +1010,7 @@ const getWeeklyHealth = async (req, res) => {
         totalExpensesDop += recWeek.totalDop;
         const expensesByCategoryResult = await (0, database_1.query)(`SELECT category, SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY category, currency`, [userId, startDate, endDate]);
         const expensesByCategory = {};
@@ -1024,14 +1024,14 @@ const getWeeklyHealth = async (req, res) => {
         // Total debts
         const cardsResult = await (0, database_1.query)(`SELECT SUM(current_debt_dop) as total_dop, SUM(current_debt_usd) as total_usd
        FROM credit_cards
-       WHERE user_id = $1`, [userId]);
+       WHERE user_id = $1 AND is_active = TRUE`, [userId]);
         const cards = cardsResult.rows[0];
         const totalCardDebtDop = parseFloat(cards.total_dop || 0);
         const totalCardDebtUsd = parseFloat(cards.total_usd || 0);
         const loansResult = await (0, database_1.query)(`SELECT l.total_amount, COALESCE(SUM(lp.amount), 0) as total_paid, l.currency
        FROM loans l
        LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'
        GROUP BY l.id, l.total_amount, l.currency`, [userId]);
         let totalLoanDebtDop = 0;
         let totalLoanDebtUsd = 0;
@@ -1055,7 +1055,7 @@ const getWeeklyHealth = async (req, res) => {
         prevEndDate.setHours(23, 59, 59, 999);
         const prevIncomeResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.INCOME_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`, [userId, prevStartDate, prevEndDate]);
         let prevIncomeDop = 0;
@@ -1071,7 +1071,7 @@ const getWeeklyHealth = async (req, res) => {
         });
         const prevExpensesResult = await (0, database_1.query)(`SELECT SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND ( ${recurrenceSql_1.EXPENSE_DATE_IN_RANGE_PUNCTUAL} )
        GROUP BY currency`, [userId, prevStartDate, prevEndDate]);
         let prevExpensesDop = 0;

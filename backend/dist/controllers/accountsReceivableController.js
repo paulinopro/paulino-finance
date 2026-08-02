@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAccountReceivable = exports.receiveAccountReceivable = exports.updateAccountReceivable = exports.createAccountReceivable = exports.deleteAccountReceivablePayment = exports.updateAccountReceivablePayment = exports.addAccountReceivablePayment = exports.getAccountReceivablePayments = exports.getAccountsReceivable = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const accountBalance_1 = require("../services/accountBalance");
 const accountsPaymentLinkSync_1 = require("../services/accountsPaymentLinkSync");
@@ -23,7 +24,7 @@ const getAccountsReceivable = async (req, res) => {
         const userId = req.userId;
         const { status } = req.query;
         let queryText = `
-      SELECT ar.id, ar.description, ar.amount, ar.currency, ar.due_date, ar.status, ar.category, ar.notes, ar.received_date, ar.created_at, ar.updated_at,
+      SELECT ar.id, ar.description, ar.amount, ar.currency, ar.due_date, ar.status, ar.category, ar.notes, ar.received_date, ar.is_active, ar.created_at, ar.updated_at,
              COALESCE(rec.total_received, 0)::numeric as total_received
       FROM accounts_receivable ar
       LEFT JOIN (
@@ -52,6 +53,7 @@ const getAccountsReceivable = async (req, res) => {
                 category: row.category,
                 notes: row.notes,
                 receivedDate: row.received_date,
+                isActive: row.is_active === true,
                 totalReceived: (0, accountsPaymentLinkSync_1.roundMoney)(parseFloat(row.total_received)),
                 createdAt: row.created_at,
                 updatedAt: row.updated_at,
@@ -104,6 +106,8 @@ const addAccountReceivablePayment = async (req, res) => {
     try {
         const userId = req.userId;
         const { id } = req.params;
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accountsReceivable', Number(id), userId, res)))
+            return;
         const { amount, paymentDate } = req.body;
         if (amount == null || paymentDate == null || paymentDate === '') {
             return res.status(400).json({ message: 'amount and paymentDate are required' });
@@ -477,6 +481,8 @@ const receiveAccountReceivable = async (req, res) => {
     try {
         const userId = req.userId;
         const { id } = req.params;
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('accountsReceivable', Number(id), userId, res)))
+            return;
         const { receivedDate, paymentDate, notes } = req.body;
         const dateStr = paymentDate ?? receivedDate;
         if (!dateStr || String(dateStr).trim() === '') {

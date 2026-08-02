@@ -24,7 +24,7 @@ export const getProjections = async (req: AuthRequest, res: Response) => {
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM income
-         WHERE user_id = $1
+         WHERE user_id = $1 AND is_active = TRUE
            AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
@@ -38,7 +38,7 @@ export const getProjections = async (req: AuthRequest, res: Response) => {
        FROM (
          SELECT EXTRACT(MONTH FROM date) as month, EXTRACT(YEAR FROM date) as year, SUM(amount) as total, currency
          FROM expenses
-         WHERE user_id = $1
+         WHERE user_id = $1 AND is_active = TRUE
            AND recurrence_type = 'non_recurrent'
            AND date >= CURRENT_DATE - INTERVAL '3 months'
          GROUP BY EXTRACT(MONTH FROM date), EXTRACT(YEAR FROM date), currency
@@ -51,7 +51,7 @@ export const getProjections = async (req: AuthRequest, res: Response) => {
     const recurrentIncomeRows = await query(
       `SELECT amount, currency, frequency
        FROM income
-       WHERE user_id = $1 AND recurrence_type = 'recurrent'`,
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'recurrent'`,
       [userId]
     );
 
@@ -59,14 +59,14 @@ export const getProjections = async (req: AuthRequest, res: Response) => {
     const recurrentExpenseRows = await query(
       `SELECT amount, currency, frequency
        FROM expenses
-       WHERE user_id = $1 AND recurrence_type = 'recurrent'`,
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'recurrent'`,
       [userId]
     );
 
     const accountsResult = await query(
       `SELECT SUM(balance_dop) as total_dop, SUM(balance_usd) as total_usd
        FROM bank_accounts
-       WHERE user_id = $1`,
+       WHERE user_id = $1 AND is_active = TRUE`,
       [userId]
     );
     const accounts = accountsResult.rows[0];

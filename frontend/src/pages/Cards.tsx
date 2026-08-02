@@ -13,6 +13,7 @@ import { useListOrderPageDnd } from '../hooks/useListOrderPageDnd';
 import ListOrderDragHandle from '../components/ListOrderDragHandle';
 import ListOrderDragGhostPortal from '../components/ListOrderDragGhostPortal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 import {
   LIST_CARD_SHELL,
@@ -162,7 +163,7 @@ const Cards: React.FC = () => {
   const accountsForCardPayment = useMemo(() => {
     const c = cardPaymentForm.payCurrency;
     return bankAccounts.filter((a: BankAccount) =>
-      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, cardPaymentForm.payCurrency, primaryCurrency, secondaryCurrency]);
 
@@ -504,6 +505,13 @@ const Cards: React.FC = () => {
                       <DollarSign className="h-[18px] w-[18px]" />
                     </button>
                     <button type="button" onClick={() => handleEdit(card)} className={listCardBtnEdit} title={t('common.actions.edit')} aria-label={t('pages.cards.editAria')}>
+                    <EntityActiveToggle
+                      resourcePath="cards"
+                      entityId={card.id}
+                      isActive={card.isActive}
+                      entityLabel={card.cardName}
+                      onChanged={fetchCards}
+                    />
                       <Edit className="h-5 w-5" />
                     </button>
                     <button type="button" onClick={() => handleDelete(card.id)} className={listCardBtnDanger} title={t('common.actions.delete')} aria-label={t('pages.cards.deleteAria')}>

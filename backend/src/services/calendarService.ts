@@ -453,7 +453,7 @@ async function syncRecurringCalendarSlotRange(
     }
   }
 }
-  
+
 /**
  * Deja de mostrar en el calendario financiero las filas ligadas al origen (p. ej. al borrar un ingreso).
  * Los registros permanecen en la base para historial (`show_on_calendar = false`).
@@ -608,10 +608,29 @@ export const getCalendarEvents = async (
         AND ce.event_type IN ('EXPENSE', 'RECURRING_EXPENSE')
       LEFT JOIN income i ON i.user_id = ce.user_id AND i.id = ce.related_id
         AND ce.event_type = 'INCOME'
-      WHERE ce.user_id = $1 
+      WHERE ce.user_id = $1
         AND ce.show_on_calendar = true
-        AND ce.event_date >= $2 
+        AND ce.event_date >= $2
         AND ce.event_date <= $3
+        AND (
+          ce.event_type NOT IN ('INCOME', 'EXPENSE', 'RECURRING_EXPENSE', 'LOAN_PAYMENT', 'CARD_PAYMENT')
+          OR (ce.event_type = 'INCOME' AND EXISTS (
+            SELECT 1 FROM income source_income
+            WHERE source_income.id = ce.related_id AND source_income.user_id = ce.user_id AND source_income.is_active = TRUE
+          ))
+          OR (ce.event_type IN ('EXPENSE', 'RECURRING_EXPENSE') AND EXISTS (
+            SELECT 1 FROM expenses source_expense
+            WHERE source_expense.id = ce.related_id AND source_expense.user_id = ce.user_id AND source_expense.is_active = TRUE
+          ))
+          OR (ce.event_type = 'LOAN_PAYMENT' AND EXISTS (
+            SELECT 1 FROM loans source_loan
+            WHERE source_loan.id = ce.related_id AND source_loan.user_id = ce.user_id AND source_loan.is_active = TRUE
+          ))
+          OR (ce.event_type = 'CARD_PAYMENT' AND EXISTS (
+            SELECT 1 FROM credit_cards source_card
+            WHERE source_card.id = ce.related_id AND source_card.user_id = ce.user_id AND source_card.is_active = TRUE
+          ))
+        )
     `;
     const params: any[] = [userId, startDate, endDate];
     let paramIndex = 4;
@@ -688,7 +707,7 @@ export const generateCalendarEvents = async (
               COALESCE(minimum_payment_dop, 0)::numeric AS minimum_payment_dop,
               COALESCE(minimum_payment_usd, 0)::numeric AS minimum_payment_usd
        FROM credit_cards
-       WHERE user_id = $1`,
+       WHERE user_id = $1 AND is_active = TRUE`,
       [userId]
     );
 
@@ -744,8 +763,8 @@ export const generateCalendarEvents = async (
 
         // Check if event already exists
         const existingEvent = await query(
-          `SELECT id FROM calendar_events 
-           WHERE user_id = $1 AND event_type = 'CARD_PAYMENT' 
+          `SELECT id FROM calendar_events
+           WHERE user_id = $1 AND event_type = 'CARD_PAYMENT'
            AND related_id = $2 AND event_date = $3`,
           [userId, card.id, eventDate]
         );
@@ -757,7 +776,7 @@ export const generateCalendarEvents = async (
         if (debtAmount > 0) {
           if (existingEvent.rows.length === 0) {
             await query(
-              `INSERT INTO calendar_events 
+              `INSERT INTO calendar_events
                (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color, is_recurring)
                VALUES ($1, 'CARD_PAYMENT', $2, 'CARD', $3, $4, $5, $6, $7, $8, true)
                ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
@@ -790,10 +809,10 @@ export const generateCalendarEvents = async (
 
     // Get loans with payment dates
     const loansResult = await query(
-      `SELECT l.id, l.loan_name, l.bank_name, l.start_date, l.payment_day, 
+      `SELECT l.id, l.loan_name, l.bank_name, l.start_date, l.payment_day,
               l.installment_amount, l.currency, l.total_installments, l.paid_installments
        FROM loans l
-       WHERE l.user_id = $1 AND l.status = 'ACTIVE'`,
+       WHERE l.user_id = $1 AND l.is_active = TRUE AND l.status = 'ACTIVE'`,
       [userId]
     );
 
@@ -809,15 +828,15 @@ export const generateCalendarEvents = async (
         const paymentDate = new Date(startDate);
         paymentDate.setMonth(paymentDate.getMonth() + i - 1);
         paymentDate.setDate(paymentDay);
-        
+
         if (paymentDate >= start && paymentDate <= end) {
           const eventDate = dateToYmdLocal(paymentDate);
           const isOverdue = paymentDate < today;
 
           // Check if event already exists
           const existingEvent = await query(
-            `SELECT id FROM calendar_events 
-             WHERE user_id = $1 AND event_type = 'LOAN_PAYMENT' 
+            `SELECT id FROM calendar_events
+             WHERE user_id = $1 AND event_type = 'LOAN_PAYMENT'
              AND related_id = $2 AND event_date = $3`,
             [userId, loan.id, eventDate]
           );
@@ -828,7 +847,7 @@ export const generateCalendarEvents = async (
 
           if (existingEvent.rows.length === 0) {
             await query(
-              `INSERT INTO calendar_events 
+              `INSERT INTO calendar_events
                (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color, is_recurring)
                VALUES ($1, 'LOAN_PAYMENT', $2, 'LOAN', $3, $4, $5, $6, $7, $8, true)
                ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
@@ -862,7 +881,7 @@ export const generateCalendarEvents = async (
               recurrence_start_date, recurrence_end_date, is_received,
               last_received_month, last_received_year
        FROM income
-       WHERE user_id = $1 AND (date >= $2 OR recurrence_type = 'recurrent')`,
+       WHERE user_id = $1 AND is_active = TRUE AND (date >= $2 OR recurrence_type = 'recurrent')`,
       [userId, startDate]
     );
 
@@ -930,8 +949,8 @@ export const generateCalendarEvents = async (
           );
 
           const existingEvent = await query(
-            `SELECT id FROM calendar_events 
-             WHERE user_id = $1 AND event_type = 'INCOME' 
+            `SELECT id FROM calendar_events
+             WHERE user_id = $1 AND event_type = 'INCOME'
              AND related_id = $2 AND event_date = $3`,
             [userId, income.id, eventDate]
           );
@@ -946,7 +965,7 @@ export const generateCalendarEvents = async (
 
           if (existingEvent.rows.length === 0) {
             await query(
-              `INSERT INTO calendar_events 
+              `INSERT INTO calendar_events
                (user_id, event_type, related_id, related_type, event_date, title, amount, currency, status, color)
                VALUES ($1, 'INCOME', $2, 'INCOME', $3, $4, $5, $6, $7, $8)
                ON CONFLICT (user_id, event_type, related_id, event_date) DO NOTHING`,
@@ -973,7 +992,7 @@ export const generateCalendarEvents = async (
       `SELECT id, description, amount, currency, payment_day, payment_month, frequency, recurrence_type, nature,
               date, recurrence_start_date, recurrence_end_date, is_paid, last_paid_month, last_paid_year, category
        FROM expenses
-       WHERE user_id = $1 AND recurrence_type = 'recurrent'`,
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'recurrent'`,
       [userId]
     );
 
@@ -1038,7 +1057,7 @@ export const generateCalendarEvents = async (
     const oneTimeExpensesResult = await query(
       `SELECT id, description, amount, currency, date, is_paid, category
        FROM expenses
-       WHERE user_id = $1 AND recurrence_type = 'non_recurrent' AND date IS NOT NULL`,
+       WHERE user_id = $1 AND is_active = TRUE AND recurrence_type = 'non_recurrent' AND date IS NOT NULL`,
       [userId]
     );
 
@@ -1110,7 +1129,7 @@ export const updateEventStatus = async (
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      `UPDATE calendar_events 
+      `UPDATE calendar_events
        SET status = $1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND user_id = $3 AND show_on_calendar = true
        RETURNING *`,

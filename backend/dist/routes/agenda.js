@@ -28,5 +28,7 @@ router.post('/items', agendaController_1.postItem);
 router.patch('/items/:id', agendaController_1.patchItem);
 router.delete('/items/:id', agendaController_1.removeItem);
 router.get('/connections', agendaController_1.getConnections);
+router.post('/sync', agendaController_1.postSync);
+router.post('/sync/import-range', agendaController_1.postImportRange);
 exports.default = router;
 //# sourceMappingURL=agenda.js.map

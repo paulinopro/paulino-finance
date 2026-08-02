@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updatePayment = exports.getAmortizationSchedule = exports.deletePayment = exports.recordPayment = exports.deleteLoan = exports.updateLoan = exports.createLoan = exports.getLoan = exports.getLoans = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const amortizationService_1 = require("../services/amortizationService");
 const accountBalance_1 = require("../services/accountBalance");
@@ -38,7 +39,7 @@ async function removeLoanPaymentById(paymentId, userId) {
     await (0, database_1.query)('UPDATE amortization_schedule SET payment_id = NULL WHERE payment_id = $1', [paymentId]);
     await (0, database_1.query)('DELETE FROM loan_payments WHERE id = $1', [paymentId]);
     const updateStatus = newPaidInstallments >= payment.total_installments ? 'PAID' : 'ACTIVE';
-    await (0, database_1.query)(`UPDATE loans 
+    await (0, database_1.query)(`UPDATE loans
      SET paid_installments = $1, status = $2, updated_at = CURRENT_TIMESTAMP
      WHERE id = $3`, [newPaidInstallments, updateStatus, loanId]);
     const updatedSchedule = await (0, amortizationService_1.generateAmortizationSchedule)(loanId, userId);
@@ -52,7 +53,7 @@ const getLoans = async (req, res) => {
       SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.interest_rate, l.interest_rate_type,
               l.total_installments, l.paid_installments, l.start_date, l.end_date,
               l.installment_amount, l.fixed_charge, l.payment_day, l.next_payment_date, l.currency, l.status,
-              l.interest_calculation_base, l.created_at, l.updated_at, 
+              l.interest_calculation_base, l.is_active, l.created_at, l.updated_at,
               COALESCE(SUM(lp.amount), 0) as total_paid,
               COALESCE(SUM(lp.principal_amount), 0) as total_principal_paid
        FROM loans l
@@ -131,6 +132,7 @@ const getLoans = async (req, res) => {
                 nextPaymentDate: nextPaymentDate || row.next_payment_date,
                 currency: row.currency,
                 status: row.status,
+                isActive: row.is_active === true,
                 interestCalculationBase: row.interest_calculation_base || 'ACTUAL_360',
                 totalPaid: parseFloat(row.total_paid),
                 remainingBalance: parseFloat(row.total_amount) - parseFloat(row.total_principal_paid || 0),
@@ -141,10 +143,10 @@ const getLoans = async (req, res) => {
         });
         const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const totalRemaining = loans
-            .filter((l) => l.status === 'ACTIVE')
+            .filter((l) => l.status === 'ACTIVE' && l.isActive)
             .reduce((sum, l) => sum + (0, userCurrencyConversion_1.amountToPrimary)(l.remainingBalance || 0, String(l.currency || 'DOP'), ctx), 0);
         const totalInstallment = loans
-            .filter((l) => l.status === 'ACTIVE')
+            .filter((l) => l.status === 'ACTIVE' && l.isActive)
             .reduce((sum, l) => sum + (0, userCurrencyConversion_1.amountToPrimary)(l.installmentAmount, String(l.currency || 'DOP'), ctx), 0);
         res.json({
             success: true,
@@ -152,7 +154,7 @@ const getLoans = async (req, res) => {
             summary: {
                 totalRemaining,
                 totalInstallment,
-                totalLoans: loans.length,
+                totalLoans: loans.filter((loan) => loan.isActive).length,
             },
         });
     }
@@ -169,7 +171,7 @@ const getLoan = async (req, res) => {
         const loanResult = await (0, database_1.query)(`SELECT id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
               total_installments, paid_installments, start_date, end_date,
               installment_amount, fixed_charge, payment_day, next_payment_date, currency, status,
-              interest_calculation_base, created_at, updated_at
+              interest_calculation_base, is_active, created_at, updated_at
        FROM loans
        WHERE id = $1 AND user_id = $2`, [loanId, userId]);
         if (loanResult.rows.length === 0) {
@@ -177,7 +179,7 @@ const getLoan = async (req, res) => {
         }
         const loan = loanResult.rows[0];
         // Get payments
-        const paymentsResult = await (0, database_1.query)(`SELECT id, payment_date, amount, principal_amount, interest_amount, charge_amount, 
+        const paymentsResult = await (0, database_1.query)(`SELECT id, payment_date, amount, principal_amount, interest_amount, charge_amount,
               late_fee, installment_number, outstanding_balance, payment_type, notes, bank_account_id,
               created_at, updated_at
        FROM loan_payments
@@ -216,6 +218,7 @@ const getLoan = async (req, res) => {
                 nextPaymentDate: nextPaymentDate,
                 currency: loan.currency,
                 status: loan.status,
+                isActive: loan.is_active === true,
                 interestCalculationBase: loan.interest_calculation_base || 'ACTUAL_360',
                 remainingBalance: remainingBalance,
                 progress: (loan.paid_installments / loan.total_installments) * 100,
@@ -276,7 +279,7 @@ const createLoan = async (req, res) => {
             }
             nextPaymentDate = (0, dateUtils_1.dateToYmdLocal)(nextPayment);
         }
-        const result = await (0, database_1.query)(`INSERT INTO loans 
+        const result = await (0, database_1.query)(`INSERT INTO loans
        (user_id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
         total_installments, start_date, end_date, installment_amount, fixed_charge, payment_day, next_payment_date, currency, interest_calculation_base)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -475,6 +478,8 @@ const recordPayment = async (req, res) => {
     try {
         const userId = req.userId;
         const loanId = parseInt(req.params.id);
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('loans', loanId, userId, res)))
+            return;
         const { paymentDate, amount, paymentType, notes, installmentNumber } = req.body;
         const bankAccountId = optionalBankAccountId(req.body);
         if (!paymentDate || !amount) {
@@ -491,8 +496,8 @@ const recordPayment = async (req, res) => {
         // Process payment with amortization logic
         const paymentDistribution = await (0, amortizationService_1.processPayment)(loanId, paymentDate, parseFloat(amount), paymentType || 'COMPLETE', installmentNumber !== undefined ? parseInt(installmentNumber) : undefined);
         // Insert payment with detailed breakdown
-        const paymentResult = await (0, database_1.query)(`INSERT INTO loan_payments 
-       (loan_id, payment_date, amount, principal_amount, interest_amount, charge_amount, 
+        const paymentResult = await (0, database_1.query)(`INSERT INTO loan_payments
+       (loan_id, payment_date, amount, principal_amount, interest_amount, charge_amount,
         late_fee, installment_number, outstanding_balance, payment_type, notes, bank_account_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id, payment_date, amount, principal_amount, interest_amount, charge_amount,
@@ -534,7 +539,7 @@ const recordPayment = async (req, res) => {
         }
         // Update loan
         const updateStatus = newPaidInstallments >= loan.total_installments ? 'PAID' : 'ACTIVE';
-        await (0, database_1.query)(`UPDATE loans 
+        await (0, database_1.query)(`UPDATE loans
        SET paid_installments = $1, status = $2, next_payment_date = COALESCE($3, next_payment_date), updated_at = CURRENT_TIMESTAMP
        WHERE id = $4`, [newPaidInstallments, updateStatus, nextPaymentDate, loanId]);
         // Regenerate and save amortization schedule
@@ -745,8 +750,8 @@ const updatePayment = async (req, res) => {
            bank_account_id = $10,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $11
-       RETURNING id, payment_date, amount, principal_amount, interest_amount, 
-                 charge_amount, late_fee, installment_number, outstanding_balance, 
+       RETURNING id, payment_date, amount, principal_amount, interest_amount,
+                 charge_amount, late_fee, installment_number, outstanding_balance,
                  payment_type, notes, bank_account_id, updated_at`, [
             effDate,
             effAmt,

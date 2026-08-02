@@ -13,7 +13,7 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
 
     let queryText = `
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
-              currency_type, account_kind, created_at, updated_at
+              currency_type, account_kind, is_active, created_at, updated_at
        FROM bank_accounts
        WHERE user_id = $1
     `;
@@ -51,19 +51,21 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       balanceUsd: parseFloat(row.balance_usd || 0),
       currencyType: row.currency_type,
       accountKind: row.account_kind || 'bank',
+      isActive: row.is_active === true,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
 
     // Calculate totals
-    const totalBalanceDop = accounts.reduce((sum, a) => {
+    const activeAccounts = accounts.filter((account) => account.isActive);
+    const totalBalanceDop = activeAccounts.reduce((sum, a) => {
       if (a.currencyType === 'DOP' || a.currencyType === 'DUAL') {
         return sum + a.balanceDop;
       }
       return sum;
     }, 0);
 
-    const totalBalanceUsd = accounts.reduce((sum, a) => {
+    const totalBalanceUsd = activeAccounts.reduce((sum, a) => {
       if (a.currencyType === 'USD' || a.currencyType === 'DUAL') {
         return sum + a.balanceUsd;
       }
@@ -72,15 +74,19 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
 
     const isCashLike = (k: string) => k === 'cash' || k === 'wallet';
     const totalBankDop = accounts
+      .filter((a) => a.isActive)
       .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
       .reduce((s, a) => s + a.balanceDop, 0);
     const totalBankUsd = accounts
+      .filter((a) => a.isActive)
       .filter((a) => a.accountKind === 'bank' && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
       .reduce((s, a) => s + a.balanceUsd, 0);
     const totalCashDop = accounts
+      .filter((a) => a.isActive)
       .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'DOP' || a.currencyType === 'DUAL'))
       .reduce((s, a) => s + a.balanceDop, 0);
     const totalCashUsd = accounts
+      .filter((a) => a.isActive)
       .filter((a) => isCashLike(a.accountKind) && (a.currencyType === 'USD' || a.currencyType === 'DUAL'))
       .reduce((s, a) => s + a.balanceUsd, 0);
 
@@ -90,7 +96,7 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
       summary: {
         totalBalanceDop,
         totalBalanceUsd,
-        totalAccounts: accounts.length,
+        totalAccounts: activeAccounts.length,
         totalBankDop,
         totalBankUsd,
         totalCashDop,
@@ -110,7 +116,7 @@ export const getAccount = async (req: AuthRequest, res: Response) => {
 
     const result = await query(
       `SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
-              currency_type, created_at, updated_at
+              currency_type, is_active, created_at, updated_at
        FROM bank_accounts
        WHERE id = $1 AND user_id = $2`,
       [accountId, userId]
@@ -131,6 +137,7 @@ export const getAccount = async (req: AuthRequest, res: Response) => {
         balanceDop: parseFloat(row.balance_dop || 0),
         balanceUsd: parseFloat(row.balance_usd || 0),
         currencyType: row.currency_type,
+        isActive: row.is_active === true,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },

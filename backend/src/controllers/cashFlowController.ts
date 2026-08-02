@@ -122,7 +122,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const incomeResult = await query(
       `SELECT date, SUM(amount) as total, currency
        FROM income
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (${INCOME_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY date, currency
        ORDER BY date ASC`,
@@ -133,7 +133,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const expensesResult = await query(
       `SELECT date, SUM(amount) as total, currency
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (${EXPENSE_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY date, currency
        ORDER BY date ASC`,
@@ -144,7 +144,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const accountsPayableResult = await query(
       `SELECT paid_date as date, SUM(amount) as total, currency
        FROM accounts_payable
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND status = 'PAID'
          AND paid_date >= $2 AND paid_date <= $3
        GROUP BY paid_date, currency
@@ -156,7 +156,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const accountsReceivableResult = await query(
       `SELECT received_date as date, SUM(amount) as total, currency
        FROM accounts_receivable
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND status = 'RECEIVED'
          AND received_date >= $2 AND received_date <= $3
        GROUP BY received_date, currency
@@ -181,7 +181,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const fixedIncomeResult = await query(
       `SELECT amount, currency, frequency, receipt_day, date, nature, recurrence_start_date, recurrence_end_date
        FROM income
-       WHERE user_id = $1 AND (${INCOME_RECURRENT_ROWS})`,
+       WHERE user_id = $1 AND is_active = TRUE AND (${INCOME_RECURRENT_ROWS})`,
       [userId]
     );
 
@@ -189,7 +189,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
       const amount = parseFloat(row.amount);
       const amountDop = amountToPrimary(amount, String(row.currency || 'DOP'), ctx);
       const frequency = row.frequency;
-      
+
       const dates = getFixedIncomeOccurrenceDates(
         {
           frequency,
@@ -225,7 +225,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const recurringExpensesExpandedResult = await query(
       `SELECT amount, currency, frequency, payment_day, payment_month, date, recurrence_start_date, recurrence_end_date
        FROM expenses
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
          AND (
            (${EXPENSE_RECURRING_MONTHLY})
            OR (${EXPENSE_RECURRING_ANNUAL})
@@ -282,7 +282,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     // Convert to array and calculate running balance
     const cashFlowData = [];
     let runningBalance = 0;
-    
+
     // Get all dates in the period
     const allDates: string[] = [];
     const currentDate = new Date(start);
@@ -310,7 +310,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const incomePunctualByNature = await query(
       `SELECT nature AS nat, currency, SUM(amount) AS total
        FROM income
-       WHERE user_id = $1 AND (${INCOME_DATE_IN_RANGE_PUNCTUAL})
+       WHERE user_id = $1 AND is_active = TRUE AND (${INCOME_DATE_IN_RANGE_PUNCTUAL})
        GROUP BY nature, currency`,
       [userId, start, end]
     );
@@ -435,7 +435,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
          FROM accounts_payable_payments
          GROUP BY account_payable_id
        ) tp ON tp.account_payable_id = ap.id
-       WHERE ap.user_id = $1
+       WHERE ap.user_id = $1 AND ap.is_active = TRUE
          AND ap.status <> 'PAID'
          AND ap.due_date::date >= $2::date
          AND ap.due_date::date <= $3::date
@@ -455,7 +455,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const cardRowsResult = await query(
       `SELECT payment_due_day, minimum_payment_dop, minimum_payment_usd, currency_type
        FROM credit_cards
-       WHERE user_id = $1`,
+       WHERE user_id = $1 AND is_active = TRUE`,
       [userId]
     );
     let pendingCreditCardMinimums = 0;
@@ -505,7 +505,7 @@ export const getCashFlow = async (req: AuthRequest, res: Response) => {
     const loanNextFallback = await query(
       `SELECT l.installment_amount, l.fixed_charge, l.currency
        FROM loans l
-       WHERE l.user_id = $1
+       WHERE l.user_id = $1 AND l.is_active = TRUE
          AND l.status = 'ACTIVE'
          AND l.next_payment_date IS NOT NULL
          AND l.next_payment_date::date >= $2::date

@@ -222,3 +222,15 @@ export const parseDdMmYyyyToIso = (input: string): string | null => {
   if (dt.getFullYear() !== year || dt.getMonth() !== month - 1 || dt.getDate() !== day) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
+
+/** Combina un día recurrente con un período calendario y ajusta al último día válido. */
+export function formatRecurringDayForPeriod(day: number, year: number, month: number): string {
+  const safeMonth = Math.max(1, Math.min(12, Math.trunc(month)));
+  const lastDay = new Date(year, safeMonth, 0).getDate();
+  const safeDay = Math.max(1, Math.min(lastDay, Math.trunc(day)));
+  return [
+    String(safeDay).padStart(2, '0'),
+    String(safeMonth).padStart(2, '0'),
+    String(year).padStart(4, '0'),
+  ].join('/');
+}

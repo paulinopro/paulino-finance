@@ -254,7 +254,7 @@ const getExpensesReport = async (req, res) => {
              recurrence_type, frequency,
              created_at, updated_at
       FROM expenses
-      WHERE user_id = $1
+      WHERE user_id = $1 AND is_active = TRUE
     `;
         const params = [userId];
         let paramIndex = 2;
@@ -351,7 +351,7 @@ const getLoansReport = async (req, res) => {
              COALESCE(SUM(lp.amount), 0) as total_paid
       FROM loans l
       LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-      WHERE l.user_id = $1
+      WHERE l.user_id = $1 AND l.is_active = TRUE
     `;
         const params = [userId];
         let paramIndex = 2;
@@ -438,7 +438,7 @@ const getCardsReport = async (req, res) => {
               current_debt_dop, current_debt_usd, minimum_payment_dop, minimum_payment_usd,
               cut_off_day, payment_due_day, currency_type, created_at, updated_at
        FROM credit_cards
-       WHERE user_id = $1
+       WHERE user_id = $1 AND is_active = TRUE
        ORDER BY created_at DESC`, [userId]);
         const cards = result.rows.map((row) => ({
             id: row.id,
@@ -493,7 +493,7 @@ const getAccountsReport = async (req, res) => {
       SELECT id, bank_name, account_type, account_number, balance_dop, balance_usd,
               currency_type, created_at, updated_at
       FROM bank_accounts
-      WHERE user_id = $1
+      WHERE user_id = $1 AND is_active = TRUE
     `;
         const params = [userId];
         let paramIndex = 2;
@@ -571,14 +571,14 @@ const getComprehensiveReport = async (req, res) => {
         const { fromDate, toDate, format } = req.query;
         // Get all data + tasa del usuario (.env si no hay valor en BD)
         const [expensesResult, loansResult, cardsResult, accountsResult] = await Promise.all([
-            (0, database_1.query)(`SELECT id, description, amount, currency, nature, category, is_paid, 
+            (0, database_1.query)(`SELECT id, description, amount, currency, nature, category, is_paid,
                 last_paid_month, last_paid_year, recurrence_type, frequency, created_at
          FROM expenses WHERE user_id = $1`, [userId]),
             (0, database_1.query)(`SELECT l.id, l.loan_name, l.bank_name, l.total_amount, l.status, l.currency,
                 COALESCE(SUM(lp.amount), 0) as total_paid
          FROM loans l
          LEFT JOIN loan_payments lp ON l.id = lp.loan_id
-         WHERE l.user_id = $1
+         WHERE l.user_id = $1 AND l.is_active = TRUE
          GROUP BY l.id`, [userId]),
             (0, database_1.query)(`SELECT id, bank_name, card_name, credit_limit_dop, credit_limit_usd,
                 current_debt_dop, current_debt_usd, currency_type

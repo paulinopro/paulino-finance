@@ -10,6 +10,7 @@ import {
   receiveAccountReceivable,
   deleteAccountReceivable,
 } from '../controllers/accountsReceivableController';
+import { createEntityActiveStatusHandler } from '../controllers/entityActiveStatus';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -19,6 +20,7 @@ router.use(authenticate);
 router.use(requireSubscriptionModule('accounts_receivable'));
 
 router.get('/', getAccountsReceivable);
+router.patch('/:id/active-status', createEntityActiveStatusHandler('accountsReceivable'));
 router.get('/:id/payments', getAccountReceivablePayments);
 router.post('/:id/payments', addAccountReceivablePayment);
 router.put('/:id/payments/:paymentId', updateAccountReceivablePayment);

@@ -10,13 +10,14 @@ import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { usePersistedTablePageSize } from '../hooks/usePersistedTablePageSize';
 import TablePagination from '../components/TablePagination';
 import PageHeader from '../components/PageHeader';
-import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs } from '../utils/dateUtils';
+import { formatDateDdMmYyyy, formatDateForInput, calendarDateToSortableMs, formatRecurringDayForPeriod } from '../utils/dateUtils';
 import { bankAccountSupportsLedgerCurrency, formatBankAccountOptionLabel } from '../utils/bankAccountDisplay';
 import { useAuth } from '../context/AuthContext';
 import { useIntlFormatting } from '../context/IntlFormattingContext';
 import { useTranslation } from 'react-i18next';
 import FinancialHistoryModal from '../components/FinancialHistoryModal';
 import SummaryBarToggleButton from '../components/SummaryBarToggleButton';
+import EntityActiveToggle from '../components/EntityActiveToggle';
 import { usePersistedSummaryBarVisible } from '../hooks/usePersistedSummaryBarVisible';
 
 const INCOME_FREQUENCY_KEYS: IncomeFrequency[] = [
@@ -358,7 +359,7 @@ const IncomePage: React.FC = () => {
   const accountsForIncome = useMemo(() => {
     const c = formData.currency;
     return bankAccounts.filter((a) =>
-      bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
+      a.isActive && bankAccountSupportsLedgerCurrency(a, c, primaryCurrency, secondaryCurrency)
     );
   }, [bankAccounts, formData.currency, primaryCurrency, secondaryCurrency]);
 
@@ -390,9 +391,9 @@ const IncomePage: React.FC = () => {
       }
       const fq = incomeFrequencyFromApi(item.frequency);
       if (fq === 'monthly') {
-        return item.receiptDay != null
-          ? t('pages.income.scheduleDay', { day: item.receiptDay })
-          : t('common.emptyDash');
+        if (item.receiptDay == null) return t('common.emptyDash');
+        const today = new Date();
+        return formatRecurringDayForPeriod(item.receiptDay, today.getFullYear(), today.getMonth() + 1);
       }
       if (fq === 'semi_monthly') {
         return t('pages.income.scheduleSemiMonthly');
@@ -820,6 +821,13 @@ const IncomePage: React.FC = () => {
                               <History size={18} />
                             </button>
                             <button type="button" onClick={() => handleDelete(item.id)} className="p-2 text-red-400 hover:text-red-300"><Trash2 size={18} /></button>
+                            <EntityActiveToggle
+                              resourcePath="income"
+                              entityId={item.id}
+                              isActive={item.isActive}
+                              entityLabel={item.description}
+                              onChanged={fetchIncome}
+                            />
                           </div>
                         </span>
                       </td>

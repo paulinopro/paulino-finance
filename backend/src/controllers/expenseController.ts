@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import type { PoolClient } from 'pg';
 import { getClient, query } from '../config/database';
@@ -209,7 +210,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
       SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
              e.category,
              e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-             e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
+             e.bank_account_id, e.is_active, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
              v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
              (SELECT epa.amount FROM expense_period_amounts epa
               WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
@@ -250,6 +251,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
         date: row.date,
         isPaid: isPaid,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        isActive: row.is_active === true,
         vehicleId: row.vehicle_id != null ? row.vehicle_id : null,
         vehicleLabel:
           row.vehicle_id != null
@@ -265,7 +267,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
     // Calculate totals for all expenses (not just current page)
     // Use params without limit and offset
     const allExpensesResult = await query(
-      `SELECT e.amount, e.currency FROM expenses e ${whereClause}`,
+      `SELECT e.amount, e.currency FROM expenses e ${whereClause} AND e.is_active = TRUE`,
       paramsBeforePagination
     );
     const ctx = await getConversionContextForUser(userId);
@@ -295,7 +297,7 @@ export const getExpenses = async (req: AuthRequest, res: Response) => {
         exchangeRate: ctx.pairRateSecondaryPerPrimary,
         totalDop: totalsByCurrency.DOP ?? 0,
         totalUsd: totalsByCurrency.USD ?? 0,
-        totalExpenses: total,
+        totalExpenses: allExpensesResult.rows.length,
       },
       pagination: {
         page: pageNum,
@@ -323,7 +325,7 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
       `SELECT e.id, e.description, e.amount, e.currency, e.nature, e.recurrence_type, e.frequency,
               e.category,
               e.payment_day, e.payment_month, e.date, e.is_paid, e.last_paid_month, e.last_paid_year,
-              e.bank_account_id, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
+              e.bank_account_id, e.is_active, e.recurrence_start_date, e.recurrence_end_date, e.created_at, e.updated_at,
               v.id AS vehicle_id, v.make AS vehicle_make, v.model AS vehicle_model,
               (SELECT epa.amount FROM expense_period_amounts epa
                WHERE epa.expense_id = e.id AND epa.user_id = e.user_id
@@ -366,6 +368,7 @@ export const getExpense = async (req: AuthRequest, res: Response) => {
         date: row.date,
         isPaid: isPaid,
         bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+        isActive: row.is_active === true,
         vehicleId: row.vehicle_id != null ? row.vehicle_id : null,
         vehicleLabel:
           row.vehicle_id != null
@@ -829,6 +832,7 @@ export const updateExpensePaymentStatus = async (req: AuthRequest, res: Response
   try {
     const userId = req.userId!;
     const expenseId = parseInt(req.params.id);
+    if (!(await ensureActiveEntity('expenses', expenseId, userId, res))) return;
     const { isPaid } = req.body;
     const actualAmountRaw = req.body.actualAmount;
 

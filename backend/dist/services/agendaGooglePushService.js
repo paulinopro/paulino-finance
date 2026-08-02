@@ -36,6 +36,7 @@ function agendaItemToGoogleEvent(row) {
     const evt = {
         summary: baseSummary.slice(0, 900),
         description: descParts.join('\n').slice(0, 7500),
+        location: row.location?.trim() || undefined,
         extendedProperties: {
             private: {
                 paulinoAgendaItemId: String(row.id),
@@ -62,6 +63,12 @@ function agendaItemToGoogleEvent(row) {
     else {
         evt.status = 'confirmed';
     }
+    if (row.recurrence_rule?.trim()) {
+        evt.recurrence = row.recurrence_rule
+            .split(/\r?\n/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+    }
     return evt;
 }
 async function selectGoogleSyncUid(connectionId, agendaItemId) {
@@ -76,12 +83,13 @@ async function selectGoogleSyncUid(connectionId, agendaItemId) {
 async function upsertGoogleSyncUid(connectionId, agendaItemId, externalUid, etag) {
     await (0, database_1.query)(`
     INSERT INTO agenda_item_sync_state (
-      agenda_item_id, connection_id, external_uid, etag, last_pushed_at
+      agenda_item_id, connection_id, external_uid, etag, external_updated_at, last_pushed_at
     )
-    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT (agenda_item_id, connection_id) DO UPDATE SET
       external_uid = EXCLUDED.external_uid,
       etag = EXCLUDED.etag,
+      external_updated_at = EXCLUDED.external_updated_at,
       last_pushed_at = CURRENT_TIMESTAMP,
       last_error = NULL,
       updated_at = CURRENT_TIMESTAMP

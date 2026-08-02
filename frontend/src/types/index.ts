@@ -41,6 +41,7 @@ export interface CreditCard {
   cutOffDay: number;
   paymentDueDay: number;
   currencyType: 'DOP' | 'USD' | 'DUAL';
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,6 +62,7 @@ export interface Loan {
   nextPaymentDate?: string;
   currency: string;
   status: 'ACTIVE' | 'PAID' | 'DEFAULTED';
+  isActive: boolean;
   interestCalculationBase?: 'ACTUAL_360' | 'ACTUAL_365' | '30_360' | '30_365';
   totalPaid?: number;
   remainingBalance?: number;
@@ -194,6 +196,7 @@ export interface Income {
   bankAccountId?: number | null;
   /** Ingreso acreditado en la cuenta (actualiza saldo al marcar «Recibido» si hay cuenta vinculada) */
   isReceived: boolean;
+  isActive: boolean;
   /** Primera fecha en que la serie recurrente aplica en calendario/proyecciones (inclusive). */
   recurrenceStartDate?: string | null;
   /** Última fecha en que aplica (inclusive). */
@@ -232,6 +235,7 @@ export interface Expense {
   paymentMonth?: number;
   date?: string;
   isPaid: boolean;
+  isActive: boolean;
   bankAccountId?: number | null;
   /** Si el gasto está vinculado a un vehículo (origen módulo Vehículos) */
   vehicleId?: number | null;
@@ -252,6 +256,7 @@ export interface BankAccount {
   currencyType: 'DOP' | 'USD' | 'DUAL';
   /** banco vs efectivo / billetera */
   accountKind: 'bank' | 'cash' | 'wallet';
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }

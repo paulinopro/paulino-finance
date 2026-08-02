@@ -111,6 +111,7 @@ export function agendaItemToIcsString(row: AgendaItemRow, userId: number): strin
 
   const descParts = [
     row.description?.trim(),
+    row.location?.trim() ? `Ubicacion: ${row.location.trim()}` : undefined,
     typeof row.kind === 'string' ? `Tipo: ${row.kind}` : undefined,
     row.finance_link_type && row.finance_link_id != null
       ? `Enlace financiero: ${row.finance_link_type} #${row.finance_link_id}`
@@ -158,6 +159,14 @@ export function agendaItemToIcsString(row: AgendaItemRow, userId: number): strin
     foldIcs(dtEndLine),
     foldIcs(`SUMMARY:${summary}`),
     ...(description.trim() ? [foldIcs(`DESCRIPTION:${description}`)] : []),
+    ...(row.location?.trim() ? [foldIcs(`LOCATION:${escapeIcsText(row.location.trim().slice(0, 900))}`)] : []),
+    ...(row.recurrence_rule?.trim()
+      ? row.recurrence_rule
+          .split(/\r?\n/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .map((x) => foldIcs(x.startsWith('RRULE:') ? x : `RRULE:${x}`))
+      : []),
     foldIcs('TRANSP:OPAQUE'),
     foldIcs(veventStatus),
     foldIcs('END:VEVENT'),
@@ -196,12 +205,13 @@ async function upsertICloudSyncRow(
   await query(
     `
     INSERT INTO agenda_item_sync_state (
-      agenda_item_id, connection_id, external_uid, etag, last_pushed_at
+      agenda_item_id, connection_id, external_uid, etag, external_updated_at, last_pushed_at
     )
-    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+    VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT (agenda_item_id, connection_id) DO UPDATE SET
       external_uid = EXCLUDED.external_uid,
       etag = EXCLUDED.etag,
+      external_updated_at = EXCLUDED.external_updated_at,
       last_pushed_at = CURRENT_TIMESTAMP,
       last_error = NULL,
       updated_at = CURRENT_TIMESTAMP

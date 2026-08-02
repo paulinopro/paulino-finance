@@ -43,7 +43,7 @@ export function buildGoogleAuthorizeUrl(userId: number): GoogleAuthorizeStart {
     access_type: 'offline',
     prompt: 'consent',
     state,
-    scope: ['https://www.googleapis.com/auth/calendar.events'].join(' '),
+    scope: ['https://www.googleapis.com/auth/calendar'].join(' '),
   });
   return { authorizationUrl, state };
 }

@@ -9,6 +9,7 @@ import {
   recordCardPayment,
   deleteCardPayment,
 } from '../controllers/cardController';
+import { createEntityActiveStatusHandler } from '../controllers/entityActiveStatus';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -20,6 +21,7 @@ router.use(requireSubscriptionModule('cards'));
 router.delete('/payments/:paymentId', deleteCardPayment);
 router.get('/:id/payments', listCardPayments);
 router.post('/:id/payments', recordCardPayment);
+router.patch('/:id/active-status', createEntityActiveStatusHandler('cards'));
 
 router.get('/', getCards);
 router.get('/:id', getCard);

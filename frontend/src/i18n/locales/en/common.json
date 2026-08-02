@@ -68,6 +68,15 @@
   "offlineBanner": {
     "message": "You are offline. Data may not load until you are back online."
   },
+  "activation": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "enableEntity": "Enable {{entity}}",
+    "disableEntity": "Disable {{entity}}",
+    "enabled": "Record enabled",
+    "disabled": "Record disabled",
+    "error": "Could not change status"
+  },
   "iconSelect": {
     "searchPlaceholder": "Search icon (e.g. Wallet, Zap, Home)…",
     "loading": "Loading icons…",

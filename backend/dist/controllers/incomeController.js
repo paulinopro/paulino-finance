@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateIncomeReceiptStatus = exports.deleteIncome = exports.updateIncome = exports.createIncome = exports.getIncomeItem = exports.getIncome = void 0;
+const activeEntityGuard_1 = require("./activeEntityGuard");
 const database_1 = require("../config/database");
 const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
@@ -134,7 +135,7 @@ const getIncome = async (req, res) => {
         let queryText = `
       SELECT id, description, amount, currency, nature, recurrence_type, frequency,
               receipt_day, date, bank_account_id, is_received,
-              last_received_month, last_received_year,
+              last_received_month, last_received_year, is_active,
               recurrence_start_date, recurrence_end_date, created_at, updated_at,
               (SELECT ipa.amount FROM income_period_amounts ipa
                WHERE ipa.income_id = income.id AND ipa.user_id = income.user_id
@@ -167,6 +168,7 @@ const getIncome = async (req, res) => {
                 receiptDay: row.receipt_day,
                 date: row.date,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                isActive: row.is_active === true,
                 isReceived,
                 recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
                 recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
@@ -176,7 +178,7 @@ const getIncome = async (req, res) => {
         });
         // Calculate totals for all income (not just current page)
         // Use params without limit and offset
-        const allIncomeResult = await (0, database_1.query)(`SELECT amount, currency FROM income ${whereClause}`, paramsBeforePagination);
+        const allIncomeResult = await (0, database_1.query)(`SELECT amount, currency FROM income ${whereClause} AND is_active = TRUE`, paramsBeforePagination);
         const ctx = await (0, userCurrencyConversion_1.getConversionContextForUser)(userId);
         const totalsByCurrency = {};
         let totalInPrimary = 0;
@@ -202,7 +204,7 @@ const getIncome = async (req, res) => {
                 exchangeRate: ctx.pairRateSecondaryPerPrimary,
                 totalDop: totalsByCurrency.DOP ?? 0,
                 totalUsd: totalsByCurrency.USD ?? 0,
-                totalIncome: total,
+                totalIncome: allIncomeResult.rows.length,
             },
             pagination: {
                 page: pageNum,
@@ -227,7 +229,7 @@ const getIncomeItem = async (req, res) => {
         const currentYear = currentDate.getFullYear();
         const result = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency,
               receipt_day, date, bank_account_id, is_received,
-              last_received_month, last_received_year,
+              last_received_month, last_received_year, is_active,
               recurrence_start_date, recurrence_end_date, created_at, updated_at,
               (SELECT ipa.amount FROM income_period_amounts ipa
                WHERE ipa.income_id = income.id AND ipa.user_id = income.user_id
@@ -260,6 +262,7 @@ const getIncomeItem = async (req, res) => {
                 receiptDay: row.receipt_day,
                 date: row.date,
                 bankAccountId: row.bank_account_id != null ? row.bank_account_id : null,
+                isActive: row.is_active === true,
                 isReceived,
                 recurrenceStartDate: row.recurrence_start_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_start_date) : null,
                 recurrenceEndDate: row.recurrence_end_date ? (0, dateUtils_1.toYmdFromPgDate)(row.recurrence_end_date) : null,
@@ -654,6 +657,8 @@ const updateIncomeReceiptStatus = async (req, res) => {
     try {
         const userId = req.userId;
         const incomeId = parseInt(req.params.id);
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('income', incomeId, userId, res)))
+            return;
         const { isReceived } = req.body;
         const actualAmountRaw = req.body.actualAmount;
         if (typeof isReceived !== 'boolean') {

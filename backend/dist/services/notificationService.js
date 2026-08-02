@@ -133,7 +133,7 @@ const checkAndSendNotifications = async () => {
                   minimum_payment_dop, minimum_payment_usd,
                   cut_off_day, payment_due_day
            FROM credit_cards
-           WHERE user_id = $1`, [userId]);
+           WHERE user_id = $1 AND is_active = TRUE`, [userId]);
                 for (const card of cardsResult.rows) {
                     const dueDay = card.payment_due_day;
                     const daysBefore = settings['CARD_PAYMENT'].daysBefore || [3, 7];
@@ -188,7 +188,7 @@ const checkAndSendNotifications = async () => {
             if (settings['LOAN_PAYMENT']) {
                 const loansResult = await (0, database_1.query)(`SELECT id, loan_name, installment_amount, paid_installments, total_installments, currency
            FROM loans
-           WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
+           WHERE user_id = $1 AND is_active = TRUE AND status = 'ACTIVE'`, [userId]);
                 for (const loan of loansResult.rows) {
                     // Calculate next payment date (simplified: assume monthly payments)
                     const nextPaymentDate = new Date();
@@ -245,11 +245,11 @@ const checkAndSendNotifications = async () => {
                 const expensesResult = await (0, database_1.query)(`SELECT id, description, amount, currency, payment_day, last_paid_month, last_paid_year,
                   nature, category, frequency, recurrence_type
            FROM expenses
-           WHERE user_id = $1 
+           WHERE user_id = $1 AND is_active = TRUE
              AND recurrence_type = 'recurrent'
              AND LOWER(TRIM(COALESCE(frequency, ''))) = 'monthly'
-             AND (last_paid_month IS NULL 
-                  OR last_paid_month != $2 
+             AND (last_paid_month IS NULL
+                  OR last_paid_month != $2
                   OR last_paid_year != $3)`, [userId, currentMonth, currentYear]);
                 for (const expense of expensesResult.rows) {
                     const paymentDay = expense.payment_day;

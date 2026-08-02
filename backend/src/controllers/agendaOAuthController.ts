@@ -13,7 +13,7 @@ import {
 import { verifyGoogleAgendaOAuthState } from '../utils/jwt';
 
 export async function googleCalendarOAuthCallbackPublic(req: Request, res: Response) {
-  const base = `${agendaFrontendBaseUrl().replace(/\/+$/, '')}/agenda`;
+  const base = `${agendaFrontendBaseUrl().replace(/\/+$/, '')}/settings`;
 
   try {
     const oauthErr = typeof req.query.error === 'string' ? req.query.error : '';

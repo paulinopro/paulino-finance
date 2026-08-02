@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -29,7 +30,7 @@ export const getAccountsPayable = async (req: AuthRequest, res: Response) => {
     const { status } = req.query;
 
     let queryText = `
-      SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status, ap.category, ap.notes, ap.paid_date, ap.created_at, ap.updated_at,
+      SELECT ap.id, ap.description, ap.amount, ap.currency, ap.due_date, ap.status, ap.category, ap.notes, ap.paid_date, ap.is_active, ap.created_at, ap.updated_at,
              COALESCE(pay.total_paid, 0)::numeric as total_paid
       FROM accounts_payable ap
       LEFT JOIN (
@@ -62,6 +63,7 @@ export const getAccountsPayable = async (req: AuthRequest, res: Response) => {
         category: row.category,
         notes: row.notes,
         paidDate: row.paid_date,
+        isActive: row.is_active === true,
         totalPaid: roundMoney(parseFloat(row.total_paid)),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -121,6 +123,7 @@ export const addAccountPayablePayment = async (req: AuthRequest, res: Response) 
   try {
     const userId = req.userId!;
     const { id } = req.params;
+    if (!(await ensureActiveEntity('accountsPayable', Number(id), userId, res))) return;
     const { amount, paymentDate } = req.body;
 
     if (amount == null || paymentDate == null || paymentDate === '') {
@@ -602,6 +605,7 @@ export const payAccountPayable = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const { id } = req.params;
+    if (!(await ensureActiveEntity('accountsPayable', Number(id), userId, res))) return;
     const { paidDate, paymentDate, notes } = req.body;
     const dateStr = paymentDate ?? paidDate;
 

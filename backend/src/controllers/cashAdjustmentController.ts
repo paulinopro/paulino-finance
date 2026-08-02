@@ -1,3 +1,4 @@
+import { ensureActiveEntity } from './activeEntityGuard';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -42,6 +43,7 @@ export const listCashAdjustments = async (req: AuthRequest, res: Response) => {
 export const createCashAdjustment = async (req: AuthRequest, res: Response) => {
   const userId = req.userId!;
   const accountId = parseInt(req.params.id, 10);
+  if (!(await ensureActiveEntity('accounts', accountId, userId, res))) return;
   const { amountDelta, currency, reason, countedTotal } = req.body;
 
   if (amountDelta == null || !currency) {

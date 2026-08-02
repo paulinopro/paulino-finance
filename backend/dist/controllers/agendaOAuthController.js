@@ -8,7 +8,7 @@ exports.googleCalendarSetDefault = googleCalendarSetDefault;
 const agendaGoogleOAuthService_1 = require("../services/agendaGoogleOAuthService");
 const jwt_1 = require("../utils/jwt");
 async function googleCalendarOAuthCallbackPublic(req, res) {
-    const base = `${(0, agendaGoogleOAuthService_1.agendaFrontendBaseUrl)().replace(/\/+$/, '')}/agenda`;
+    const base = `${(0, agendaGoogleOAuthService_1.agendaFrontendBaseUrl)().replace(/\/+$/, '')}/settings`;
     try {
         const oauthErr = typeof req.query.error === 'string' ? req.query.error : '';
         if (oauthErr) {

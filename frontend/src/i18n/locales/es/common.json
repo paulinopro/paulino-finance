@@ -68,6 +68,15 @@
   "offlineBanner": {
     "message": "Sin conexión. Los datos pueden no cargarse hasta que vuelvas a estar en línea."
   },
+  "activation": {
+    "active": "Activo",
+    "inactive": "Inactivo",
+    "enableEntity": "Habilitar {{entity}}",
+    "disableEntity": "Deshabilitar {{entity}}",
+    "enabled": "Registro habilitado",
+    "disabled": "Registro deshabilitado",
+    "error": "No se pudo cambiar el estado"
+  },
   "iconSelect": {
     "searchPlaceholder": "Buscar ícono (ej. Wallet, Zap, Home)…",
     "loading": "Cargando íconos…",
