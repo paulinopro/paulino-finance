@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateIncomeReceiptStatus = exports.deleteIncome = exports.updateIncome = exports.createIncome = exports.getIncomeItem = exports.getIncome = void 0;
 const activeEntityGuard_1 = require("./activeEntityGuard");
+const entityActivation_1 = require("../services/entityActivation");
+const financialEntityMutation_1 = require("../services/financialEntityMutation");
 const database_1 = require("../config/database");
 const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
@@ -435,12 +437,30 @@ const updateIncome = async (req, res) => {
     const incomeId = parseInt(req.params.id);
     const { description, amount, currency, frequency, receiptDay, date } = req.body;
     const oldResult = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received,
-            recurrence_start_date, recurrence_end_date
+            is_active, recurrence_start_date, recurrence_end_date
      FROM income WHERE id = $1 AND user_id = $2`, [incomeId, userId]);
     if (oldResult.rows.length === 0) {
         return res.status(404).json({ message: 'Income item not found' });
     }
     const old = oldResult.rows[0];
+    const financialUpdate = (0, financialEntityMutation_1.financialEntityUpdateRequiresActive)('income', req.body);
+    if (!financialUpdate) {
+        const descriptive = await (0, database_1.query)(`UPDATE income SET description = COALESCE($1, description), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND user_id = $3
+       RETURNING id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`, [description, incomeId, userId]);
+        const row = descriptive.rows[0];
+        await (0, accountsPaymentLinkSync_1.syncReceivablePaymentFromIncome)(userId, incomeId);
+        return res.json({ success: true, message: 'Income updated successfully', income: {
+                id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+                nature: row.nature, recurrenceType: row.recurrence_type, frequency: row.frequency,
+                receiptDay: row.receipt_day, date: row.date, bankAccountId: row.bank_account_id ?? null,
+                isReceived: Boolean(row.is_received), createdAt: row.created_at, updatedAt: row.updated_at,
+            } });
+    }
+    if (old.is_active !== true) {
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('income', incomeId, userId, res)))
+            return;
+    }
     const receivableErr = await (0, accountsPaymentLinkSync_1.validateIncomeUpdateForLinkedReceivable)(userId, incomeId, {
         amount,
         currency,
@@ -522,6 +542,11 @@ const updateIncome = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
+        const active = await (0, entityActivation_1.requireEntityActiveForUpdate)('income', incomeId, userId, (sql, params) => client.query(sql, params));
+        if (active === false) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Income item not found' });
+        }
         if (old.bank_account_id && old.is_received) {
             await (0, accountBalance_1.applyBalanceDelta)(userId, old.bank_account_id, old.currency, -parseFloat(old.amount), client, { description: `Reversión: «${old.description}»` });
         }
@@ -712,6 +737,11 @@ const updateIncomeReceiptStatus = async (req, res) => {
         const client = await (0, database_1.getClient)();
         try {
             await client.query('BEGIN');
+            const active = await (0, entityActivation_1.requireEntityActiveForUpdate)('income', incomeId, userId, (sql, params) => client.query(sql, params));
+            if (active === false) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ message: 'Income item not found' });
+            }
             if (!monthlyRec) {
                 if (row.bank_account_id) {
                     const amt = parseFloat(String(row.amount));

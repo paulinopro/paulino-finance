@@ -57,6 +57,21 @@ describe('iCloud Agenda outbound failure propagation', () => {
 
   afterEach(() => warnSpy.mockRestore());
 
+  it('rejects when a configured iCloud connection cannot load a push client', async () => {
+    mockFetchAgendaItem.mockResolvedValue(agendaItem);
+    mockLoadPush.mockResolvedValue(null);
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM agenda_provider_connections')) {
+        return { rows: [{ id: 22, status: 'ERROR', last_error: 'iCloud credentials unavailable' }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(syncAgendaItemToICloudCalDav(7, 41)).rejects.toThrow(
+      'iCloud credentials unavailable'
+    );
+  });
+
   it('rejects when an event push fails after recording the provider error', async () => {
     mockFetchAgendaItem.mockResolvedValue(agendaItem);
     mockQuery.mockResolvedValue({ rows: [] });

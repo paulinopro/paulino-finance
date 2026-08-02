@@ -1,4 +1,6 @@
 import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
+import { requireEntityActiveForUpdate } from '../services/entityActivation';
+import { financialEntityUpdateRequiresActive } from '../services/financialEntityMutation';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -523,7 +525,7 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
 
   const oldResult = await query(
     `SELECT id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received,
-            recurrence_start_date, recurrence_end_date
+            is_active, recurrence_start_date, recurrence_end_date
      FROM income WHERE id = $1 AND user_id = $2`,
     [incomeId, userId]
   );
@@ -533,6 +535,26 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   }
 
   const old = oldResult.rows[0];
+  const financialUpdate = financialEntityUpdateRequiresActive('income', req.body);
+  if (!financialUpdate) {
+    const descriptive = await query(
+      `UPDATE income SET description = COALESCE($1, description), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND user_id = $3
+       RETURNING id, description, amount, currency, nature, recurrence_type, frequency, receipt_day, date, bank_account_id, is_received, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
+      [description, incomeId, userId]
+    );
+    const row = descriptive.rows[0];
+    await syncReceivablePaymentFromIncome(userId, incomeId);
+    return res.json({ success: true, message: 'Income updated successfully', income: {
+      id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+      nature: row.nature, recurrenceType: row.recurrence_type, frequency: row.frequency,
+      receiptDay: row.receipt_day, date: row.date, bankAccountId: row.bank_account_id ?? null,
+      isReceived: Boolean(row.is_received), createdAt: row.created_at, updatedAt: row.updated_at,
+    } });
+  }
+  if (old.is_active !== true) {
+    if (!(await ensureActiveEntity('income', incomeId, userId, res))) return;
+  }
   const receivableErr = await validateIncomeUpdateForLinkedReceivable(userId, incomeId, {
     amount,
     currency,
@@ -631,6 +653,16 @@ export const updateIncome = async (req: AuthRequest, res: Response) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');
+    const active = await requireEntityActiveForUpdate(
+      'income',
+      incomeId,
+      userId,
+      (sql, params) => client.query(sql, params)
+    );
+    if (active === false) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Income item not found' });
+    }
 
     if (old.bank_account_id && old.is_received) {
       await applyBalanceDelta(
@@ -870,6 +902,16 @@ export const updateIncomeReceiptStatus = async (req: AuthRequest, res: Response)
     const client = await getClient();
     try {
       await client.query('BEGIN');
+    const active = await requireEntityActiveForUpdate(
+      'income',
+      incomeId,
+      userId,
+      (sql, params) => client.query(sql, params)
+    );
+    if (active === false) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Income item not found' });
+    }
 
       if (!monthlyRec) {
         if (row.bank_account_id) {

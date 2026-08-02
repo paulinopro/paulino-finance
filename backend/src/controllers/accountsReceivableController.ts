@@ -1,4 +1,5 @@
 import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
+import { InactiveEntityError } from '../services/entityActivation';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -137,111 +138,122 @@ export const addAccountReceivablePayment = async (req: AuthRequest, res: Respons
       return res.status(400).json({ message: 'amount must be greater than zero' });
     }
 
-    const accountResult = await query(
-      `SELECT id, description, amount, currency, category, status
-       FROM accounts_receivable
-       WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Account receivable not found' });
-    }
-
-    const account = accountResult.rows[0];
-
-    if (account.status === 'RECEIVED') {
-      return res.status(400).json({ message: 'Account receivable is already received' });
-    }
-
-    const totalReceived = await getTotalReceivedReceivable(Number(id));
-    const totalDue = roundMoney(parseFloat(account.amount));
-    const remaining = roundMoney(totalDue - totalReceived);
-
-    if (remaining <= 0) {
-      return res.status(400).json({ message: 'No remaining balance' });
-    }
-
-    if (payAmount > remaining + 0.005) {
-      return res.status(400).json({ message: `Amount exceeds remaining balance (${remaining})` });
-    }
-
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
+    const client = await getClient();
 
-    const incomeResult = await query(
-      `INSERT INTO income (user_id, description, amount, currency, nature, recurrence_type, frequency, date, bank_account_id, is_received)
-       VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true)
-       RETURNING id`,
-      [userId, `Abono: ${account.description}`, payAmount, account.currency, paymentDate, bankAccountId]
-    );
+    try {
+      await client.query('BEGIN');
 
-    const incomeId = incomeResult.rows[0].id;
+      const accountResult = await client.query(
+        `SELECT id, description, amount, currency, category, status, is_active
+         FROM accounts_receivable
+         WHERE id = $1 AND user_id = $2
+         FOR UPDATE`,
+        [id, userId]
+      );
 
-    if (bankAccountId) {
-      try {
-        await applyBalanceDelta(userId, bankAccountId, account.currency, payAmount, undefined, {
+      if (accountResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Account receivable not found' });
+      }
+
+      const account = accountResult.rows[0];
+      if (account.is_active !== true) {
+        throw new InactiveEntityError();
+      }
+      if (account.status === 'RECEIVED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Account receivable is already received' });
+      }
+
+      const totalResult = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM accounts_receivable_payments
+         WHERE account_receivable_id = $1 AND user_id = $2`,
+        [id, userId]
+      );
+      const totalReceived = roundMoney(parseFloat(totalResult.rows[0].total));
+      const totalDue = roundMoney(parseFloat(account.amount));
+      const remaining = roundMoney(totalDue - totalReceived);
+
+      if (remaining <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'No remaining balance' });
+      }
+      if (payAmount > remaining + 0.005) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: `Amount exceeds remaining balance (${remaining})` });
+      }
+
+      const incomeResult = await client.query(
+        `INSERT INTO income (user_id, description, amount, currency, nature, recurrence_type, frequency, date, bank_account_id, is_received)
+         VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true)
+         RETURNING id`,
+        [userId, `Abono: ${account.description}`, payAmount, account.currency, paymentDate, bankAccountId]
+      );
+      const incomeId = incomeResult.rows[0].id;
+
+      if (bankAccountId) {
+        await applyBalanceDelta(userId, bankAccountId, account.currency, payAmount, client, {
           description: `[CxC] Abono por cobrar · «${account.description}»`,
         });
-      } catch (e: any) {
-        await query('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
-        throw e;
       }
-    }
 
-    await query(
-      `INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, payAmount, paymentDate, incomeId]
-    );
-
-    const newTotal = roundMoney(totalReceived + payAmount);
-
-    if (newTotal >= totalDue - 0.005) {
-      await query(
-        `UPDATE accounts_receivable
-         SET status = 'RECEIVED',
-             received_date = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND user_id = $3`,
-        [paymentDate, id, userId]
+      await client.query(
+        `INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, userId, payAmount, paymentDate, incomeId]
       );
-    }
 
-    const totalReceivedAfter = await getTotalReceivedReceivable(Number(id));
+      const totalReceivedAfter = roundMoney(totalReceived + payAmount);
+      const isReceived = totalReceivedAfter >= totalDue - 0.005;
+      const rowResult = await client.query(
+        `UPDATE accounts_receivable
+         SET status = $1,
+             received_date = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4 AND is_active = TRUE
+         RETURNING id, description, amount, currency, due_date, status, category, notes, received_date, created_at, updated_at`,
+        [isReceived ? 'RECEIVED' : 'PENDING', isReceived ? paymentDate : null, id, userId]
+      );
+      if (rowResult.rows.length === 0) {
+        throw new InactiveEntityError();
+      }
 
-    const rowResult = await query(
-      `SELECT id, description, amount, currency, due_date, status, category, notes, received_date, created_at, updated_at
-       FROM accounts_receivable WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-    const ar = rowResult.rows[0];
+      await client.query('COMMIT');
+      const ar = rowResult.rows[0];
 
-    res.status(201).json({
-      success: true,
-      message: 'Payment recorded',
-      totalReceived: totalReceivedAfter,
-      accountReceivable: {
-        id: ar.id,
-        description: ar.description,
-        amount: parseFloat(ar.amount),
-        currency: ar.currency,
-        dueDate: ar.due_date,
-        status: ar.status,
-        category: ar.category,
-        notes: ar.notes,
-        receivedDate: ar.received_date,
+      res.status(201).json({
+        success: true,
+        message: 'Payment recorded',
         totalReceived: totalReceivedAfter,
-        createdAt: ar.created_at,
-        updatedAt: ar.updated_at,
-      },
-    });
+        accountReceivable: {
+          id: ar.id,
+          description: ar.description,
+          amount: parseFloat(ar.amount),
+          currency: ar.currency,
+          dueDate: ar.due_date,
+          status: ar.status,
+          category: ar.category,
+          notes: ar.notes,
+          receivedDate: ar.received_date,
+          totalReceived: totalReceivedAfter,
+          createdAt: ar.created_at,
+          updatedAt: ar.updated_at,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error: any) {
     if (respondInactiveEntityError(error, res)) return;
     console.error('Add account receivable payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
   }
 };
-
 export const updateAccountReceivablePayment = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -603,104 +615,123 @@ export const receiveAccountReceivable = async (req: AuthRequest, res: Response) 
       return res.status(400).json({ message: 'paymentDate is required (YYYY-MM-DD)' });
     }
 
-    const accountResult = await query(
-      `SELECT id, description, amount, currency, category, status
-       FROM accounts_receivable
-       WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Account receivable not found' });
-    }
-
-    const account = accountResult.rows[0];
-
-    if (account.status === 'RECEIVED') {
-      return res.status(400).json({ message: 'Account receivable is already received' });
-    }
-
-    const totalReceived = await getTotalReceivedReceivable(Number(id));
-    const totalDue = roundMoney(parseFloat(account.amount));
-    const remaining = roundMoney(totalDue - totalReceived);
-
-    if (remaining <= 0) {
-      return res.status(400).json({ message: 'No remaining balance' });
-    }
-
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
+    const client = await getClient();
 
-    const incomeResult = await query(
-      `INSERT INTO income (user_id, description, amount, currency, nature, recurrence_type, frequency, date, bank_account_id, is_received)
-       VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true)
-       RETURNING id`,
-      [
-        userId,
-        `Cobro: ${account.description}`,
-        remaining,
-        account.currency,
-        dateStr,
-        bankAccountId,
-      ]
-    );
+    try {
+      await client.query('BEGIN');
 
-    const incomeId = incomeResult.rows[0].id;
+      const accountResult = await client.query(
+        `SELECT id, description, amount, currency, category, status, is_active
+         FROM accounts_receivable
+         WHERE id = $1 AND user_id = $2
+         FOR UPDATE`,
+        [id, userId]
+      );
 
-    if (bankAccountId) {
-      try {
-        await applyBalanceDelta(userId, bankAccountId, account.currency, remaining, undefined, {
+      if (accountResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Account receivable not found' });
+      }
+
+      const account = accountResult.rows[0];
+      if (account.is_active !== true) {
+        throw new InactiveEntityError();
+      }
+      if (account.status === 'RECEIVED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Account receivable is already received' });
+      }
+
+      const totalResult = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM accounts_receivable_payments
+         WHERE account_receivable_id = $1 AND user_id = $2`,
+        [id, userId]
+      );
+      const totalReceived = roundMoney(parseFloat(totalResult.rows[0].total));
+      const totalDue = roundMoney(parseFloat(account.amount));
+      const remaining = roundMoney(totalDue - totalReceived);
+
+      if (remaining <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'No remaining balance' });
+      }
+
+      const incomeResult = await client.query(
+        `INSERT INTO income (user_id, description, amount, currency, nature, recurrence_type, frequency, date, bank_account_id, is_received)
+         VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true)
+         RETURNING id`,
+        [
+          userId,
+          `Cobro: ${account.description}`,
+          remaining,
+          account.currency,
+          dateStr,
+          bankAccountId,
+        ]
+      );
+      const incomeId = incomeResult.rows[0].id;
+
+      if (bankAccountId) {
+        await applyBalanceDelta(userId, bankAccountId, account.currency, remaining, client, {
           description: `[CxC] Cobro total por cobrar · «${account.description}»`,
         });
-      } catch (e: any) {
-        await query('DELETE FROM income WHERE id = $1 AND user_id = $2', [incomeId, userId]);
-        throw e;
       }
+
+      await client.query(
+        `INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, userId, remaining, dateStr, incomeId]
+      );
+
+      const updateResult = await client.query(
+        `UPDATE accounts_receivable
+         SET status = 'RECEIVED',
+             received_date = $1,
+             notes = COALESCE($2, notes),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4 AND is_active = TRUE
+         RETURNING id, description, amount, currency, due_date, status, category, notes, received_date, created_at, updated_at`,
+        [dateStr, notes ?? null, id, userId]
+      );
+      if (updateResult.rows.length === 0) {
+        throw new InactiveEntityError();
+      }
+
+      await client.query('COMMIT');
+      const totalReceivedAfter = roundMoney(totalReceived + remaining);
+
+      res.json({
+        success: true,
+        message: 'Account receivable marked as received and added to income',
+        accountReceivable: {
+          id: updateResult.rows[0].id,
+          description: updateResult.rows[0].description,
+          amount: parseFloat(updateResult.rows[0].amount),
+          currency: updateResult.rows[0].currency,
+          dueDate: updateResult.rows[0].due_date,
+          status: updateResult.rows[0].status,
+          category: updateResult.rows[0].category,
+          notes: updateResult.rows[0].notes,
+          receivedDate: updateResult.rows[0].received_date,
+          totalReceived: totalReceivedAfter,
+          createdAt: updateResult.rows[0].created_at,
+          updatedAt: updateResult.rows[0].updated_at,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-
-    await query(
-      `INSERT INTO accounts_receivable_payments (account_receivable_id, user_id, amount, payment_date, income_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, remaining, dateStr, incomeId]
-    );
-
-    const updateResult = await query(
-      `UPDATE accounts_receivable
-       SET status = 'RECEIVED',
-           received_date = $1,
-           notes = COALESCE($2, notes),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3 AND user_id = $4
-       RETURNING id, description, amount, currency, due_date, status, category, notes, received_date, created_at, updated_at`,
-      [dateStr, notes ?? null, id, userId]
-    );
-
-    const totalReceivedAfter = await getTotalReceivedReceivable(Number(id));
-
-    res.json({
-      success: true,
-      message: 'Account receivable marked as received and added to income',
-      accountReceivable: {
-        id: updateResult.rows[0].id,
-        description: updateResult.rows[0].description,
-        amount: parseFloat(updateResult.rows[0].amount),
-        currency: updateResult.rows[0].currency,
-        dueDate: updateResult.rows[0].due_date,
-        status: updateResult.rows[0].status,
-        category: updateResult.rows[0].category,
-        notes: updateResult.rows[0].notes,
-        receivedDate: updateResult.rows[0].received_date,
-        totalReceived: totalReceivedAfter,
-        createdAt: updateResult.rows[0].created_at,
-        updatedAt: updateResult.rows[0].updated_at,
-      },
-    });
   } catch (error: any) {
     if (respondInactiveEntityError(error, res)) return;
     console.error('Receive account receivable error:', error);
     res.status(500).json({ message: 'Error receiving account receivable', error: error.message });
   }
 };
-
 export const deleteAccountReceivable = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;

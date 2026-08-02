@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateExpensePaymentStatus = exports.deleteExpense = exports.updateExpense = exports.createExpense = exports.getExpense = exports.getExpenses = void 0;
 const activeEntityGuard_1 = require("./activeEntityGuard");
+const entityActivation_1 = require("../services/entityActivation");
+const financialEntityMutation_1 = require("../services/financialEntityMutation");
 const database_1 = require("../config/database");
 const userCurrencyConversion_1 = require("../services/userCurrencyConversion");
 const accountBalance_1 = require("../services/accountBalance");
@@ -469,7 +471,7 @@ const updateExpense = async (req, res) => {
     const expenseId = parseInt(req.params.id);
     const { description, amount, currency, category, paymentDay, paymentMonth, date, isPaid } = req.body;
     const oldResult = await (0, database_1.query)(`SELECT id, description, amount, currency, nature, recurrence_type, frequency, category,
-            payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date
+            payment_day, payment_month, date, is_paid, bank_account_id, is_active, recurrence_start_date, recurrence_end_date
      FROM expenses WHERE id = $1 AND user_id = $2`, [expenseId, userId]);
     if (oldResult.rows.length === 0) {
         return res.status(404).json({ message: 'Expense not found' });
@@ -482,6 +484,44 @@ const updateExpense = async (req, res) => {
         return res.status(400).json({ message: payableErr });
     }
     const old = oldResult.rows[0];
+    const financialUpdate = (0, financialEntityMutation_1.financialEntityUpdateRequiresActive)('expenses', req.body);
+    if (!financialUpdate) {
+        const descriptive = await (0, database_1.query)(`UPDATE expenses SET description = COALESCE($1, description), category = COALESCE($2, category), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 AND user_id = $4
+       RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at`, [description, category, expenseId, userId]);
+        const row = descriptive.rows[0];
+        const linkedClient = await (0, database_1.getClient)();
+        try {
+            await linkedClient.query('BEGIN');
+            await (0, vehicleExpenseLinkSync_1.syncVehicleExpenseFromLinkedExpense)(linkedClient, userId, expenseId, {
+                description: String(row.description),
+                amount: parseFloat(row.amount),
+                currency: String(row.currency),
+                category: row.category != null ? String(row.category) : null,
+                date: row.date != null ? String(row.date).slice(0, 10) : null,
+                bankAccountId: row.bank_account_id ?? null,
+            });
+            await linkedClient.query('COMMIT');
+        }
+        catch (error) {
+            await linkedClient.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            linkedClient.release();
+        }
+        await (0, accountsPaymentLinkSync_1.syncPayablePaymentFromExpense)(userId, expenseId);
+        return res.json({ success: true, message: 'Expense updated successfully', expense: {
+                id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+                nature: row.nature, recurrenceType: row.recurrence_type, frequency: row.frequency, category: row.category,
+                paymentDay: row.payment_day, paymentMonth: row.payment_month, date: row.date, isPaid: row.is_paid,
+                bankAccountId: row.bank_account_id ?? null, createdAt: row.created_at, updatedAt: row.updated_at,
+            } });
+    }
+    if (old.is_active !== true) {
+        if (!(await (0, activeEntityGuard_1.ensureActiveEntity)('expenses', expenseId, userId, res)))
+            return;
+    }
     const body = req.body;
     const merged = {
         nature: body.nature !== undefined ? body.nature : old.nature,
@@ -541,6 +581,11 @@ const updateExpense = async (req, res) => {
     const client = await (0, database_1.getClient)();
     try {
         await client.query('BEGIN');
+        const active = await (0, entityActivation_1.requireEntityActiveForUpdate)('expenses', expenseId, userId, (sql, params) => client.query(sql, params));
+        if (active === false) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Expense not found' });
+        }
         if ((0, incomeExpenseTaxonomy_1.expenseUsesImmediateBalance)({
             recurrence_type: old.recurrence_type,
             frequency: old.frequency,
@@ -741,6 +786,11 @@ const updateExpensePaymentStatus = async (req, res) => {
             const client = await (0, database_1.getClient)();
             try {
                 await client.query('BEGIN');
+                const active = await (0, entityActivation_1.requireEntityActiveForUpdate)('expenses', expenseId, userId, (sql, params) => client.query(sql, params));
+                if (active === false) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Expense not found' });
+                }
                 if (isPaid) {
                     if (!alreadyMarkedPaidThisMonth) {
                         if (expense.nature === 'variable') {

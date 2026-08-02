@@ -1,6 +1,6 @@
 import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
 import { Response } from 'express';
-import { query } from '../config/database';
+import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import {
   generateAmortizationSchedule,
@@ -9,9 +9,11 @@ import {
 } from '../services/amortizationService';
 import { applyBalanceDelta } from '../services/accountBalance';
 import { amountToPrimary, getConversionContextForUser } from '../services/userCurrencyConversion';
+import { financialEntityUpdateRequiresActive } from '../services/financialEntityMutation';
 import { dateToYmdLocal } from '../utils/dateUtils';
 import { deleteCalendarEventsForRelated } from '../services/calendarService';
 import { getUserCurrencyPair, isCurrencyInUserPair } from '../utils/userCurrencyPair';
+import { InactiveEntityError } from '../services/entityActivation';
 
 function optionalBankAccountId(body: Record<string, unknown>): number | null {
   const v = body.bankAccountId;
@@ -438,12 +440,39 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     const checkResult = await query(
-      'SELECT id FROM loans WHERE id = $1 AND user_id = $2',
+      'SELECT id, is_active FROM loans WHERE id = $1 AND user_id = $2',
       [loanId, userId]
     );
 
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ message: 'Loan not found' });
+    }
+    const financialUpdate = financialEntityUpdateRequiresActive('loans', req.body);
+    if (financialUpdate && checkResult.rows[0].is_active !== true) {
+      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
+    }
+    if (!financialUpdate) {
+      const descriptive = await query(
+        `UPDATE loans
+         SET loan_name = COALESCE($1, loan_name), bank_name = COALESCE($2, bank_name), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4
+         RETURNING id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
+                   total_installments, paid_installments, start_date, end_date, installment_amount,
+                   fixed_charge, payment_day, next_payment_date, currency, status,
+                   interest_calculation_base, created_at, updated_at`,
+        [loanName, bankName, loanId, userId]
+      );
+      const row = descriptive.rows[0];
+      return res.json({ success: true, message: 'Loan updated successfully', loan: {
+        id: row.id, loanName: row.loan_name, bankName: row.bank_name,
+        totalAmount: parseFloat(row.total_amount), interestRate: parseFloat(row.interest_rate),
+        interestRateType: row.interest_rate_type, totalInstallments: row.total_installments,
+        paidInstallments: row.paid_installments, startDate: row.start_date, endDate: row.end_date,
+        installmentAmount: parseFloat(row.installment_amount), paymentDay: row.payment_day,
+        nextPaymentDate: row.next_payment_date, currency: row.currency, status: row.status,
+        interestCalculationBase: row.interest_calculation_base || 'ACTUAL_360',
+        createdAt: row.created_at, updatedAt: row.updated_at,
+      } });
     }
 
     const existingCurRow = await query(`SELECT currency FROM loans WHERE id = $1 AND user_id = $2`, [
@@ -513,6 +542,7 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
            interest_calculation_base = COALESCE($16, interest_calculation_base),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $17 AND user_id = $18
+         AND (is_active = TRUE OR $19::boolean = FALSE)
        RETURNING id, loan_name, bank_name, total_amount, interest_rate, interest_rate_type,
                  total_installments, paid_installments, start_date, end_date,
                  installment_amount, fixed_charge, payment_day, next_payment_date, currency, status, interest_calculation_base, created_at, updated_at`,
@@ -535,8 +565,14 @@ export const updateLoan = async (req: AuthRequest, res: Response) => {
         interestCalculationBase,
         loanId,
         userId,
+        financialUpdate,
       ]
     );
+
+    if (result.rows.length === 0) {
+      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
+      return res.status(404).json({ message: 'Loan not found' });
+    }
 
     const row = result.rows[0];
     res.json({
@@ -611,7 +647,7 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 
     // Verify loan exists and belongs to user
     const loanResult = await query(
-      `SELECT id, loan_name, paid_installments, total_installments, payment_day, currency
+      `SELECT id, loan_name, paid_installments, total_installments, payment_day, currency, is_active
        FROM loans WHERE id = $1 AND user_id = $2`,
       [loanId, userId]
     );
@@ -621,6 +657,9 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
     }
 
     const loan = loanResult.rows[0];
+    if (loan.is_active !== true) {
+      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
+    }
     const loanCurrency = String(loan.currency || 'DOP');
 
     // Process payment with amortization logic
@@ -684,12 +723,18 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 
     // Update loan
     const updateStatus = newPaidInstallments >= loan.total_installments ? 'PAID' : 'ACTIVE';
-    await query(
+    const loanUpdate = await query(
       `UPDATE loans
        SET paid_installments = $1, status = $2, next_payment_date = COALESCE($3, next_payment_date), updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [newPaidInstallments, updateStatus, nextPaymentDate, loanId]
+       WHERE id = $4 AND user_id = $5 AND is_active = TRUE
+       RETURNING id`,
+      [newPaidInstallments, updateStatus, nextPaymentDate, loanId, userId]
     );
+    if (loanUpdate.rows.length === 0) {
+      await query('DELETE FROM loan_payments WHERE id = $1', [newPaymentId]);
+      if (!(await ensureActiveEntity('loans', loanId, userId, res))) return;
+      return res.status(404).json({ message: 'Loan not found' });
+    }
 
     // Regenerate and save amortization schedule
     const updatedSchedule = await generateAmortizationSchedule(loanId, userId);
@@ -766,47 +811,77 @@ export const recordPayment = async (req: AuthRequest, res: Response) => {
 };
 
 export const deletePayment = async (req: AuthRequest, res: Response) => {
+  let client: Awaited<ReturnType<typeof getClient>> | null = null;
+  let transactionOpen = false;
+
   try {
     const userId = req.userId!;
     const paymentId = parseInt(req.params.paymentId);
+    client = await getClient();
+    await client.query('BEGIN');
+    transactionOpen = true;
 
-    const meta = await query(
-      `SELECT lp.amount, lp.bank_account_id, lp.installment_number, l.currency, l.loan_name, lp.loan_id
+    const meta = await client.query(
+      `SELECT lp.amount, lp.bank_account_id, lp.installment_number, lp.loan_id,
+              l.currency, l.loan_name, l.is_active, l.paid_installments, l.total_installments
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
-       WHERE lp.id = $1 AND l.user_id = $2`,
+       WHERE lp.id = $1 AND l.user_id = $2
+       FOR UPDATE OF l, lp`,
       [paymentId, userId]
     );
 
     if (meta.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
       return res.status(404).json({ message: 'Payment not found' });
     }
 
     const row = meta.rows[0];
+    if (row.is_active !== true) throw new InactiveEntityError();
+    const loanId = Number(row.loan_id);
+
     if (row.bank_account_id) {
-      try {
-        const loanNm = String(row.loan_name ?? '').trim() || `#${row.loan_id}`;
-        const instHint =
-          row.installment_number != null ? ` · Cuota ${row.installment_number}` : '';
-        await applyBalanceDelta(userId, row.bank_account_id, row.currency, parseFloat(row.amount), undefined, {
-          description: `[Préstamo «${loanNm}»] Eliminación de pago (reversión)${instHint}`,
-        });
-      } catch (e: any) {
-        console.error('Revert balance on loan payment delete:', e);
-      throw e;
-      }
+      const loanNm = String(row.loan_name ?? '').trim() || `#${row.loan_id}`;
+      const instHint = row.installment_number != null ? ` · Cuota ${row.installment_number}` : '';
+      await applyBalanceDelta(
+        userId,
+        row.bank_account_id,
+        row.currency,
+        parseFloat(row.amount),
+        client,
+        { description: `[Préstamo «${loanNm}»] Eliminación de pago (reversión)${instHint}` }
+      );
     }
 
-    await removeLoanPaymentById(paymentId, userId);
+    const newPaidInstallments = Math.max(0, row.paid_installments - 1);
+    const updateStatus = newPaidInstallments >= row.total_installments ? 'PAID' : 'ACTIVE';
+    await client.query('UPDATE amortization_schedule SET payment_id = NULL WHERE payment_id = $1', [paymentId]);
+    await client.query('DELETE FROM loan_payments WHERE id = $1', [paymentId]);
+    await client.query(
+      `UPDATE loans
+       SET paid_installments = $1, status = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 AND user_id = $4`,
+      [newPaidInstallments, updateStatus, loanId, userId]
+    );
 
-    res.json({
-      success: true,
-      message: 'Payment deleted successfully',
-    });
+    await client.query('COMMIT');
+    transactionOpen = false;
+
+    const updatedSchedule = await generateAmortizationSchedule(loanId, userId);
+    await saveAmortizationSchedule(loanId, updatedSchedule);
+
+    res.json({ success: true, message: 'Payment deleted successfully' });
   } catch (error: any) {
+    if (client && transactionOpen) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
+    }
     if (respondInactiveEntityError(error, res)) return;
     console.error('Delete payment error:', error);
     res.status(500).json({ message: 'Error deleting payment', error: error.message });
+  } finally {
+    client?.release();
   }
 };
 
@@ -885,30 +960,40 @@ export const getAmortizationSchedule = async (req: AuthRequest, res: Response) =
 
 // Update payment
 export const updatePayment = async (req: AuthRequest, res: Response) => {
+  let client: Awaited<ReturnType<typeof getClient>> | null = null;
+  let transactionOpen = false;
+
   try {
     const userId = req.userId!;
     const paymentId = parseInt(req.params.paymentId);
     const { paymentDate, amount, paymentType, notes } = req.body;
+    client = await getClient();
+    await client.query('BEGIN');
+    transactionOpen = true;
 
-    const oldQ = await query(
+    const oldQ = await client.query(
       `SELECT lp.id, lp.loan_id, lp.installment_number, lp.amount, lp.bank_account_id, lp.payment_date,
-              l.currency, l.loan_name
+              l.currency, l.loan_name, l.is_active
        FROM loan_payments lp
        INNER JOIN loans l ON lp.loan_id = l.id
-       WHERE lp.id = $1 AND l.user_id = $2`,
+       WHERE lp.id = $1 AND l.user_id = $2
+       FOR UPDATE OF l, lp`,
       [paymentId, userId]
     );
 
     if (oldQ.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
       return res.status(404).json({ message: 'Payment not found' });
     }
 
     const old = oldQ.rows[0];
+    if (old.is_active !== true) throw new InactiveEntityError();
+
     const loanId = old.loan_id;
     const loanCurrency = String(old.currency || 'DOP');
     const loanNmEdit = String(old.loan_name ?? '').trim() || `#${loanId}`;
     const newBankId = resolveBankAccountIdUpdate(req.body as Record<string, unknown>, old.bank_account_id);
-
     const effDate = paymentDate !== undefined && paymentDate !== null ? paymentDate : old.payment_date;
     const effAmt =
       amount !== undefined && amount !== null && amount !== ''
@@ -916,23 +1001,17 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
         : parseFloat(old.amount);
 
     if (old.bank_account_id) {
-      try {
-        const instHintOld =
-          old.installment_number != null ? ` · Cuota ${old.installment_number}` : '';
-        await applyBalanceDelta(
-          userId,
-          old.bank_account_id,
-          loanCurrency,
-          parseFloat(old.amount),
-          undefined,
-          {
-            description: `[Préstamo «${loanNmEdit}»] Edición de pago — reversión del cargo anterior${instHintOld}`,
-          }
-        );
-      } catch (e: any) {
-        console.error('Revert balance on loan payment update:', e);
-      throw e;
-      }
+      const instHintOld = old.installment_number != null ? ` · Cuota ${old.installment_number}` : '';
+      await applyBalanceDelta(
+        userId,
+        old.bank_account_id,
+        loanCurrency,
+        parseFloat(old.amount),
+        client,
+        {
+          description: `[Préstamo «${loanNmEdit}»] Edición de pago — reversión del cargo anterior${instHintOld}`,
+        }
+      );
     }
 
     const paymentDistribution = await processPayment(
@@ -942,7 +1021,7 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
       (paymentType || 'COMPLETE') as 'COMPLETE' | 'PARTIAL' | 'ADVANCE' | 'INTEREST'
     );
 
-    const updateResult = await query(
+    const updateResult = await client.query(
       `UPDATE loan_payments
        SET payment_date = $1,
            amount = $2,
@@ -974,30 +1053,21 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    if (newBankId) {
+      const instHintAfter =
+        paymentDistribution.installmentNumber != null
+          ? ` · Cuota ${paymentDistribution.installmentNumber}`
+          : '';
+      await applyBalanceDelta(userId, newBankId, loanCurrency, -effAmt, client, {
+        description: `[Préstamo «${loanNmEdit}»] Edición de pago — nuevo cargo${instHintAfter}`,
+      });
+    }
+
+    await client.query('COMMIT');
+    transactionOpen = false;
+
     const updatedSchedule = await generateAmortizationSchedule(loanId, userId);
     await saveAmortizationSchedule(loanId, updatedSchedule);
-
-    if (newBankId) {
-      try {
-        const instHintAfter =
-          paymentDistribution.installmentNumber != null
-            ? ` · Cuota ${paymentDistribution.installmentNumber}`
-            : '';
-        await applyBalanceDelta(userId, newBankId, loanCurrency, -effAmt, undefined, {
-          description: `[Préstamo «${loanNmEdit}»] Edición de pago — nuevo cargo${instHintAfter}`,
-        });
-      } catch (e: any) {
-        if (e.message === 'ACCOUNT_NOT_FOUND' || e.message === 'CURRENCY_MISMATCH') {
-          return res.status(400).json({
-            message:
-              e.message === 'CURRENCY_MISMATCH'
-                ? 'La moneda de la cuenta no coincide con la moneda del préstamo'
-                : 'Cuenta no encontrada',
-          });
-        }
-        throw e;
-      }
-    }
 
     res.json({
       success: true,
@@ -1014,13 +1084,28 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
         outstandingBalance: parseFloat(updateResult.rows[0].outstanding_balance),
         paymentType: updateResult.rows[0].payment_type,
         notes: updateResult.rows[0].notes,
-        bankAccountId: updateResult.rows[0].bank_account_id != null ? updateResult.rows[0].bank_account_id : null,
+        bankAccountId:
+          updateResult.rows[0].bank_account_id != null ? updateResult.rows[0].bank_account_id : null,
         updatedAt: updateResult.rows[0].updated_at,
       },
     });
   } catch (error: any) {
+    if (client && transactionOpen) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
+    }
     if (respondInactiveEntityError(error, res)) return;
+    if (error.message === 'ACCOUNT_NOT_FOUND' || error.message === 'CURRENCY_MISMATCH') {
+      return res.status(400).json({
+        message:
+          error.message === 'CURRENCY_MISMATCH'
+            ? 'La moneda de la cuenta no coincide con la moneda del préstamo'
+            : 'Cuenta no encontrada',
+      });
+    }
     console.error('Update payment error:', error);
     res.status(500).json({ message: 'Error updating payment', error: error.message });
+  } finally {
+    client?.release();
   }
 };

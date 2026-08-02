@@ -63,3 +63,22 @@ export async function requireEntityActive(
   if (!row) return false;
   if (row.is_active !== true) throw new InactiveEntityError();
 }
+
+export async function requireEntityActiveForUpdate(
+  entity: ActivatableEntity,
+  id: number,
+  userId: number,
+  executor: ActivationQueryExecutor = defaultExecutor
+): Promise<void | false> {
+  const table = ENTITY_TABLES[entity];
+  const result = await executor(
+    `SELECT is_active
+     FROM ${table}
+     WHERE id = $1 AND user_id = $2
+     FOR UPDATE`,
+    [id, userId]
+  );
+  const row = result.rows[0];
+  if (!row) return false;
+  if (row.is_active !== true) throw new InactiveEntityError();
+}

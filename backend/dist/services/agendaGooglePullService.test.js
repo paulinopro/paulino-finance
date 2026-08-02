@@ -95,5 +95,50 @@ describe('Google Agenda pull pagination', () => {
         }));
         expect(mockRecordGoogleError).not.toHaveBeenCalled();
     });
+    it('emits a tombstone for a mapped cancellation stub without start data', async () => {
+        mockQuery.mockImplementation(async (sql) => {
+            if (sql.includes('SELECT sync_token'))
+                return { rows: [{ sync_token: 'current-token' }] };
+            if (sql.includes('FROM agenda_item_sync_state s') && sql.includes('INNER JOIN agenda_items')) {
+                return {
+                    rows: [
+                        {
+                            title: 'Cancelled meeting',
+                            description: 'Stored locally',
+                            location: null,
+                            starts_at: new Date('2026-05-10T14:00:00.000Z'),
+                            ends_at: new Date('2026-05-10T15:00:00.000Z'),
+                            all_day: false,
+                            recurrence_rule: null,
+                        },
+                    ],
+                };
+            }
+            return { rows: [] };
+        });
+        mockList.mockResolvedValue({
+            data: {
+                items: [
+                    {
+                        id: 'cancelled-event',
+                        status: 'cancelled',
+                        updated: '2026-05-11T12:00:00.000Z',
+                    },
+                ],
+                nextSyncToken: 'next-token',
+            },
+        });
+        const result = await pullGoogleAgendaEvents(7, {
+            fromIso: '2026-05-01T00:00:00.000Z',
+            toIso: '2026-06-01T00:00:00.000Z',
+        });
+        expect(result.events).toHaveLength(1);
+        expect(result.events[0]).toMatchObject({
+            externalUid: 'cancelled-event',
+            startsAt: '2026-05-10T14:00:00.000Z',
+            deleted: true,
+            status: 'CANCELLED',
+        });
+    });
 });
 //# sourceMappingURL=agendaGooglePullService.test.js.map

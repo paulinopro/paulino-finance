@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.InactiveEntityError = void 0;
 exports.setEntityActiveStatus = setEntityActiveStatus;
 exports.requireEntityActive = requireEntityActive;
+exports.requireEntityActiveForUpdate = requireEntityActiveForUpdate;
 const database_1 = require("../config/database");
 const ENTITY_TABLES = {
     accounts: 'bank_accounts',
@@ -34,6 +35,18 @@ async function setEntityActiveStatus(entity, id, userId, isActive, executor = de
 async function requireEntityActive(entity, id, userId, executor = defaultExecutor) {
     const table = ENTITY_TABLES[entity];
     const result = await executor(`SELECT is_active FROM ${table} WHERE id = $1 AND user_id = $2`, [id, userId]);
+    const row = result.rows[0];
+    if (!row)
+        return false;
+    if (row.is_active !== true)
+        throw new InactiveEntityError();
+}
+async function requireEntityActiveForUpdate(entity, id, userId, executor = defaultExecutor) {
+    const table = ENTITY_TABLES[entity];
+    const result = await executor(`SELECT is_active
+     FROM ${table}
+     WHERE id = $1 AND user_id = $2
+     FOR UPDATE`, [id, userId]);
     const row = result.rows[0];
     if (!row)
         return false;

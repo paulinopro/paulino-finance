@@ -204,13 +204,36 @@ async function flagICloudSyncSqlError(connectionId, agendaItemId, message) {
     WHERE connection_id = $1 AND agenda_item_id = $2
     `, [connectionId, agendaItemId, message.slice(0, 750)]);
 }
+async function configuredICloudConnection(userId) {
+    const res = await (0, database_1.query)(`
+    SELECT id, status, last_error
+    FROM agenda_provider_connections
+    WHERE user_id = $1 AND provider = $2 AND status IN ('CONNECTED','ERROR')
+    LIMIT 1
+    `, [userId, PROVIDER_ICLOUD]);
+    const row = res.rows[0];
+    if (!row)
+        return null;
+    return {
+        id: row.id,
+        status: row.status,
+        lastError: typeof row.last_error === 'string' && row.last_error.trim() ? row.last_error : null,
+    };
+}
 async function syncAgendaItemToICloudCalDav(userId, agendaItemId) {
     const row = await (0, agendaService_1.fetchAgendaItemRow)(userId, agendaItemId);
     if (!row || !row.sync_to_external)
         return;
     const loaded = await (0, agendaICloudCaldavService_1.loadICloudDavClientForPush)(userId);
-    if (!loaded)
-        return;
+    if (!loaded) {
+        const configured = await configuredICloudConnection(userId);
+        if (!configured)
+            return;
+        const message = configured.lastError || 'La conexión de iCloud está configurada pero no está disponible';
+        await (0, agendaICloudCaldavService_1.recordICloudConnectionError)(userId, message);
+        await flagICloudSyncSqlError(configured.id, agendaItemId, message).catch(() => undefined);
+        throw new Error(message);
+    }
     const { client, connectionId, calendar } = loaded;
     const icsBody = agendaItemToIcsString(row, userId);
     const filename = icsCalendarFilename(userId, agendaItemId);
@@ -265,15 +288,24 @@ async function syncAgendaItemToICloudCalDav(userId, agendaItemId) {
 async function removeAgendaItemFromICloudCalDav(userId, agendaItemId) {
     const loaded = await (0, agendaICloudCaldavService_1.loadICloudDavClientForMaintenance)(userId);
     const res = await (0, database_1.query)(`
-    SELECT s.external_uid, s.etag
+    SELECT s.connection_id, s.external_uid, s.etag, c.last_error
     FROM agenda_item_sync_state s
     INNER JOIN agenda_provider_connections c ON c.id = s.connection_id
     WHERE s.agenda_item_id = $1
       AND c.user_id = $2
       AND c.provider = $3
     `, [agendaItemId, userId, PROVIDER_ICLOUD]);
-    if (res.rows.length === 0 || !loaded)
+    if (res.rows.length === 0)
         return;
+    if (!loaded) {
+        const first = res.rows[0];
+        const message = typeof first.last_error === 'string' && first.last_error.trim()
+            ? first.last_error
+            : 'La conexión de iCloud está configurada pero no está disponible';
+        await (0, agendaICloudCaldavService_1.recordICloudConnectionError)(userId, message);
+        await flagICloudSyncSqlError(first.connection_id, agendaItemId, message).catch(() => undefined);
+        throw new Error(message);
+    }
     const failures = [];
     for (const r of res.rows) {
         if (!r.external_uid)

@@ -1,4 +1,5 @@
 import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
+import { InactiveEntityError } from '../services/entityActivation';
 import { Response } from 'express';
 import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
@@ -137,120 +138,130 @@ export const addAccountPayablePayment = async (req: AuthRequest, res: Response) 
       return res.status(400).json({ message: 'amount must be greater than zero' });
     }
 
-    const accountResult = await query(
-      `SELECT id, description, amount, currency, category, status
-       FROM accounts_payable
-       WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Account payable not found' });
-    }
-
-    const account = accountResult.rows[0];
-
-    if (account.status === 'PAID') {
-      return res.status(400).json({ message: 'Account payable is already paid' });
-    }
-
-    const totalPaid = await getTotalPaidPayable(Number(id));
-    const totalDue = roundMoney(parseFloat(account.amount));
-    const remaining = roundMoney(totalDue - totalPaid);
-
-    if (remaining <= 0) {
-      return res.status(400).json({ message: 'No remaining balance' });
-    }
-
-    if (payAmount > remaining + 0.005) {
-      return res.status(400).json({ message: `Amount exceeds remaining balance (${remaining})` });
-    }
-
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
+    const client = await getClient();
 
-    const expenseResult = await query(
-      `INSERT INTO expenses (user_id, description, amount, currency, nature, recurrence_type, frequency, category, date, is_paid, bank_account_id)
-       VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true, $7)
-       RETURNING id`,
-      [
-        userId,
-        `Abono: ${account.description}`,
-        payAmount,
-        account.currency,
-        account.category || 'Cuentas por Pagar',
-        paymentDate,
-        bankAccountId,
-      ]
-    );
+    try {
+      await client.query('BEGIN');
 
-    const expenseId = expenseResult.rows[0].id;
-
-    if (bankAccountId) {
-      try {
-        const cxpLbl = `[CxP] Abono`;
-        await applyBalanceDelta(userId, bankAccountId, account.currency, -payAmount, undefined, {
-          description: `${cxpLbl} · «${account.description}»`,
-        });
-      } catch (e: any) {
-        await query('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [expenseId, userId]);
-        throw e;
-      }
-    }
-
-    await query(
-      `INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, payAmount, paymentDate, expenseId]
-    );
-
-    const newTotalPaid = roundMoney(totalPaid + payAmount);
-
-    if (newTotalPaid >= totalDue - 0.005) {
-      await query(
-        `UPDATE accounts_payable
-         SET status = 'PAID',
-             paid_date = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND user_id = $3`,
-        [paymentDate, id, userId]
+      const accountResult = await client.query(
+        `SELECT id, description, amount, currency, category, status, is_active
+         FROM accounts_payable
+         WHERE id = $1 AND user_id = $2
+         FOR UPDATE`,
+        [id, userId]
       );
-    }
 
-    const totalPaidAfter = await getTotalPaidPayable(Number(id));
+      if (accountResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Account payable not found' });
+      }
 
-    const rowResult = await query(
-      `SELECT id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at
-       FROM accounts_payable WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-    const ar = rowResult.rows[0];
+      const account = accountResult.rows[0];
+      if (account.is_active !== true) {
+        throw new InactiveEntityError();
+      }
+      if (account.status === 'PAID') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Account payable is already paid' });
+      }
 
-    res.status(201).json({
-      success: true,
-      message: 'Payment recorded',
-      totalPaid: totalPaidAfter,
-      accountPayable: {
-        id: ar.id,
-        description: ar.description,
-        amount: parseFloat(ar.amount),
-        currency: ar.currency,
-        dueDate: ar.due_date,
-        status: ar.status,
-        category: ar.category,
-        notes: ar.notes,
-        paidDate: ar.paid_date,
+      const totalResult = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM accounts_payable_payments
+         WHERE account_payable_id = $1 AND user_id = $2`,
+        [id, userId]
+      );
+      const totalPaid = roundMoney(parseFloat(totalResult.rows[0].total));
+      const totalDue = roundMoney(parseFloat(account.amount));
+      const remaining = roundMoney(totalDue - totalPaid);
+
+      if (remaining <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'No remaining balance' });
+      }
+      if (payAmount > remaining + 0.005) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: `Amount exceeds remaining balance (${remaining})` });
+      }
+
+      const expenseResult = await client.query(
+        `INSERT INTO expenses (user_id, description, amount, currency, nature, recurrence_type, frequency, category, date, is_paid, bank_account_id)
+         VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true, $7)
+         RETURNING id`,
+        [
+          userId,
+          `Abono: ${account.description}`,
+          payAmount,
+          account.currency,
+          account.category || 'Cuentas por Pagar',
+          paymentDate,
+          bankAccountId,
+        ]
+      );
+      const expenseId = expenseResult.rows[0].id;
+
+      if (bankAccountId) {
+        await applyBalanceDelta(userId, bankAccountId, account.currency, -payAmount, client, {
+          description: `[CxP] Abono · «${account.description}»`,
+        });
+      }
+
+      await client.query(
+        `INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, userId, payAmount, paymentDate, expenseId]
+      );
+
+      const totalPaidAfter = roundMoney(totalPaid + payAmount);
+      const isPaid = totalPaidAfter >= totalDue - 0.005;
+      const rowResult = await client.query(
+        `UPDATE accounts_payable
+         SET status = $1,
+             paid_date = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4 AND is_active = TRUE
+         RETURNING id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at`,
+        [isPaid ? 'PAID' : 'PENDING', isPaid ? paymentDate : null, id, userId]
+      );
+      if (rowResult.rows.length === 0) {
+        throw new InactiveEntityError();
+      }
+
+      await client.query('COMMIT');
+      const ar = rowResult.rows[0];
+
+      res.status(201).json({
+        success: true,
+        message: 'Payment recorded',
         totalPaid: totalPaidAfter,
-        createdAt: ar.created_at,
-        updatedAt: ar.updated_at,
-      },
-    });
+        accountPayable: {
+          id: ar.id,
+          description: ar.description,
+          amount: parseFloat(ar.amount),
+          currency: ar.currency,
+          dueDate: ar.due_date,
+          status: ar.status,
+          category: ar.category,
+          notes: ar.notes,
+          paidDate: ar.paid_date,
+          totalPaid: totalPaidAfter,
+          createdAt: ar.created_at,
+          updatedAt: ar.updated_at,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error: any) {
     if (respondInactiveEntityError(error, res)) return;
     console.error('Add account payable payment error:', error);
     res.status(500).json({ message: 'Error recording payment', error: error.message });
   }
 };
-
 export const updateAccountPayablePayment = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -623,105 +634,124 @@ export const payAccountPayable = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'paymentDate is required (YYYY-MM-DD)' });
     }
 
-    const accountResult = await query(
-      `SELECT id, description, amount, currency, category, status
-       FROM accounts_payable
-       WHERE id = $1 AND user_id = $2`,
-      [id, userId]
-    );
-
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Account payable not found' });
-    }
-
-    const account = accountResult.rows[0];
-
-    if (account.status === 'PAID') {
-      return res.status(400).json({ message: 'Account payable is already paid' });
-    }
-
-    const totalPaid = await getTotalPaidPayable(Number(id));
-    const totalDue = roundMoney(parseFloat(account.amount));
-    const remaining = roundMoney(totalDue - totalPaid);
-
-    if (remaining <= 0) {
-      return res.status(400).json({ message: 'No remaining balance' });
-    }
-
     const bankAccountId = optionalBankAccountId(req.body as Record<string, unknown>);
+    const client = await getClient();
 
-    const expenseResult = await query(
-      `INSERT INTO expenses (user_id, description, amount, currency, nature, recurrence_type, frequency, category, date, is_paid, bank_account_id)
-       VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true, $7)
-       RETURNING id`,
-      [
-        userId,
-        `Pago: ${account.description}`,
-        remaining,
-        account.currency,
-        account.category || 'Cuentas por Pagar',
-        dateStr,
-        bankAccountId,
-      ]
-    );
+    try {
+      await client.query('BEGIN');
 
-    const expenseId = expenseResult.rows[0].id;
+      const accountResult = await client.query(
+        `SELECT id, description, amount, currency, category, status, is_active
+         FROM accounts_payable
+         WHERE id = $1 AND user_id = $2
+         FOR UPDATE`,
+        [id, userId]
+      );
 
-    if (bankAccountId) {
-      try {
-        await applyBalanceDelta(userId, bankAccountId, account.currency, -remaining, undefined, {
+      if (accountResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Account payable not found' });
+      }
+
+      const account = accountResult.rows[0];
+      if (account.is_active !== true) {
+        throw new InactiveEntityError();
+      }
+      if (account.status === 'PAID') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'Account payable is already paid' });
+      }
+
+      const totalResult = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM accounts_payable_payments
+         WHERE account_payable_id = $1 AND user_id = $2`,
+        [id, userId]
+      );
+      const totalPaid = roundMoney(parseFloat(totalResult.rows[0].total));
+      const totalDue = roundMoney(parseFloat(account.amount));
+      const remaining = roundMoney(totalDue - totalPaid);
+
+      if (remaining <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ message: 'No remaining balance' });
+      }
+
+      const expenseResult = await client.query(
+        `INSERT INTO expenses (user_id, description, amount, currency, nature, recurrence_type, frequency, category, date, is_paid, bank_account_id)
+         VALUES ($1, $2, $3, $4, 'variable', 'non_recurrent', NULL, $5, $6, true, $7)
+         RETURNING id`,
+        [
+          userId,
+          `Pago: ${account.description}`,
+          remaining,
+          account.currency,
+          account.category || 'Cuentas por Pagar',
+          dateStr,
+          bankAccountId,
+        ]
+      );
+      const expenseId = expenseResult.rows[0].id;
+
+      if (bankAccountId) {
+        await applyBalanceDelta(userId, bankAccountId, account.currency, -remaining, client, {
           description: `[CxP] Liquidación por pagar · «${account.description}»`,
         });
-      } catch (e: any) {
-        await query('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [expenseId, userId]);
-        throw e;
       }
+
+      await client.query(
+        `INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, userId, remaining, dateStr, expenseId]
+      );
+
+      const updateResult = await client.query(
+        `UPDATE accounts_payable
+         SET status = 'PAID',
+             paid_date = $1,
+             notes = COALESCE($2, notes),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4 AND is_active = TRUE
+         RETURNING id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at`,
+        [dateStr, notes ?? null, id, userId]
+      );
+      if (updateResult.rows.length === 0) {
+        throw new InactiveEntityError();
+      }
+
+      await client.query('COMMIT');
+      const totalPaidAfter = roundMoney(totalPaid + remaining);
+
+      res.json({
+        success: true,
+        message: 'Account payable marked as paid and added to expenses',
+        accountPayable: {
+          id: updateResult.rows[0].id,
+          description: updateResult.rows[0].description,
+          amount: parseFloat(updateResult.rows[0].amount),
+          currency: updateResult.rows[0].currency,
+          dueDate: updateResult.rows[0].due_date,
+          status: updateResult.rows[0].status,
+          category: updateResult.rows[0].category,
+          notes: updateResult.rows[0].notes,
+          paidDate: updateResult.rows[0].paid_date,
+          totalPaid: totalPaidAfter,
+          createdAt: updateResult.rows[0].created_at,
+          updatedAt: updateResult.rows[0].updated_at,
+        },
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-
-    await query(
-      `INSERT INTO accounts_payable_payments (account_payable_id, user_id, amount, payment_date, expense_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, remaining, dateStr, expenseId]
-    );
-
-    const updateResult = await query(
-      `UPDATE accounts_payable
-       SET status = 'PAID',
-           paid_date = $1,
-           notes = COALESCE($2, notes),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3 AND user_id = $4
-       RETURNING id, description, amount, currency, due_date, status, category, notes, paid_date, created_at, updated_at`,
-      [dateStr, notes ?? null, id, userId]
-    );
-
-    const totalPaidAfter = await getTotalPaidPayable(Number(id));
-
-    res.json({
-      success: true,
-      message: 'Account payable marked as paid and added to expenses',
-      accountPayable: {
-        id: updateResult.rows[0].id,
-        description: updateResult.rows[0].description,
-        amount: parseFloat(updateResult.rows[0].amount),
-        currency: updateResult.rows[0].currency,
-        dueDate: updateResult.rows[0].due_date,
-        status: updateResult.rows[0].status,
-        category: updateResult.rows[0].category,
-        notes: updateResult.rows[0].notes,
-        paidDate: updateResult.rows[0].paid_date,
-        totalPaid: totalPaidAfter,
-        createdAt: updateResult.rows[0].created_at,
-        updatedAt: updateResult.rows[0].updated_at,
-      },
-    });
   } catch (error: any) {
     if (respondInactiveEntityError(error, res)) return;
     console.error('Pay account payable error:', error);
     res.status(500).json({ message: 'Error paying account payable', error: error.message });
   }
 };
-
 export const deleteAccountPayable = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;

@@ -30,7 +30,7 @@ async function pullICloudAgendaEvents(userId, range) {
     try {
         const mappedResult = await (0, database_1.query)(`
       SELECT
-        s.external_uid, a.title, a.description, a.location, a.starts_at, a.ends_at,
+        s.agenda_item_id, s.external_uid, a.title, a.description, a.location, a.starts_at, a.ends_at,
         a.all_day, a.recurrence_rule
       FROM agenda_item_sync_state s
       INNER JOIN agenda_items a ON a.id = s.agenda_item_id
@@ -54,7 +54,10 @@ async function pullICloudAgendaEvents(userId, range) {
             urlFilter: () => true,
         });
         for (const obj of objects) {
-            const urlKey = externalKey(obj.url);
+            const resourceUrl = typeof obj.url === 'string'
+                ? String(obj.url).trim()
+                : '';
+            const urlKey = externalKey(resourceUrl);
             const mappedByUrl = mappedByExternalKey.get(urlKey);
             if (mappedByUrl)
                 seenMappedKeys.add(externalKey(mappedByUrl.external_uid));
@@ -64,12 +67,20 @@ async function pullICloudAgendaEvents(userId, range) {
                 continue;
             const uidKey = externalKey(parsed.externalUid);
             const mapped = mappedByUrl ?? mappedByExternalKey.get(uidKey);
-            if (mapped)
+            if (mapped) {
                 seenMappedKeys.add(externalKey(mapped.external_uid));
+                if (resourceUrl && externalKey(mapped.external_uid) !== urlKey) {
+                    await (0, database_1.query)(`
+            UPDATE agenda_item_sync_state SET external_uid = $3, updated_at = CURRENT_TIMESTAMP
+            WHERE agenda_item_id = $1 AND connection_id = $2
+            `, [mapped.agenda_item_id, loaded.connectionId, resourceUrl]);
+                }
+            }
+            const externalLocator = resourceUrl || mapped?.external_uid || parsed.externalUid;
             events.push({
                 provider: 'ICLOUD_CALDAV',
                 connectionId: loaded.connectionId,
-                externalUid: mapped?.external_uid ?? parsed.externalUid,
+                externalUid: externalLocator,
                 etag: typeof obj.etag === 'string' ? obj.etag : null,
                 title: parsed.title,
                 description: parsed.description,

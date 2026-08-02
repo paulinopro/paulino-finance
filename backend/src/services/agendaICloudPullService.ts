@@ -4,6 +4,7 @@ import { parseFirstVEvent } from './agendaIcsParser';
 import type { AgendaExternalEventDraft } from './agendaSyncTypes';
 
 interface MappedICloudItem {
+  agenda_item_id: number;
   external_uid: string;
   title: string;
   description: string | null;
@@ -44,7 +45,7 @@ export async function pullICloudAgendaEvents(
     const mappedResult = await query(
       `
       SELECT
-        s.external_uid, a.title, a.description, a.location, a.starts_at, a.ends_at,
+        s.agenda_item_id, s.external_uid, a.title, a.description, a.location, a.starts_at, a.ends_at,
         a.all_day, a.recurrence_rule
       FROM agenda_item_sync_state s
       INNER JOIN agenda_items a ON a.id = s.agenda_item_id
@@ -70,7 +71,11 @@ export async function pullICloudAgendaEvents(
       urlFilter: () => true,
     });
     for (const obj of objects) {
-      const urlKey = externalKey((obj as { url?: unknown }).url);
+      const resourceUrl =
+        typeof (obj as { url?: unknown }).url === 'string'
+          ? String((obj as { url: string }).url).trim()
+          : '';
+      const urlKey = externalKey(resourceUrl);
       const mappedByUrl = mappedByExternalKey.get(urlKey);
       if (mappedByUrl) seenMappedKeys.add(externalKey(mappedByUrl.external_uid));
 
@@ -79,12 +84,24 @@ export async function pullICloudAgendaEvents(
       if (!parsed) continue;
       const uidKey = externalKey(parsed.externalUid);
       const mapped = mappedByUrl ?? mappedByExternalKey.get(uidKey);
-      if (mapped) seenMappedKeys.add(externalKey(mapped.external_uid));
+      if (mapped) {
+        seenMappedKeys.add(externalKey(mapped.external_uid));
+        if (resourceUrl && externalKey(mapped.external_uid) !== urlKey) {
+          await query(
+            `
+            UPDATE agenda_item_sync_state SET external_uid = $3, updated_at = CURRENT_TIMESTAMP
+            WHERE agenda_item_id = $1 AND connection_id = $2
+            `,
+            [mapped.agenda_item_id, loaded.connectionId, resourceUrl]
+          );
+        }
+      }
+      const externalLocator = resourceUrl || mapped?.external_uid || parsed.externalUid;
 
       events.push({
         provider: 'ICLOUD_CALDAV',
         connectionId: loaded.connectionId,
-        externalUid: mapped?.external_uid ?? parsed.externalUid,
+        externalUid: externalLocator,
         etag: typeof obj.etag === 'string' ? obj.etag : null,
         title: parsed.title,
         description: parsed.description,

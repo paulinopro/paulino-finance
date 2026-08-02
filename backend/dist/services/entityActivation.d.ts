@@ -21,5 +21,6 @@ export declare function setEntityActiveStatus(entity: ActivatableEntity, id: num
     isActive: boolean;
 } | null>;
 export declare function requireEntityActive(entity: ActivatableEntity, id: number, userId: number, executor?: ActivationQueryExecutor): Promise<void | false>;
+export declare function requireEntityActiveForUpdate(entity: ActivatableEntity, id: number, userId: number, executor?: ActivationQueryExecutor): Promise<void | false>;
 export {};
 //# sourceMappingURL=entityActivation.d.ts.map

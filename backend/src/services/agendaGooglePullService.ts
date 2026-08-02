@@ -56,6 +56,58 @@ async function storeConnectionSyncToken(connectionId: number, syncToken: string 
   );
 }
 
+function storedDateIso(value: Date | string): string {
+  return (value instanceof Date ? value : new Date(value)).toISOString();
+}
+
+async function mappedGoogleCancellationDraft(
+  event: calendar_v3.Schema$Event,
+  connectionId: number
+): Promise<AgendaExternalEventDraft | null> {
+  const externalUid = event.id || '';
+  if (!externalUid || event.status !== 'cancelled') return null;
+  const res = await query(
+    `
+    SELECT
+      a.title, a.description, a.location, a.starts_at, a.ends_at,
+      a.all_day, a.recurrence_rule
+    FROM agenda_item_sync_state s
+    INNER JOIN agenda_items a ON a.id = s.agenda_item_id
+    WHERE s.connection_id = $1 AND s.external_uid = $2
+    LIMIT 1
+    `,
+    [connectionId, externalUid]
+  );
+  const row = res.rows[0] as
+    | {
+        title: string;
+        description: string | null;
+        location: string | null;
+        starts_at: Date | string;
+        ends_at: Date | string | null;
+        all_day: boolean;
+        recurrence_rule: string | null;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    provider: 'GOOGLE_CALENDAR',
+    connectionId,
+    externalUid,
+    etag: event.etag || null,
+    title: row.title,
+    description: row.description,
+    location: row.location,
+    startsAt: storedDateIso(row.starts_at),
+    endsAt: row.ends_at ? storedDateIso(row.ends_at) : null,
+    allDay: row.all_day,
+    status: 'CANCELLED',
+    recurrenceRule: row.recurrence_rule,
+    externalUpdatedAt: event.updated || new Date().toISOString(),
+    deleted: true,
+  };
+}
+
 function isInvalidSyncToken(error: unknown): boolean {
   const err = error as { code?: unknown; message?: unknown };
   const message = typeof err.message === 'string' ? err.message : String(error);
@@ -114,7 +166,10 @@ export async function pullGoogleAgendaEvents(
     }
 
     for (const item of pulled.events) {
-      const draft = googleEventToAgendaDraft(item, loaded.connectionId);
+      let draft = googleEventToAgendaDraft(item, loaded.connectionId);
+      if (!draft && item.status === 'cancelled') {
+        draft = await mappedGoogleCancellationDraft(item, loaded.connectionId);
+      }
       if (draft) events.push(draft);
     }
     await storeConnectionSyncToken(loaded.connectionId, pulled.nextSyncToken);

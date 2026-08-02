@@ -1,4 +1,6 @@
 import { ensureActiveEntity, respondInactiveEntityError } from './activeEntityGuard';
+import { requireEntityActiveForUpdate } from '../services/entityActivation';
+import { financialEntityUpdateRequiresActive } from '../services/financialEntityMutation';
 import { Response } from 'express';
 import type { PoolClient } from 'pg';
 import { getClient, query } from '../config/database';
@@ -578,7 +580,7 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
 
   const oldResult = await query(
     `SELECT id, description, amount, currency, nature, recurrence_type, frequency, category,
-            payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date
+            payment_day, payment_month, date, is_paid, bank_account_id, is_active, recurrence_start_date, recurrence_end_date
      FROM expenses WHERE id = $1 AND user_id = $2`,
     [expenseId, userId]
   );
@@ -596,6 +598,44 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
   }
 
   const old = oldResult.rows[0];
+  const financialUpdate = financialEntityUpdateRequiresActive('expenses', req.body);
+  if (!financialUpdate) {
+    const descriptive = await query(
+      `UPDATE expenses SET description = COALESCE($1, description), category = COALESCE($2, category), updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 AND user_id = $4
+       RETURNING id, description, amount, currency, nature, recurrence_type, frequency, category, payment_day, payment_month, date, is_paid, bank_account_id, recurrence_start_date, recurrence_end_date, created_at, updated_at`,
+      [description, category, expenseId, userId]
+    );
+    const row = descriptive.rows[0];
+    const linkedClient = await getClient();
+    try {
+      await linkedClient.query('BEGIN');
+      await syncVehicleExpenseFromLinkedExpense(linkedClient, userId, expenseId, {
+        description: String(row.description),
+        amount: parseFloat(row.amount),
+        currency: String(row.currency),
+        category: row.category != null ? String(row.category) : null,
+        date: row.date != null ? String(row.date).slice(0, 10) : null,
+        bankAccountId: row.bank_account_id ?? null,
+      });
+      await linkedClient.query('COMMIT');
+    } catch (error) {
+      await linkedClient.query('ROLLBACK');
+      throw error;
+    } finally {
+      linkedClient.release();
+    }
+    await syncPayablePaymentFromExpense(userId, expenseId);
+    return res.json({ success: true, message: 'Expense updated successfully', expense: {
+      id: row.id, description: row.description, amount: parseFloat(row.amount), currency: row.currency,
+      nature: row.nature, recurrenceType: row.recurrence_type, frequency: row.frequency, category: row.category,
+      paymentDay: row.payment_day, paymentMonth: row.payment_month, date: row.date, isPaid: row.is_paid,
+      bankAccountId: row.bank_account_id ?? null, createdAt: row.created_at, updatedAt: row.updated_at,
+    } });
+  }
+  if (old.is_active !== true) {
+    if (!(await ensureActiveEntity('expenses', expenseId, userId, res))) return;
+  }
   const body = req.body as Record<string, unknown>;
   const merged: Record<string, unknown> = {
     nature: body.nature !== undefined ? body.nature : old.nature,
@@ -668,6 +708,16 @@ export const updateExpense = async (req: AuthRequest, res: Response) => {
   const client = await getClient();
   try {
     await client.query('BEGIN');
+    const active = await requireEntityActiveForUpdate(
+      'expenses',
+      expenseId,
+      userId,
+      (sql, params) => client.query(sql, params)
+    );
+    if (active === false) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Expense not found' });
+    }
 
     if (
       expenseUsesImmediateBalance({
@@ -898,6 +948,16 @@ export const updateExpensePaymentStatus = async (req: AuthRequest, res: Response
       const client = await getClient();
       try {
         await client.query('BEGIN');
+    const active = await requireEntityActiveForUpdate(
+      'expenses',
+      expenseId,
+      userId,
+      (sql, params) => client.query(sql, params)
+    );
+    if (active === false) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Expense not found' });
+    }
 
         if (isPaid) {
           if (!alreadyMarkedPaidThisMonth) {
