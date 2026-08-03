@@ -85,6 +85,7 @@ export const updateWhatsAppConfiguration = async (req: AuthRequest, res: Respons
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    const phoneChanged = lockedUser.rows[0].whatsapp_phone !== phone;
     let updated;
     if (consent) {
       updated = await client.query(
@@ -112,6 +113,9 @@ export const updateWhatsAppConfiguration = async (req: AuthRequest, res: Respons
          RETURNING whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at`,
         [phone, req.userId!]
       );
+    }
+
+    if (!consent || phoneChanged) {
       await client.query(
         `UPDATE notification_settings
          SET whatsapp_enabled = FALSE,

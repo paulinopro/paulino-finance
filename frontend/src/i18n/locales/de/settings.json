@@ -105,6 +105,7 @@
   "whatsappRefreshError": "Der Test wurde gesendet, der Status aber nicht aktualisiert. W\u00e4hlen Sie Aktualisieren.",
   "whatsappWithdrawSuccess": "WhatsApp-Einwilligung widerrufen.",
   "whatsappWithdrawError": "Die Einwilligung konnte nicht widerrufen werden. Versuchen Sie es erneut.",
+  "whatsappToggleForType": "WhatsApp-Benachrichtigungen: {{type}}",
   "whatsappToggleLabel": "Benachrichtigungen \u00fcber WhatsApp",
   "whatsappTogglePrerequisite": "Speichern Sie die Nummer, stimmen Sie zu und schlie\u00dfen Sie einen Test ab, bevor Sie WhatsApp aktivieren."
 }

@@ -5,13 +5,16 @@ import toast from 'react-hot-toast';
 import api from '../services/api';
 import type { WhatsAppNotificationConfiguration } from '../types';
 
-type Props = { onVerificationChange?: (verified: boolean) => void };
+type Props = {
+  onVerificationChange?: (verified: boolean) => void;
+  onConfigurationChange?: (configuration: WhatsAppNotificationConfiguration) => void;
+};
 
 const EMPTY_CONFIGURATION: WhatsAppNotificationConfiguration = {
   phone: null, consented: false, verified: false, consentedAt: null, verifiedAt: null,
 };
 
-const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange }) => {
+const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, onConfigurationChange }) => {
   const { t } = useTranslation();
   const [configuration, setConfiguration] = useState<WhatsAppNotificationConfiguration>(EMPTY_CONFIGURATION);
   const [phone, setPhone] = useState('');
@@ -25,7 +28,8 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange })
     setPhone(next.phone || '');
     setConsent(next.consented);
     onVerificationChange?.(next.verified);
-  }, [onVerificationChange]);
+    onConfigurationChange?.(next);
+  }, [onConfigurationChange, onVerificationChange]);
 
   const loadConfiguration = useCallback(async (showError = true) => {
     setLoading(true);

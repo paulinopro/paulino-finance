@@ -13,11 +13,14 @@ describe('Settings notification channels integration', () => {
   });
 
   it('embeds WhatsApp configuration and gates per-type toggles on verification', () => {
-    expect(source).toContain('<WhatsAppNotificationSettings onVerificationChange={setWhatsAppVerified} />');
+    expect(source).toContain('<WhatsAppNotificationSettings onConfigurationChange={handleWhatsAppConfigurationChange} />');
+    expect(source).toContain('reconcileWhatsAppVerification(current, configuration.verified)');
+    expect(source).toContain('void fetchNotificationSettings();');
     expect(source).toContain('whatsappEnabled: false');
     expect(source).toContain('checked={whatsappVerified ? settings.whatsappEnabled : false}');
     expect(source).toContain('disabled={!whatsappVerified}');
     expect(source).toContain("t('settings.whatsappTogglePrerequisite')");
+    expect(source).toContain("aria-label={t('settings.whatsappToggleForType', { type: typeLabel })}");
   });
 
   it('keeps the complete WhatsApp copy equivalent across all supported locales', () => {
@@ -29,6 +32,10 @@ describe('Settings notification channels integration', () => {
 
     expect(localeKeys[0]).toEqual(localeKeys[1]);
     expect(localeKeys[1]).toEqual(localeKeys[2]);
+    for (const locale of ['es', 'en', 'de']) {
+      const values = JSON.parse(fs.readFileSync(path.join(localeDirectory, locale, 'settings.json'), 'utf8'));
+      expect(values.whatsappToggleForType).toContain('{{type}}');
+    }
     expect(localeKeys[0]).toEqual(expect.arrayContaining([
       'whatsappConsent',
       'whatsappLoadError',
@@ -37,6 +44,7 @@ describe('Settings notification channels integration', () => {
       'whatsappStatePending',
       'whatsappStateVerified',
       'whatsappTestError',
+      'whatsappToggleForType',
       'whatsappToggleLabel',
       'whatsappTogglePrerequisite',
       'whatsappWithdrawConfirm',

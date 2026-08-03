@@ -105,6 +105,7 @@
   "whatsappRefreshError": "La prueba se envi\u00f3, pero no pudimos actualizar el estado. Pulsa actualizar.",
   "whatsappWithdrawSuccess": "Consentimiento de WhatsApp retirado.",
   "whatsappWithdrawError": "No pudimos retirar el consentimiento. Int\u00e9ntalo de nuevo.",
+  "whatsappToggleForType": "Notificaciones por WhatsApp: {{type}}",
   "whatsappToggleLabel": "Notificaciones por WhatsApp",
   "whatsappTogglePrerequisite": "Guarda el n\u00famero, acepta el consentimiento y completa una prueba antes de activar WhatsApp."
 }

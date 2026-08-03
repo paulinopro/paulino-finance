@@ -105,6 +105,7 @@
   "whatsappRefreshError": "The test was sent, but we could not refresh the status. Select refresh.",
   "whatsappWithdrawSuccess": "WhatsApp consent withdrawn.",
   "whatsappWithdrawError": "We could not withdraw consent. Try again.",
+  "whatsappToggleForType": "WhatsApp notifications: {{type}}",
   "whatsappToggleLabel": "Notifications via WhatsApp",
   "whatsappTogglePrerequisite": "Save the number, provide consent, and complete a test before enabling WhatsApp."
 }

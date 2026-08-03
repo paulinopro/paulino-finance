@@ -93,6 +93,30 @@ describe('WhatsApp notification configuration', () => {
     });
   });
 
+  it('atomically disables every WhatsApp preference when the phone changes', async () => {
+    const verifiedAt = new Date('2026-08-02T19:00:00.000Z');
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...userRow, whatsapp_verified_at: verifiedAt }] })
+      .mockResolvedValueOnce({ rows: [{ ...userRow, whatsapp_phone: '18095559999', whatsapp_verified_at: null }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    getClientMock.mockResolvedValue(client);
+    const { res, state } = responseDouble();
+
+    await updateWhatsAppConfiguration(
+      { userId: 9, body: { phone: '18095559999', consent: true } } as any,
+      res
+    );
+
+    expect(clientQuery.mock.calls[3][0]).toContain('UPDATE notification_settings');
+    expect(clientQuery.mock.calls[3][0]).toContain('whatsapp_enabled = FALSE');
+    expect(clientQuery.mock.calls[3][1]).toEqual([9]);
+    expect(clientQuery.mock.calls.at(-1)?.[0]).toBe('COMMIT');
+    expect(state.body.whatsapp).toMatchObject({ phone: '18095559999', verified: false });
+  });
   it('preserves verification when re-saving the same consented phone', async () => {
     const verifiedAt = new Date('2026-08-02T19:00:00.000Z');
     const clientQuery = jest

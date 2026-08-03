@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +17,12 @@ import {
 import { SETTINGS_CURRENCY_OPTIONS, SETTINGS_LOCALE_OPTIONS } from '../constants/userPreferences';
 import { defaultSecondaryForPrimary, useIntlFormatting } from '../context/IntlFormattingContext';
 import { tzI18nKey, pushFailureI18nKey } from '../i18n/config';
+import type { WhatsAppNotificationConfiguration } from '../types';
+import {
+  reconcileWhatsAppVerification,
+  type NotificationSettingsByType,
+  type NotificationTypeSettings,
+} from '../utils/notificationSettings';
 
 const TIMEZONE_IDS = [
   'America/Santo_Domingo',
@@ -40,13 +46,6 @@ const TIMEZONE_IDS = [
   'UTC',
 ] as const;
 
-interface NotificationTypeSettings {
-  enabled: boolean;
-  telegramEnabled: boolean;
-  whatsappEnabled: boolean;
-  emailEnabled?: boolean;
-  daysBefore: number[];
-}
 
 const Settings: React.FC = () => {
   const { t } = useTranslation();
@@ -60,8 +59,9 @@ const Settings: React.FC = () => {
   const [calendarCardPaymentAmountBasis, setCalendarCardPaymentAmountBasis] =
     useState(DEFAULT_CALENDAR_CARD_PAYMENT_AMOUNT_BASIS);
   const [exchangeRateManualInput, setExchangeRateManualInput] = useState('');
-  const [notificationSettings, setNotificationSettings] = useState<Record<string, NotificationTypeSettings>>({});
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsByType>({});
   const [whatsappVerified, setWhatsAppVerified] = useState(false);
+  const notificationSettingsRequestRef = useRef(0);
   const [telegramSaving, setTelegramSaving] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [exchangeSaving, setExchangeSaving] = useState(false);
@@ -77,6 +77,29 @@ const Settings: React.FC = () => {
       setBrowserNotifPermission(Notification.permission);
     }
   }, []);
+
+  const fetchNotificationSettings = useCallback(async () => {
+    const requestId = ++notificationSettingsRequestRef.current;
+    try {
+      const response = await api.get('/notifications/settings');
+      if (requestId === notificationSettingsRequestRef.current) {
+        setNotificationSettings(response.data.settings || {});
+      }
+    } catch (error: unknown) {
+      console.error('Error fetching notification settings:', error);
+    }
+  }, []);
+
+  const handleWhatsAppConfigurationChange = useCallback(
+    (configuration: WhatsAppNotificationConfiguration) => {
+      setWhatsAppVerified(configuration.verified);
+      setNotificationSettings((current) =>
+        reconcileWhatsAppVerification(current, configuration.verified)
+      );
+      void fetchNotificationSettings();
+    },
+    [fetchNotificationSettings]
+  );
 
   useEffect(() => {
     if (user) {
@@ -95,17 +118,8 @@ const Settings: React.FC = () => {
         manual !== undefined && manual !== null && Number.isFinite(manual) ? String(manual) : ''
       );
     }
-    fetchNotificationSettings();
-  }, [user]);
-
-  const fetchNotificationSettings = async () => {
-    try {
-      const response = await api.get('/notifications/settings');
-      setNotificationSettings(response.data.settings || {});
-    } catch (error: unknown) {
-      console.error('Error fetching notification settings:', error);
-    }
-  };
+    void fetchNotificationSettings();
+  }, [fetchNotificationSettings, user]);
 
   const handleSaveTelegram = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -422,8 +436,14 @@ const Settings: React.FC = () => {
             <h2 className="text-xl font-semibold text-white">{t('settings.notificationsHeading')}</h2>
           </div>
           <div className="space-y-6">
-            <WhatsAppNotificationSettings onVerificationChange={setWhatsAppVerified} />
+            <WhatsAppNotificationSettings onConfigurationChange={handleWhatsAppConfigurationChange} />
             {['CARD_PAYMENT', 'LOAN_PAYMENT', 'RECURRING_EXPENSE'].map((type) => {
+              const typeLabel =
+                type === 'CARD_PAYMENT'
+                  ? t('settings.notifTypeCardPayments')
+                  : type === 'LOAN_PAYMENT'
+                    ? t('settings.notifTypeLoanPayments')
+                    : t('settings.notifTypeRecurringExpense');
               const settings = notificationSettings[type] || {
                 enabled: true,
                 telegramEnabled: false,
@@ -433,11 +453,7 @@ const Settings: React.FC = () => {
               return (
                 <div key={type} className="bg-dark-700 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-medium text-white">
-                      {type === 'CARD_PAYMENT' && t('settings.notifTypeCardPayments')}
-                      {type === 'LOAN_PAYMENT' && t('settings.notifTypeLoanPayments')}
-                      {type === 'RECURRING_EXPENSE' && t('settings.notifTypeRecurringExpense')}
-                    </h3>
+                    <h3 className="font-medium text-white">{typeLabel}</h3>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
                         type="checkbox"
@@ -476,7 +492,7 @@ const Settings: React.FC = () => {
                             type="checkbox"
                             checked={whatsappVerified ? settings.whatsappEnabled : false}
                             disabled={!whatsappVerified}
-                            aria-label={t('settings.whatsappToggleLabel')}
+                            aria-label={t('settings.whatsappToggleForType', { type: typeLabel })}
                             onChange={(e) =>
                               handleNotificationSettingsUpdate(type, {
                                 ...settings,
