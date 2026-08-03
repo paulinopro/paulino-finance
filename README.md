@@ -183,6 +183,27 @@ La app de desarrollo suele abrirse en http://localhost:3000.
 
 ---
 
+## Notificaciones WhatsApp con OpenWA (opcional)
+
+Paulino Finance usa una sola sesión central de OpenWA. Los usuarios configuran únicamente su número de destino y consentimiento en la aplicación; no crean ni administran sesiones de OpenWA.
+
+> **Advertencia:** OpenWA es una integración no oficial de WhatsApp. WhatsApp puede restringir o bloquear el número central. Usa un número dedicado a Paulino Finance, evita envíos masivos o no solicitados y conserva `whatsapp-web.js` como motor recomendado para reducir incompatibilidades.
+
+### Preparar la sesión central
+
+1. Copia `docker.env.example` a `.env` en la raíz si todavía no existe.
+2. Genera una clave larga y aleatoria para `OPENWA_API_KEY`, guárdala solo en `.env` y no la confirmes en Git.
+3. Define `OPENWA_ENABLED=true`. Mantén `OPENWA_SESSION_ID=paulino-finance-central`, `OPENWA_BASE_URL=http://openwa:2785/api` y `OPENWA_ENGINE_TYPE=whatsapp-web.js`.
+4. Inicia o recrea el stack con `docker compose up -d --build --force-recreate`.
+5. Abre `http://localhost:2785`. El panel y API comparten el puerto 2785 y solo están disponibles desde la máquina anfitriona por el enlace a `127.0.0.1`.
+6. Autentícate con la clave configurada en `OPENWA_API_KEY`.
+7. Crea la sesión `paulino-finance-central`, iníciala y escanea el código QR o introduce el código de vinculación desde el número central dedicado.
+8. Confirma en el panel que la sesión esté lista. La comprobación oficial de disponibilidad usada por Docker es `/api/health/ready`.
+9. En Paulino Finance, abre Configuración, registra el número internacional de un usuario con su consentimiento y ejecuta la prueba de WhatsApp. Solo después de una prueba correcta se habilitan sus tipos de recordatorio por WhatsApp.
+
+OpenWA permanece aislado: el backend no depende de su estado para iniciar, y Telegram, Web Push y las notificaciones dentro de la aplicación siguen funcionando aunque OpenWA no tenga una sesión enlazada o no esté disponible.
+
+---
 ## Estructura del repositorio
 
 ```

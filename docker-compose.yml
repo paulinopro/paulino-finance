@@ -35,6 +35,11 @@ services:
       DB_NAME: ${DB_NAME:-paulino_finance}
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      OPENWA_ENABLED: ${OPENWA_ENABLED:-false}
+      OPENWA_API_KEY: ${OPENWA_API_KEY:-}
+      OPENWA_SESSION_ID: ${OPENWA_SESSION_ID:-paulino-finance-central}
+      OPENWA_BASE_URL: ${OPENWA_BASE_URL:-http://openwa:2785/api}
+      OPENWA_REQUEST_TIMEOUT_MS: ${OPENWA_REQUEST_TIMEOUT_MS:-10000}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -74,6 +79,28 @@ services:
     # (p. ej. web-push) si solo existía node_modules/.bin de una imagen antigua.
     command: sh -c "npm install && exec npm run dev"
 
+  openwa:
+    image: ghcr.io/rmyndharis/openwa:0.12.5
+    container_name: paulino-finance-openwa
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 2785
+      API_MASTER_KEY: ${OPENWA_API_KEY:-}
+      AUTO_START_SESSIONS: ${OPENWA_AUTO_START_SESSIONS:-true}
+      ENGINE_TYPE: ${OPENWA_ENGINE_TYPE:-whatsapp-web.js}
+    ports:
+      - "127.0.0.1:${OPENWA_PORT:-2785}:2785"
+    volumes:
+      - openwa_data:/app/data
+    networks:
+      - paulino-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2785/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
   frontend:
     build:
       context: ./frontend
@@ -101,6 +128,7 @@ services:
 
 volumes:
   postgres_data:
+  openwa_data:
 
 networks:
   paulino-network:
