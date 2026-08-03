@@ -918,6 +918,14 @@ const createTables = async () => {
   `);
 
   await query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_phone VARCHAR(20);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_consent_at TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_verified_at TIMESTAMP;
+    ALTER TABLE notification_settings
+      ADD COLUMN IF NOT EXISTS whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
