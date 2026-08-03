@@ -30,7 +30,10 @@ function arrangeSweep(options: {
   type?: ReminderType;
   whatsappEnabled?: boolean;
   verified?: boolean;
+  consent?: boolean;
+  phone?: boolean;
   telegramEnabled?: boolean;
+  notificationId?: number | null;
 } = {}) {
   const type = options.type ?? 'CARD_PAYMENT';
   const fakeNow = type === 'LOAN_PAYMENT'
@@ -42,8 +45,8 @@ function arrangeSweep(options: {
     id: 41,
     telegram_chat_id: 'tg-41',
     locale_preference: 'es',
-    whatsapp_phone: '18095551234',
-    whatsapp_consent_at: new Date('2026-08-01T10:00:00.000Z'),
+    whatsapp_phone: options.phone === false ? null : '18095551234',
+    whatsapp_consent_at: options.consent === false ? null : new Date('2026-08-01T10:00:00.000Z'),
     whatsapp_verified_at: options.verified === false ? null : new Date('2026-08-01T10:05:00.000Z'),
   };
   const setting = {
@@ -96,7 +99,10 @@ function arrangeSweep(options: {
         recurrence_type: 'recurrent',
       }] };
     }
-    if (sql.includes('INSERT INTO notifications')) return { rows: [{ id: 73 }] };
+    if (sql.includes('INSERT INTO notifications')) {
+      const id = options.notificationId === undefined ? 73 : options.notificationId;
+      return { rows: [{ id }] };
+    }
     throw new Error(`Unexpected scheduler query: ${sql}`);
   });
 }
@@ -139,6 +145,8 @@ describe('WhatsApp notification scheduler integration', () => {
   it.each([
     ['disabled in the notification setting', { whatsappEnabled: false, verified: true }],
     ['not verified by a successful test', { whatsappEnabled: true, verified: false }],
+    ['missing explicit consent', { whatsappEnabled: true, verified: true, consent: false }],
+    ['missing a destination phone', { whatsappEnabled: true, verified: true, phone: false }],
   ])('does not deliver WhatsApp when it is %s', async (_label, eligibility) => {
     arrangeSweep({ ...eligibility, telegramEnabled: false });
 
@@ -188,6 +196,23 @@ describe('WhatsApp notification scheduler integration', () => {
       expect(mockTelegram.mock.invocationCallOrder[0]).toBeGreaterThan(insertOrder!);
       expect(mockWhatsApp.mock.invocationCallOrder[0]).toBeGreaterThan(insertOrder!);
       expect(mockPush.mock.invocationCallOrder[0]).toBeGreaterThan(insertOrder!);
+    }
+  );
+  it.each<ReminderType>(['CARD_PAYMENT', 'LOAN_PAYMENT', 'RECURRING_EXPENSE'])(
+    'marks the sweep failed instead of silently losing %s channels when INSERT returns no id',
+    async (type) => {
+      arrangeSweep({ type, notificationId: null });
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await runSweep();
+
+      expect(notificationService.getNotificationSchedulerStatus().lastSweep?.ok).toBe(false);
+      expect(mockTelegram).not.toHaveBeenCalled();
+      expect(mockWhatsApp).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      const logText = errorSpy.mock.calls.map((args) => JSON.stringify(args)).join('\n');
+      expect(logText).toContain('NOTIFICATION_ID_MISSING');
+      expect(logText).toContain(type);
     }
   );
 });

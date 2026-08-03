@@ -119,6 +119,27 @@ function buildCardPaymentTemplateVariables(
   };
 }
 
+class NotificationSweepError extends Error {
+  constructor(
+    readonly code: 'NOTIFICATION_ID_MISSING',
+    readonly notificationType: 'CARD_PAYMENT' | 'LOAN_PAYMENT' | 'RECURRING_EXPENSE',
+    readonly userId: number
+  ) {
+    super(code);
+  }
+}
+
+function requireNotificationId(
+  value: unknown,
+  notificationType: NotificationSweepError['notificationType'],
+  userId: number
+): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new NotificationSweepError('NOTIFICATION_ID_MISSING', notificationType, userId);
+  }
+  return value;
+}
+
 export const checkAndSendNotifications = async () => {
   const sweepStartedAt = new Date().toISOString();
   try {
@@ -221,9 +242,8 @@ export const checkAndSendNotifications = async () => {
                  RETURNING id`,
                 [userId, plainTitle, message, card.id]
               );
-              const nid = ins.rows[0]?.id as number | undefined;
-              if (nid != null) {
-                await dispatchNotificationChannels({
+              const nid = requireNotificationId(ins.rows[0]?.id, 'CARD_PAYMENT', userId);
+              await dispatchNotificationChannels({
                   userId,
                   notificationId: nid,
                   title: plainTitle,
@@ -242,8 +262,7 @@ export const checkAndSendNotifications = async () => {
                     phone: user.whatsapp_phone,
                   },
                   pushEnabled: true,
-                });
-              }
+              });
             }
           }
         }
@@ -308,9 +327,8 @@ export const checkAndSendNotifications = async () => {
                  RETURNING id`,
                 [userId, plainTitle, message, loan.id]
               );
-              const nid = ins.rows[0]?.id as number | undefined;
-              if (nid != null) {
-                await dispatchNotificationChannels({
+              const nid = requireNotificationId(ins.rows[0]?.id, 'LOAN_PAYMENT', userId);
+              await dispatchNotificationChannels({
                   userId,
                   notificationId: nid,
                   title: plainTitle,
@@ -329,8 +347,7 @@ export const checkAndSendNotifications = async () => {
                     phone: user.whatsapp_phone,
                   },
                   pushEnabled: true,
-                });
-              }
+              });
             }
           }
         }
@@ -402,9 +419,8 @@ export const checkAndSendNotifications = async () => {
                  RETURNING id`,
                 [userId, plainTitle, message, expense.id]
               );
-              const nid = ins.rows[0]?.id as number | undefined;
-              if (nid != null) {
-                await dispatchNotificationChannels({
+              const nid = requireNotificationId(ins.rows[0]?.id, 'RECURRING_EXPENSE', userId);
+              await dispatchNotificationChannels({
                   userId,
                   notificationId: nid,
                   title: plainTitle,
@@ -423,14 +439,22 @@ export const checkAndSendNotifications = async () => {
                     phone: user.whatsapp_phone,
                   },
                   pushEnabled: true,
-                });
-              }
+              });
             }
           }
         }
       }
     }
   } catch (error: any) {
+    if (error instanceof NotificationSweepError) {
+      console.error('[notifications] sweep failed', {
+        errorCode: error.code,
+        notificationType: error.notificationType,
+        userId: error.userId,
+      });
+      finalizeNotificationSweep(sweepStartedAt, false, error.code);
+      return;
+    }
     console.error('Error checking notifications:', error);
     finalizeNotificationSweep(sweepStartedAt, false, error?.message ?? String(error));
     return;
