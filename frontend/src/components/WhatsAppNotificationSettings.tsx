@@ -14,6 +14,11 @@ const EMPTY_CONFIGURATION: WhatsAppNotificationConfiguration = {
   phone: null, consented: false, verified: false, consentedAt: null, verifiedAt: null,
 };
 
+const getRequestErrorMessage = (error: unknown, fallback: string) => {
+  const message = (error as any)?.response?.data?.message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+};
+
 const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, onConfigurationChange }) => {
   const { t } = useTranslation();
   const [configuration, setConfiguration] = useState<WhatsAppNotificationConfiguration>(EMPTY_CONFIGURATION);
@@ -65,8 +70,8 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
       );
       applyConfiguration(data.whatsapp);
       toast.success(t('settings.whatsappSaveSuccess'));
-    } catch {
-      toast.error(t('settings.whatsappSaveError'));
+    } catch (error) {
+      toast.error(getRequestErrorMessage(error, t('settings.whatsappSaveError')));
     } finally { setSaving(false); }
   };
 
@@ -78,8 +83,8 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
       const refreshed = await loadConfiguration(false);
       if (refreshed) toast.success(t('settings.whatsappTestSuccess'));
       else toast.error(t('settings.whatsappRefreshError'));
-    } catch {
-      toast.error(t('settings.whatsappTestError'));
+    } catch (error) {
+      toast.error(getRequestErrorMessage(error, t('settings.whatsappTestError')));
     } finally { setTesting(false); }
   };
 

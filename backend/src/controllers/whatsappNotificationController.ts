@@ -37,7 +37,7 @@ export const getWhatsAppConfiguration = async (req: AuthRequest, res: Response) 
     const result = await query(
       `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
        FROM users
-       WHERE id = $1`,
+       WHERE id = $1::int`,
       [req.userId!]
     );
     if (!result.rows[0]) {
@@ -75,7 +75,7 @@ export const updateWhatsAppConfiguration = async (req: AuthRequest, res: Respons
     const lockedUser = await client.query(
       `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
        FROM users
-       WHERE id = $1
+       WHERE id = $1::int
        FOR UPDATE`,
       [req.userId!]
     );
@@ -90,26 +90,26 @@ export const updateWhatsAppConfiguration = async (req: AuthRequest, res: Respons
     if (consent) {
       updated = await client.query(
         `UPDATE users
-         SET whatsapp_phone = $1,
+         SET whatsapp_phone = $1::varchar,
              whatsapp_consent_at = CASE
-               WHEN whatsapp_phone IS DISTINCT FROM $1 OR whatsapp_consent_at IS NULL THEN CURRENT_TIMESTAMP
+               WHEN whatsapp_phone IS DISTINCT FROM $1::varchar OR whatsapp_consent_at IS NULL THEN CURRENT_TIMESTAMP
                ELSE whatsapp_consent_at
              END,
              whatsapp_verified_at = CASE
-               WHEN whatsapp_phone IS DISTINCT FROM $1 THEN NULL
+               WHEN whatsapp_phone IS DISTINCT FROM $1::varchar THEN NULL
                ELSE whatsapp_verified_at
              END
-         WHERE id = $2
+         WHERE id = $2::int
          RETURNING whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at`,
         [phone, req.userId!]
       );
     } else {
       updated = await client.query(
         `UPDATE users
-         SET whatsapp_phone = $1,
+         SET whatsapp_phone = $1::varchar,
              whatsapp_consent_at = NULL,
              whatsapp_verified_at = NULL
-         WHERE id = $2
+         WHERE id = $2::int
          RETURNING whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at`,
         [phone, req.userId!]
       );
@@ -120,7 +120,7 @@ export const updateWhatsAppConfiguration = async (req: AuthRequest, res: Respons
         `UPDATE notification_settings
          SET whatsapp_enabled = FALSE,
              updated_at = CURRENT_TIMESTAMP
-         WHERE user_id = $1`,
+         WHERE user_id = $1::int`,
         [req.userId!]
       );
     }
@@ -148,7 +148,7 @@ export const testWhatsAppNotification = async (req: AuthRequest, res: Response) 
     const configurationResult = await query(
       `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
        FROM users
-       WHERE id = $1`,
+       WHERE id = $1::int`,
       [req.userId!]
     );
     const configuration = configurationResult.rows[0] as WhatsAppUserRow | undefined;
@@ -177,14 +177,14 @@ export const testWhatsAppNotification = async (req: AuthRequest, res: Response) 
       await client.query(
         `SELECT id
          FROM users
-         WHERE id = $1
+         WHERE id = $1::int
          FOR UPDATE`,
         [req.userId!]
       );
       const verified = await client.query(
         `UPDATE users
          SET whatsapp_verified_at = CURRENT_TIMESTAMP
-         WHERE id = $1
+         WHERE id = $1::int
            AND whatsapp_phone = $2
            AND whatsapp_consent_at IS NOT NULL
          RETURNING whatsapp_verified_at`,

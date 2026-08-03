@@ -38,7 +38,7 @@ export function isOpenWaConfigured(): boolean {
 
 export function formatMessageForWhatsApp(html: string): string {
   return html
-    .replace(/<\s*(?:br)\s*\/?>/gi, '\n')
+    .replace(/<\s*br\s*(?:\/\s*)?>/gi, '\n')
     .replace(/<\/?\s*p\b[^>]*>/gi, '\n')
     .replace(/<\s*(?:b|strong)\b[^>]*>/gi, '*')
     .replace(/<\s*\/\s*(?:b|strong)\s*>/gi, '*')
@@ -54,6 +54,122 @@ export function formatMessageForWhatsApp(html: string): string {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{2,}/g, '\n')
     .trim();
+}
+
+function extractOpenWaMessageId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const extractFromCandidate = (value: unknown): string | undefined => {
+    if (Array.isArray(value)) {
+      for (const element of value) {
+        const nestedId = extractFromCandidate(element);
+        if (nestedId) return nestedId;
+      }
+      return undefined;
+    }
+
+    if (typeof value === 'string') return value.trim() || undefined;
+    if (typeof value === 'number') return String(value);
+    if (!value || typeof value !== 'object') return undefined;
+
+    const nested = value as Record<string, unknown>;
+    const directId = nested.id ?? nested.messageId ?? nested.message_id;
+    if (typeof directId === 'string' || typeof directId === 'number') return String(directId);
+
+    if (directId && typeof directId === 'object' && '_serialized' in directId) {
+      const serialized = directId._serialized;
+      if (typeof serialized === 'string' || typeof serialized === 'number') return String(serialized);
+    }
+
+    if (typeof nested._serialized === 'string' || typeof nested._serialized === 'number') {
+      return String(nested._serialized);
+    }
+
+    if (typeof nested.id === 'object' && nested.id !== null) {
+      const nestedId = nested.id as Record<string, unknown>;
+      if (typeof nestedId.id === 'string' || typeof nestedId.id === 'number') return String(nestedId.id);
+      if (typeof nestedId._serialized === 'string' || typeof nestedId._serialized === 'number') return String(nestedId._serialized);
+    }
+
+    return undefined;
+  };
+
+  const record = payload as Record<string, unknown>;
+
+  return (
+    extractFromCandidate(record.data) ||
+    extractFromCandidate(record.result) ||
+    extractFromCandidate(record.message) ||
+    extractFromCandidate(record.id) ||
+    extractFromCandidate(record.response) ||
+    extractFromCandidate(record.payload)
+  );
+}
+
+function hasExplicitOpenWaError(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.some((item) => hasExplicitOpenWaError(item));
+  }
+
+  const record = payload as Record<string, unknown>;
+  const statusValue = typeof record.status === 'string' ? record.status.trim().toLowerCase() : '';
+  const codeValue = typeof record.code === 'string' ? Number(record.code.trim()) : record.code;
+
+  if (record.success === false || record.ok === false) return true;
+  if (record.error || statusValue === 'error' || statusValue === 'failed' || statusValue === 'fail') return true;
+  if (typeof record.errors === 'string') return Boolean(record.errors.trim());
+  if (Array.isArray(record.errors)) return record.errors.length > 0;
+  if (typeof codeValue === 'number' && !Number.isNaN(codeValue) && codeValue >= 400) return true;
+  if (typeof record.message === 'string' && record.message.toLowerCase().includes('error')) return true;
+
+  return false;
+}
+
+function isOpenWaResponseSuccessful(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+
+  if (Array.isArray(payload)) {
+    return payload.some((candidate) => isOpenWaResponseSuccessful(candidate));
+  }
+
+  const record = payload as Record<string, unknown>;
+  const statusValue = typeof record.status === 'string' ? record.status.trim().toLowerCase() : '';
+  const codeValue = typeof record.code === 'string' ? Number(record.code.trim()) : record.code;
+  const statusCodeValue = typeof record.statusCode === 'string' ? Number(record.statusCode.trim()) : record.statusCode;
+
+  if (record.success === true) return true;
+  if (record.ok === true) return true;
+  if (typeof statusValue === 'string' && ['success', 'queued', 'sent', 'ok', 'received', 'delivered', 'read'].includes(statusValue)) return true;
+  if (typeof codeValue === 'number' && codeValue >= 200 && codeValue < 300) return true;
+  if (typeof statusCodeValue === 'number' && statusCodeValue >= 200 && statusCodeValue < 300) return true;
+
+  if (
+    isOpenWaResponseSuccessful(record.data) ||
+    isOpenWaResponseSuccessful(record.result) ||
+    isOpenWaResponseSuccessful(record.message) ||
+    isOpenWaResponseSuccessful(record.response) ||
+    isOpenWaResponseSuccessful(record.payload)
+  ) {
+    return true;
+  }
+
+  const providerMessageId =
+    extractOpenWaMessageId(record.data) ||
+    extractOpenWaMessageId(record.result) ||
+    extractOpenWaMessageId(record.message) ||
+    extractOpenWaMessageId(record.response) ||
+    extractOpenWaMessageId(record.payload);
+  if (providerMessageId) return true;
+
+  if (hasExplicitOpenWaError(payload)) return false;
+
+  return true;
 }
 
 export async function sendWhatsAppMessage(phone: string, message: string): Promise<OpenWaResult> {
@@ -94,19 +210,10 @@ export async function sendWhatsAppMessage(phone: string, message: string): Promi
     }
 
     const payload: unknown = await response.json();
-    const providerMessageId = (
-      payload &&
-      typeof payload === 'object' &&
-      'data' in payload &&
-      payload.data &&
-      typeof payload.data === 'object' &&
-      'id' in payload.data &&
-      typeof payload.data.id === 'string'
-    )
-      ? payload.data.id
-      : undefined;
+    const providerMessageId = extractOpenWaMessageId(payload);
+    const isSuccessPayload = isOpenWaResponseSuccessful(payload);
 
-    if (!providerMessageId) {
+    if (!providerMessageId && !isSuccessPayload) {
       console.error(`OpenWA returned an invalid response for ${maskedPhone}`);
       return { ok: false, code: 'PROVIDER_ERROR', message: 'OpenWA returned an invalid response' };
     }

@@ -45,8 +45,11 @@ describe('OpenWA HTTP adapter', () => {
 
     expect(isOpenWaConfigured()).toBe(false);
   });
+
   it('formats supported HTML for WhatsApp', () => {
-    expect(formatMessageForWhatsApp('<p><strong>Pago &amp; saldo</strong></p><p>Hoy<br>Listo &nbsp; &#39;ok&#39;</p><em>extra</em>')).toBe('*Pago & saldo*\nHoy\nListo \'ok\'\nextra');
+    expect(
+      formatMessageForWhatsApp('<p><strong>Pago &amp; saldo</strong></p><p>Hoy<br>Listo &nbsp; &#39;ok&#39;</p><em>extra</em>')
+    ).toBe('*Pago & saldo*\nHoy\nListo \'ok\'\nextra');
   });
 
   it('converts supported HTML before sending', async () => {
@@ -88,14 +91,26 @@ describe('OpenWA HTTP adapter', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('returns a provider error when a successful response has no message id', async () => {
+  it('returns a provider error when a successful response reports explicit failure', async () => {
     configureOpenWa();
-    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ data: {} }) }) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ error: 'No LID for user', status: 'error' }) }) as jest.Mock;
 
     await expect(sendWhatsAppMessage('18095551234', 'test')).resolves.toEqual({
       ok: false,
       code: 'PROVIDER_ERROR',
       message: 'OpenWA returned an invalid response',
+    });
+  });
+
+  it('accepts provider success responses without an explicit id', async () => {
+    configureOpenWa();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'success', data: {} }),
+    }) as jest.Mock;
+
+    await expect(sendWhatsAppMessage('18095551234', 'test')).resolves.toEqual({
+      ok: true,
     });
   });
 
@@ -159,6 +174,7 @@ describe('OpenWA HTTP adapter', () => {
 
     await expect(resultPromise).resolves.toMatchObject({ ok: false, code: 'TIMEOUT' });
   });
+
   it('masks the recipient phone in logged provider errors', async () => {
     configureOpenWa();
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, text: async () => 'provider error' }) as jest.Mock;
