@@ -1,6 +1,16 @@
 import { maskWhatsAppPhone, toOpenWaChatId } from './whatsappPhone';
 
-const REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const MIN_REQUEST_TIMEOUT_MS = 1_000;
+const MAX_REQUEST_TIMEOUT_MS = 60_000;
+const OPENWA_SESSION_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function getRequestTimeoutMs(): number {
+  const configured = Number(process.env.OPENWA_REQUEST_TIMEOUT_MS);
+  return Number.isInteger(configured) && configured >= MIN_REQUEST_TIMEOUT_MS && configured <= MAX_REQUEST_TIMEOUT_MS
+    ? configured
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
 
 type OpenWaResult =
   | { ok: true; providerMessageId?: string }
@@ -17,7 +27,7 @@ function getOpenWaConfig(): OpenWaConfig | null {
   const apiKey = process.env.OPENWA_API_KEY;
   const sessionId = process.env.OPENWA_SESSION_ID;
 
-  if (process.env.OPENWA_ENABLED !== 'true' || !baseUrl || !apiKey || !sessionId) return null;
+  if (process.env.OPENWA_ENABLED !== 'true' || !baseUrl || !apiKey || !sessionId || !OPENWA_SESSION_UUID_PATTERN.test(sessionId)) return null;
 
   return { baseUrl, apiKey, sessionId };
 }
@@ -53,7 +63,7 @@ export async function sendWhatsAppMessage(phone: string, message: string): Promi
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), getRequestTimeoutMs());
   const maskedPhone = maskWhatsAppPhone(phone);
 
   try {

@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { query } from '../config/database';
+import { getClient, query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import {
   getVapidPublicKey as getVapidPublicKeyFromEnv,
@@ -175,6 +175,8 @@ export const getNotificationSettings = async (req: AuthRequest, res: Response) =
 };
 
 export const updateNotificationSettings = async (req: AuthRequest, res: Response) => {
+  let client: Awaited<ReturnType<typeof getClient>> | null = null;
+  let transactionStarted = false;
   try {
     const userId = req.userId!;
     const { notificationType, enabled, daysBefore, telegramEnabled, emailEnabled, whatsappEnabled } = req.body;
@@ -191,23 +193,30 @@ export const updateNotificationSettings = async (req: AuthRequest, res: Response
       return res.status(400).json({ message: 'Notification channel settings must be boolean values' });
     }
 
-    if (whatsappEnabled === true) {
-      const whatsappConfiguration = await query(
-        `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
-         FROM users
-         WHERE id = $1`,
-        [userId]
-      );
-      const user = whatsappConfiguration.rows[0];
+    client = await getClient();
+    await client.query('BEGIN');
+    transactionStarted = true;
+    const whatsappConfiguration = await client.query(
+      `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [userId]
+    );
+    const user = whatsappConfiguration.rows[0];
 
-      if (!user?.whatsapp_phone || !user.whatsapp_consent_at || !user.whatsapp_verified_at) {
-        return res.status(409).json({
-          message: 'WhatsApp requires a phone number with consent and verification before it can be enabled',
-        });
-      }
+    if (
+      whatsappEnabled === true &&
+      (!user?.whatsapp_phone || !user.whatsapp_consent_at || !user.whatsapp_verified_at)
+    ) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(409).json({
+        message: 'WhatsApp requires a phone number with consent and verification before it can be enabled',
+      });
     }
 
-    await query(
+    await client.query(
       `INSERT INTO notification_settings 
        (user_id, notification_type, enabled, days_before, telegram_enabled, email_enabled, whatsapp_enabled)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -230,13 +239,24 @@ export const updateNotificationSettings = async (req: AuthRequest, res: Response
       ]
     );
 
-    res.json({
+    await client.query('COMMIT');
+    transactionStarted = false;
+    return res.json({
       success: true,
       message: 'Notification settings updated successfully',
     });
   } catch (error: any) {
+    if (client && transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback notification settings error:', rollbackError);
+      }
+    }
     console.error('Update notification settings error:', error);
-    res.status(500).json({ message: 'Error updating settings', error: error.message });
+    return res.status(500).json({ message: 'Error updating settings', error: error.message });
+  } finally {
+    client?.release();
   }
 };
 

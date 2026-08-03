@@ -1,5 +1,6 @@
 jest.mock('../config/database', () => ({
   query: jest.fn(),
+  getClient: jest.fn(),
 }));
 
 jest.mock('../services/webPushService', () => ({
@@ -14,7 +15,7 @@ jest.mock('./whatsappNotificationController', () => ({
   updateWhatsAppConfiguration: jest.fn(),
 }));
 
-import { query } from '../config/database';
+import { getClient, query } from '../config/database';
 import {
   getNotificationSettings,
   testPushNotification,
@@ -25,6 +26,7 @@ import { testWhatsAppNotification } from './whatsappNotificationController';
 import router from '../routes/notifications';
 
 const mockQuery = query as jest.MockedFunction<typeof query>;
+const mockGetClient = getClient as jest.MockedFunction<typeof getClient>;
 
 function req(body: Record<string, unknown> = {}) {
   return { userId: 9, body } as any;
@@ -53,6 +55,7 @@ function routeHandler(path: string) {
 describe('notification channel settings and test routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetClient.mockReset();
   });
 
   it('maps whatsapp_enabled in notification settings', async () => {
@@ -92,44 +95,57 @@ describe('notification channel settings and test routes', () => {
     }
   );
   it('rejects enabling WhatsApp without consent and verification', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ whatsapp_phone: '18095551234', whatsapp_consent_at: null, whatsapp_verified_at: null }],
-    } as any);
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{ whatsapp_phone: '18095551234', whatsapp_consent_at: null, whatsapp_verified_at: null }],
+      })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    mockGetClient.mockResolvedValue(client);
     const { res } = responseDouble();
 
     await updateNotificationSettings(req({ notificationType: 'PAYMENT_DUE', whatsappEnabled: true }), res);
 
     expect(res.status).toHaveBeenCalledWith(409);
+    expect(clientQuery.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(clientQuery.mock.calls[2][0]).toBe('ROLLBACK');
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 
   it('allows WhatsApp only after phone, consent, and verification are present', async () => {
-    mockQuery
-      .mockResolvedValueOnce({
-        rows: [{
-          whatsapp_phone: '18095551234',
-          whatsapp_consent_at: new Date('2026-08-02T18:00:00.000Z'),
-          whatsapp_verified_at: new Date('2026-08-02T19:00:00.000Z'),
-        }],
-      } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{
+        whatsapp_phone: '18095551234',
+        whatsapp_consent_at: new Date('2026-08-02T18:00:00.000Z'),
+        whatsapp_verified_at: new Date('2026-08-02T19:00:00.000Z'),
+      }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    mockGetClient.mockResolvedValue(client);
     const { res } = responseDouble();
 
     await updateNotificationSettings(req({ notificationType: 'PAYMENT_DUE', whatsappEnabled: true }), res);
 
-    expect(mockQuery).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('WHERE id = $1'),
-      [9]
-    );
-    expect(mockQuery).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('whatsapp_enabled'),
-      [9, 'PAYMENT_DUE', true, [3, 7], false, false, true]
-    );
+    expect(clientQuery.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(clientQuery.mock.calls[2][0]).toContain('whatsapp_enabled');
+    expect(clientQuery.mock.calls[2][1]).toEqual([9, 'PAYMENT_DUE', true, [3, 7], false, false, true]);
+    expect(clientQuery.mock.calls[3][0]).toBe('COMMIT');
     expect(res.status).not.toHaveBeenCalled();
   });
   it('writes whatsapp_enabled while preserving the Telegram and email values supplied', async () => {
-    mockQuery.mockResolvedValue({ rows: [] } as any);
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    mockGetClient.mockResolvedValue(client);
     const { res } = responseDouble();
 
     await updateNotificationSettings(req({
@@ -141,12 +157,60 @@ describe('notification channel settings and test routes', () => {
       whatsappEnabled: false,
     }), res);
 
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining('whatsapp_enabled'),
-      [9, 'PAYMENT_DUE', false, [1], true, true, false]
-    );
+    expect(clientQuery.mock.calls[2][0]).toContain('whatsapp_enabled');
+    expect(clientQuery.mock.calls[2][1]).toEqual([9, 'PAYMENT_DUE', false, [1], true, true, false]);
+    expect(clientQuery.mock.calls[3][0]).toBe('COMMIT');
   });
 
+  it('locks WhatsApp configuration and upserts through one transaction client', async () => {
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{
+        whatsapp_phone: '18095551234',
+        whatsapp_consent_at: new Date('2026-08-02T18:00:00.000Z'),
+        whatsapp_verified_at: new Date('2026-08-02T19:00:00.000Z'),
+      }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    mockGetClient.mockResolvedValue(client);
+    const { res, state } = responseDouble();
+
+    await updateNotificationSettings(req({ notificationType: 'PAYMENT_DUE', whatsappEnabled: true }), res);
+
+    expect(clientQuery.mock.calls[0][0]).toBe('BEGIN');
+    expect(clientQuery.mock.calls[1][0]).toContain('FOR UPDATE');
+    expect(clientQuery.mock.calls[1][1]).toEqual([9]);
+    expect(clientQuery.mock.calls[2][0]).toContain('INSERT INTO notification_settings');
+    expect(clientQuery.mock.calls[2][1]).toEqual([9, 'PAYMENT_DUE', true, [3, 7], false, false, true]);
+    expect(clientQuery.mock.calls[3][0]).toBe('COMMIT');
+    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(state.status).toBe(200);
+  });
+
+  it('rolls back the same transaction when the settings upsert fails', async () => {
+    const clientQuery = jest
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{
+        whatsapp_phone: '18095551234',
+        whatsapp_consent_at: new Date('2026-08-02T18:00:00.000Z'),
+        whatsapp_verified_at: new Date('2026-08-02T19:00:00.000Z'),
+      }] })
+      .mockRejectedValueOnce(new Error('upsert failed'))
+      .mockResolvedValueOnce({ rows: [] });
+    const client = { query: clientQuery, release: jest.fn() } as any;
+    mockGetClient.mockResolvedValue(client);
+    const { res, state } = responseDouble();
+
+    await updateNotificationSettings(req({ notificationType: 'PAYMENT_DUE', whatsappEnabled: true }), res);
+
+    expect(clientQuery.mock.calls[3][0]).toBe('ROLLBACK');
+    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(state.status).toBe(500);
+  });
   it('registers distinct canonical test routes while retaining legacy aliases', () => {
     expect(routeHandler('/test/telegram')).toBe(testTelegramNotification);
     expect(routeHandler('/test')).toBe(testTelegramNotification);

@@ -188,6 +188,69 @@ describe('WhatsAppNotificationSettings', () => {
     });
     expect(refresh.disabled).toBe(false);
   });
+  it('ignores a delayed GET after a newer save response is applied', async () => {
+    mockedApi.get.mockResolvedValueOnce({ data: { whatsapp: verified } } as any);
+    const onConfigurationChange = jest.fn();
+    await act(async () => {
+      root.render(<WhatsAppNotificationSettings onConfigurationChange={onConfigurationChange} />);
+    });
+    let resolveRefresh: ((value: any) => void) | undefined;
+    mockedApi.get.mockReturnValueOnce(new Promise((resolve) => { resolveRefresh = resolve; }));
+    mockedApi.put.mockResolvedValueOnce({ data: { whatsapp: { ...pending, phone: '18095550999' } } } as any);
+    change(input(), '18095550999');
+    const refresh = container.querySelector<HTMLButtonElement>('button[aria-label="settings.whatsappRefresh"]')!;
+
+    await act(async () => {
+      refresh.click();
+      button('settings.whatsappSaveIdle').click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('settings.whatsappStatePending');
+    await act(async () => {
+      resolveRefresh?.({ data: { whatsapp: verified } });
+      await Promise.resolve();
+    });
+
+    expect(input().value).toBe('18095550999');
+    expect(container.textContent).toContain('settings.whatsappStatePending');
+    expect(onConfigurationChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      phone: '18095550999', verified: false,
+    }));
+  });
+
+  it.each(['save', 'withdraw', 'test'])('disables incompatible actions while %s is pending', async (mutation) => {
+    mockedApi.get.mockResolvedValueOnce({ data: { whatsapp: verified } } as any);
+    await renderComponent();
+    let resolveMutation: ((value: any) => void) | undefined;
+    const pendingRequest = new Promise((resolve) => { resolveMutation = resolve; });
+    if (mutation === 'test') mockedApi.post.mockReturnValueOnce(pendingRequest);
+    else mockedApi.put.mockReturnValueOnce(pendingRequest);
+    const refresh = container.querySelector<HTMLButtonElement>('button[aria-label="settings.whatsappRefresh"]')!;
+    const saveButton = button('settings.whatsappSaveIdle');
+    const testButton = button('settings.whatsappTestIdle');
+    const withdrawButton = button('settings.whatsappWithdraw');
+    const action = mutation === 'save'
+      ? saveButton
+      : mutation === 'withdraw'
+        ? withdrawButton
+        : testButton;
+
+    act(() => action.click());
+
+    expect(refresh.disabled).toBe(true);
+    expect(input().disabled).toBe(true);
+    expect(consent().disabled).toBe(true);
+    expect(saveButton.disabled).toBe(true);
+    expect(testButton.disabled).toBe(true);
+    expect(withdrawButton.disabled).toBe(true);
+
+    await act(async () => {
+      resolveMutation?.(mutation === 'test'
+        ? { data: { success: true } }
+        : { data: { whatsapp: mutation === 'withdraw' ? unconfigured : verified } });
+      await Promise.resolve();
+    });
+  });
   it('shows translated actionable errors for load, save and test failures', async () => {
     mockedApi.get.mockRejectedValueOnce(new Error('load'));
     await renderComponent();
@@ -206,3 +269,4 @@ describe('WhatsAppNotificationSettings', () => {
     expect(mockedToast.error).toHaveBeenCalledWith('settings.whatsappTestError');
   });
 });
+

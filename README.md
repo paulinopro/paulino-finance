@@ -193,13 +193,16 @@ Paulino Finance usa una sola sesión central de OpenWA. Los usuarios configuran 
 
 1. Copia `docker.env.example` a `.env` en la raíz si todavía no existe.
 2. Genera una clave larga y aleatoria para `OPENWA_API_KEY`, guárdala solo en `.env` y no la confirmes en Git.
-3. Define `OPENWA_ENABLED=true`. Mantén `OPENWA_SESSION_ID=paulino-finance-central`, `OPENWA_BASE_URL=http://openwa:2785/api` y `OPENWA_ENGINE_TYPE=whatsapp-web.js`.
+3. Mantén inicialmente `OPENWA_ENABLED=false`, `OPENWA_SESSION_ID=replace-with-generated-session-uuid`, `OPENWA_BASE_URL=http://openwa:2785/api` y `OPENWA_ENGINE_TYPE=whatsapp-web.js`.
 4. Inicia o recrea el stack con `docker compose up -d --build --force-recreate`.
 5. Abre `http://localhost:2785`. El panel y API comparten el puerto 2785 y solo están disponibles desde la máquina anfitriona por el enlace a `127.0.0.1`.
 6. Autentícate con la clave configurada en `OPENWA_API_KEY`.
-7. Crea la sesión `paulino-finance-central`, iníciala y escanea el código QR o introduce el código de vinculación desde el número central dedicado.
-8. Confirma en el panel que la sesión esté lista. La comprobación oficial de disponibilidad usada por Docker es `/api/health/ready`.
-9. En Paulino Finance, abre Configuración, registra el número internacional de un usuario con su consentimiento y ejecuta la prueba de WhatsApp. Solo después de una prueba correcta se habilitan sus tipos de recordatorio por WhatsApp.
+7. Crea una sesión con el nombre visible `paulino-finance-central`, iníciala y escanea el código QR o introduce el código de vinculación desde el número central dedicado.
+8. Copia el UUID generado que muestra OpenWA para esa sesión en `OPENWA_SESSION_ID` dentro de `.env`; el nombre visible `paulino-finance-central` no sustituye ese UUID. Define `OPENWA_ENABLED=true` y recrea el backend para aplicar ambas variables.
+9. Confirma en el panel que la sesión esté lista. La comprobación oficial de disponibilidad usada por Docker es `/api/health/ready`.
+10. En Paulino Finance, abre Configuración, registra el número internacional de un usuario con su consentimiento y ejecuta la prueba de WhatsApp. Solo después de una prueba correcta se habilitan sus tipos de recordatorio por WhatsApp.
+
+OpenWA se ejecuta con `NODE_ENV=production`. Para que su panel cargue correctamente por HTTP en loopback, Compose define `OPENWA_CSP_UPGRADE_INSECURE_REQUESTS=false`; esto evita que el navegador convierta automáticamente sus scripts a HTTPS y muestre una pantalla vacía. Cambia esa variable a `true` solo si publicas el panel detrás de un proxy con HTTPS/TLS correctamente configurado.
 
 OpenWA permanece aislado: el backend no depende de su estado para iniciar, y Telegram, Web Push y las notificaciones dentro de la aplicación siguen funcionando aunque OpenWA no tenga una sesión enlazada o no esté disponible.
 

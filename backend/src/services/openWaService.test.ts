@@ -10,7 +10,7 @@ function configureOpenWa(): void {
   process.env.OPENWA_ENABLED = 'true';
   process.env.OPENWA_BASE_URL = 'http://openwa:2785/api';
   process.env.OPENWA_API_KEY = 'secret';
-  process.env.OPENWA_SESSION_ID = 'central';
+  process.env.OPENWA_SESSION_ID = '123e4567-e89b-12d3-a456-426614174000';
 }
 
 describe('OpenWA HTTP adapter', () => {
@@ -20,8 +20,13 @@ describe('OpenWA HTTP adapter', () => {
     delete process.env.OPENWA_BASE_URL;
     delete process.env.OPENWA_API_KEY;
     delete process.env.OPENWA_SESSION_ID;
+    delete process.env.OPENWA_REQUEST_TIMEOUT_MS;
     jest.restoreAllMocks();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   afterAll(() => {
@@ -34,6 +39,12 @@ describe('OpenWA HTTP adapter', () => {
     expect(isOpenWaConfigured()).toBe(true);
   });
 
+  it.each(['paulino-finance-central', 'replace-with-generated-session-uuid'])('rejects non-UUID session identifier %s', (sessionId) => {
+    configureOpenWa();
+    process.env.OPENWA_SESSION_ID = sessionId;
+
+    expect(isOpenWaConfigured()).toBe(false);
+  });
   it('formats supported HTML for WhatsApp', () => {
     expect(formatMessageForWhatsApp('<p><strong>Pago &amp; saldo</strong></p><p>Hoy<br>Listo &nbsp; &#39;ok&#39;</p><em>extra</em>')).toBe('*Pago & saldo*\nHoy\nListo \'ok\'\nextra');
   });
@@ -50,7 +61,7 @@ describe('OpenWA HTTP adapter', () => {
       providerMessageId: 'wamid-1',
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://openwa:2785/api/sessions/central/messages/send-text',
+      'http://openwa:2785/api/sessions/123e4567-e89b-12d3-a456-426614174000/messages/send-text',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ 'X-API-Key': 'secret' }),
@@ -101,6 +112,53 @@ describe('OpenWA HTTP adapter', () => {
     });
   });
 
+  it('uses OPENWA_REQUEST_TIMEOUT_MS to abort a slow provider request', async () => {
+    jest.useFakeTimers();
+    configureOpenWa();
+    process.env.OPENWA_REQUEST_TIMEOUT_MS = '1500';
+    let capturedSignal: AbortSignal | undefined;
+    global.fetch = jest.fn((_url, options) => new Promise((_resolve, reject) => {
+      capturedSignal = (options as RequestInit).signal as AbortSignal;
+      capturedSignal.addEventListener('abort', () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    })) as jest.Mock;
+
+    const resultPromise = sendWhatsAppMessage('18095551234', 'test');
+    jest.advanceTimersByTime(1499);
+    expect(capturedSignal?.aborted).toBe(false);
+    jest.advanceTimersByTime(1);
+
+    await expect(resultPromise).resolves.toEqual({
+      ok: false,
+      code: 'TIMEOUT',
+      message: 'OpenWA request timed out',
+    });
+  });
+
+  it.each(['invalid', '999', '60001'])('falls back to 10000 ms for out-of-range timeout %s', async (configuredTimeout) => {
+    jest.useFakeTimers();
+    configureOpenWa();
+    process.env.OPENWA_REQUEST_TIMEOUT_MS = configuredTimeout;
+    let capturedSignal: AbortSignal | undefined;
+    global.fetch = jest.fn((_url, options) => new Promise((_resolve, reject) => {
+      capturedSignal = (options as RequestInit).signal as AbortSignal;
+      capturedSignal.addEventListener('abort', () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    })) as jest.Mock;
+
+    const resultPromise = sendWhatsAppMessage('18095551234', 'test');
+    jest.advanceTimersByTime(9999);
+    expect(capturedSignal?.aborted).toBe(false);
+    jest.advanceTimersByTime(1);
+
+    await expect(resultPromise).resolves.toMatchObject({ ok: false, code: 'TIMEOUT' });
+  });
   it('masks the recipient phone in logged provider errors', async () => {
     configureOpenWa();
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, text: async () => 'provider error' }) as jest.Mock;

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, MessageCircle, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
@@ -22,6 +22,7 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const configurationRequestRef = useRef(0);
 
   const applyConfiguration = useCallback((next: WhatsAppNotificationConfiguration) => {
     setConfiguration(next);
@@ -31,23 +32,32 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
     onConfigurationChange?.(next);
   }, [onConfigurationChange, onVerificationChange]);
 
+  const invalidateConfigurationRequests = useCallback(() => {
+    configurationRequestRef.current += 1;
+    setLoading(false);
+  }, []);
+
   const loadConfiguration = useCallback(async (showError = true) => {
+    const requestId = ++configurationRequestRef.current;
     setLoading(true);
     try {
       const { data } = await api.get<{ whatsapp: WhatsAppNotificationConfiguration }>('/notifications/whatsapp');
+      if (requestId !== configurationRequestRef.current) return false;
       applyConfiguration(data.whatsapp);
       return true;
     } catch {
+      if (requestId !== configurationRequestRef.current) return false;
       if (showError) toast.error(t('settings.whatsappLoadError'));
       return false;
     } finally {
-      setLoading(false);
+      if (requestId === configurationRequestRef.current) setLoading(false);
     }
   }, [applyConfiguration, t]);
 
   useEffect(() => { void loadConfiguration(); }, [loadConfiguration]);
 
   const save = async () => {
+    invalidateConfigurationRequests();
     setSaving(true);
     try {
       const { data } = await api.put<{ whatsapp: WhatsAppNotificationConfiguration }>(
@@ -61,6 +71,7 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
   };
 
   const testDestination = async () => {
+    invalidateConfigurationRequests();
     setTesting(true);
     try {
       await api.post('/notifications/test/whatsapp');
@@ -74,6 +85,7 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
 
   const withdraw = async () => {
     if (!window.confirm(t('settings.whatsappWithdrawConfirm'))) return;
+    invalidateConfigurationRequests();
     setSaving(true);
     try {
       const { data } = await api.put<{ whatsapp: WhatsAppNotificationConfiguration }>(
@@ -88,8 +100,9 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
 
   const status = configuration.verified ? 'verified' : configuration.phone && configuration.consented ? 'pending' : 'unconfigured';
   const phoneChanged = configuration.phone !== null && phone.trim() !== configuration.phone;
-  const canSave = phone.trim().length > 0 && consent && !saving;
-  const canTest = !!configuration.phone && configuration.consented && !phoneChanged && !testing;
+  const mutating = saving || testing;
+  const canSave = phone.trim().length > 0 && consent && !mutating;
+  const canTest = !!configuration.phone && configuration.consented && !phoneChanged && !mutating;
 
   return (
     <section className="bg-dark-700 rounded-lg p-4 sm:p-5" aria-labelledby="whatsapp-settings-title">
@@ -103,7 +116,7 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
             <p className="text-sm text-dark-400 mt-1">{t('settings.whatsappDescription')}</p>
           </div>
         </div>
-        <button type="button" onClick={() => void loadConfiguration()} disabled={loading}
+        <button type="button" onClick={() => void loadConfiguration()} disabled={loading || mutating}
           className="text-dark-400 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded-md p-2 disabled:opacity-50"
           aria-label={t('settings.whatsappRefresh')} title={t('settings.whatsappRefresh')}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden />
@@ -125,13 +138,14 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
         <div>
           <label htmlFor="whatsapp-phone" className="label">{t('settings.whatsappPhoneLabel')}</label>
           <input id="whatsapp-phone" type="tel" inputMode="numeric" autoComplete="tel" value={phone}
-            onChange={(event) => setPhone(event.target.value)} className="input w-full"
+            onChange={(event) => setPhone(event.target.value)} disabled={mutating} className="input w-full"
             placeholder={t('settings.whatsappPhonePlaceholder')} aria-describedby="whatsapp-phone-hint" />
           <p id="whatsapp-phone-hint" className="text-xs text-dark-400 mt-1.5">{t('settings.whatsappPhoneHint')}</p>
         </div>
 
         <label className="flex items-start gap-3 text-sm text-dark-300 cursor-pointer">
           <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)}
+            disabled={mutating}
             className="mt-0.5 h-4 w-4 rounded border-dark-500 bg-dark-800 text-primary-600 focus:ring-primary-500" />
           <span>{t('settings.whatsappConsent')}</span>
         </label>
@@ -150,7 +164,7 @@ const WhatsAppNotificationSettings: React.FC<Props> = ({ onVerificationChange, o
         </div>
 
         {configuration.consented && (
-          <button type="button" onClick={withdraw} disabled={saving}
+          <button type="button" onClick={withdraw} disabled={mutating}
             className="text-sm text-red-300 hover:text-red-200 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded-sm disabled:opacity-50">
             {t('settings.whatsappWithdraw')}
           </button>
