@@ -1,8 +1,8 @@
 import cron from 'node-cron';
 import { query } from '../config/database';
-import { sendTelegramMessage, initializeTelegramBot } from './telegramService';
+import { initializeTelegramBot } from './telegramService';
 import { getTemplate, renderTemplate, type TemplateVariables } from './templateService';
-import { sendPushForNotification } from './webPushService';
+import { dispatchNotificationChannels } from './notificationChannelDispatcher';
 import { describeExpenseScheduleEs } from '../constants/incomeExpenseTaxonomy';
 import { formatCurrencyAmount, localeTagFromUiLanguage } from '../utils/intlFormat';
 import { getUserCurrencyPair, type UserCurrencyPair } from '../utils/userCurrencyPair';
@@ -119,7 +119,7 @@ function buildCardPaymentTemplateVariables(
   };
 }
 
-const checkAndSendNotifications = async () => {
+export const checkAndSendNotifications = async () => {
   const sweepStartedAt = new Date().toISOString();
   try {
     const today = new Date();
@@ -129,7 +129,8 @@ const checkAndSendNotifications = async () => {
 
     // Get all users with notification settings enabled
     const usersResult = await query(
-      `SELECT DISTINCT u.id, u.telegram_chat_id, u.locale_preference
+      `SELECT DISTINCT u.id, u.telegram_chat_id, u.locale_preference,
+                       u.whatsapp_phone, u.whatsapp_consent_at, u.whatsapp_verified_at
        FROM users u
        INNER JOIN notification_settings ns ON u.id = ns.user_id
        WHERE ns.enabled = true`,
@@ -144,9 +145,9 @@ const checkAndSendNotifications = async () => {
 
       // Get user's notification settings
       const settingsResult = await query(
-        `SELECT notification_type, days_before, telegram_enabled
-         FROM notification_settings
-         WHERE user_id = $1 AND enabled = true`,
+        `SELECT ns.notification_type, ns.days_before, ns.telegram_enabled, ns.whatsapp_enabled
+         FROM notification_settings ns
+         WHERE ns.user_id = $1 AND ns.enabled = true`,
         [userId]
       );
 
@@ -155,6 +156,7 @@ const checkAndSendNotifications = async () => {
         settings[row.notification_type] = {
           daysBefore: row.days_before || [3, 7],
           telegramEnabled: row.telegram_enabled,
+          whatsappEnabled: row.whatsapp_enabled,
         };
       });
 
@@ -221,15 +223,26 @@ const checkAndSendNotifications = async () => {
               );
               const nid = ins.rows[0]?.id as number | undefined;
               if (nid != null) {
-                await sendPushForNotification(userId, {
+                await dispatchNotificationChannels({
+                  userId,
+                  notificationId: nid,
                   title: plainTitle,
                   message,
-                  notificationId: nid,
+                  telegram: {
+                    enabled: Boolean(settings['CARD_PAYMENT']?.telegramEnabled),
+                    chatId: telegramChatId,
+                  },
+                  whatsapp: {
+                    enabled: Boolean(
+                      settings['CARD_PAYMENT']?.whatsappEnabled &&
+                      user.whatsapp_phone &&
+                      user.whatsapp_consent_at &&
+                      user.whatsapp_verified_at
+                    ),
+                    phone: user.whatsapp_phone,
+                  },
+                  pushEnabled: true,
                 });
-              }
-
-              if (settings['CARD_PAYMENT']?.telegramEnabled && telegramChatId) {
-                await sendTelegramMessage(telegramChatId, message);
               }
             }
           }
@@ -297,15 +310,26 @@ const checkAndSendNotifications = async () => {
               );
               const nid = ins.rows[0]?.id as number | undefined;
               if (nid != null) {
-                await sendPushForNotification(userId, {
+                await dispatchNotificationChannels({
+                  userId,
+                  notificationId: nid,
                   title: plainTitle,
                   message,
-                  notificationId: nid,
+                  telegram: {
+                    enabled: Boolean(settings['LOAN_PAYMENT']?.telegramEnabled),
+                    chatId: telegramChatId,
+                  },
+                  whatsapp: {
+                    enabled: Boolean(
+                      settings['LOAN_PAYMENT']?.whatsappEnabled &&
+                      user.whatsapp_phone &&
+                      user.whatsapp_consent_at &&
+                      user.whatsapp_verified_at
+                    ),
+                    phone: user.whatsapp_phone,
+                  },
+                  pushEnabled: true,
                 });
-              }
-
-              if (settings['LOAN_PAYMENT']?.telegramEnabled && telegramChatId) {
-                await sendTelegramMessage(telegramChatId, message);
               }
             }
           }
@@ -380,15 +404,26 @@ const checkAndSendNotifications = async () => {
               );
               const nid = ins.rows[0]?.id as number | undefined;
               if (nid != null) {
-                await sendPushForNotification(userId, {
+                await dispatchNotificationChannels({
+                  userId,
+                  notificationId: nid,
                   title: plainTitle,
                   message,
-                  notificationId: nid,
+                  telegram: {
+                    enabled: Boolean(settings['RECURRING_EXPENSE']?.telegramEnabled),
+                    chatId: telegramChatId,
+                  },
+                  whatsapp: {
+                    enabled: Boolean(
+                      settings['RECURRING_EXPENSE']?.whatsappEnabled &&
+                      user.whatsapp_phone &&
+                      user.whatsapp_consent_at &&
+                      user.whatsapp_verified_at
+                    ),
+                    phone: user.whatsapp_phone,
+                  },
+                  pushEnabled: true,
                 });
-              }
-
-              if (settings['RECURRING_EXPENSE']?.telegramEnabled && telegramChatId) {
-                await sendTelegramMessage(telegramChatId, message);
               }
             }
           }
