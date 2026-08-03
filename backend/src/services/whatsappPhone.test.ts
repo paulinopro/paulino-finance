@@ -13,10 +13,19 @@ describe('WhatsApp phone domain', () => {
     expect(normalizeWhatsAppPhone(input)).toBe(expected);
   });
 
+  it('returns null for null', () => {
+    expect(normalizeWhatsAppPhone(null)).toBeNull();
+  });
+
   it.each(['', '0123456789', '1234567', '1234567890123456', '1ABC5551234'])('rejects %s', (input) => {
     expect(() => normalizeWhatsAppPhone(input)).toThrow('Invalid WhatsApp phone number');
   });
 
-  expect(maskWhatsAppPhone('18095551234')).toBe('*******1234');
-  expect(toOpenWaChatId('18095551234')).toBe('18095551234@c.us');
+  it('masks all but the last four digits', () => {
+    expect(maskWhatsAppPhone('18095551234')).toBe('*******1234');
+  });
+
+  it('creates an OpenWA chat ID', () => {
+    expect(toOpenWaChatId('18095551234')).toBe('18095551234@c.us');
+  });
 });
