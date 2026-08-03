@@ -147,7 +147,7 @@ export const getNotificationSettings = async (req: AuthRequest, res: Response) =
     const userId = req.userId!;
 
     const result = await query(
-      `SELECT notification_type, enabled, days_before, telegram_enabled, email_enabled
+      `SELECT notification_type, enabled, days_before, telegram_enabled, email_enabled, whatsapp_enabled
        FROM notification_settings
        WHERE user_id = $1`,
       [userId]
@@ -160,6 +160,7 @@ export const getNotificationSettings = async (req: AuthRequest, res: Response) =
         daysBefore: row.days_before,
         telegramEnabled: row.telegram_enabled,
         emailEnabled: row.email_enabled,
+        whatsappEnabled: row.whatsapp_enabled,
       };
     });
 
@@ -176,22 +177,39 @@ export const getNotificationSettings = async (req: AuthRequest, res: Response) =
 export const updateNotificationSettings = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { notificationType, enabled, daysBefore, telegramEnabled, emailEnabled } = req.body;
+    const { notificationType, enabled, daysBefore, telegramEnabled, emailEnabled, whatsappEnabled } = req.body;
 
     if (!notificationType) {
       return res.status(400).json({ message: 'Notification type is required' });
     }
 
+    if (whatsappEnabled === true) {
+      const whatsappConfiguration = await query(
+        `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
+         FROM users
+         WHERE id = $1`,
+        [userId]
+      );
+      const user = whatsappConfiguration.rows[0];
+
+      if (!user?.whatsapp_phone || !user.whatsapp_consent_at || !user.whatsapp_verified_at) {
+        return res.status(409).json({
+          message: 'WhatsApp requires a phone number with consent and verification before it can be enabled',
+        });
+      }
+    }
+
     await query(
       `INSERT INTO notification_settings 
-       (user_id, notification_type, enabled, days_before, telegram_enabled, email_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6)
+       (user_id, notification_type, enabled, days_before, telegram_enabled, email_enabled, whatsapp_enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (user_id, notification_type)
        DO UPDATE SET
          enabled = EXCLUDED.enabled,
          days_before = EXCLUDED.days_before,
          telegram_enabled = EXCLUDED.telegram_enabled,
          email_enabled = EXCLUDED.email_enabled,
+         whatsapp_enabled = EXCLUDED.whatsapp_enabled,
          updated_at = CURRENT_TIMESTAMP`,
       [
         userId,
@@ -200,6 +218,7 @@ export const updateNotificationSettings = async (req: AuthRequest, res: Response
         daysBefore || [3, 7],
         telegramEnabled !== undefined ? telegramEnabled : false,
         emailEnabled !== undefined ? emailEnabled : false,
+        whatsappEnabled !== undefined ? whatsappEnabled : false,
       ]
     );
 
@@ -395,7 +414,7 @@ export const testPushNotification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const testNotification = async (req: AuthRequest, res: Response) => {
+export const testTelegramNotification = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
     const { sendTelegramMessage } = await import('../services/telegramService');
