@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import ExternalCalendarSettings from '../components/ExternalCalendarSettings';
+import WhatsAppNotificationSettings from '../components/WhatsAppNotificationSettings';
 import { syncPushSubscriptionWithServer } from '../services/pushSubscription';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -39,6 +40,14 @@ const TIMEZONE_IDS = [
   'UTC',
 ] as const;
 
+interface NotificationTypeSettings {
+  enabled: boolean;
+  telegramEnabled: boolean;
+  whatsappEnabled: boolean;
+  emailEnabled?: boolean;
+  daysBefore: number[];
+}
+
 const Settings: React.FC = () => {
   const { t } = useTranslation();
   const { currencySymbol } = useIntlFormatting();
@@ -51,7 +60,8 @@ const Settings: React.FC = () => {
   const [calendarCardPaymentAmountBasis, setCalendarCardPaymentAmountBasis] =
     useState(DEFAULT_CALENDAR_CARD_PAYMENT_AMOUNT_BASIS);
   const [exchangeRateManualInput, setExchangeRateManualInput] = useState('');
-  const [notificationSettings, setNotificationSettings] = useState<any>({});
+  const [notificationSettings, setNotificationSettings] = useState<Record<string, NotificationTypeSettings>>({});
+  const [whatsappVerified, setWhatsAppVerified] = useState(false);
   const [telegramSaving, setTelegramSaving] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [exchangeSaving, setExchangeSaving] = useState(false);
@@ -163,7 +173,7 @@ const Settings: React.FC = () => {
     }
     setTestingNotification(true);
     try {
-      await api.post('/notifications/test');
+      await api.post('/notifications/test/telegram');
       toast.success(t('settings.toastTelegramTestSent'));
     } catch (error: unknown) {
       const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -185,7 +195,7 @@ const Settings: React.FC = () => {
         toast.error(t(pushFailureI18nKey(pre.reason)));
         return;
       }
-      const { data } = await api.post<{ success?: boolean; message?: string }>('/notifications/push/test');
+      const { data } = await api.post<{ success?: boolean; message?: string }>('/notifications/test/push');
       toast.success(data?.message || t('settings.pushTestFallbackSuccess'));
     } catch (error: unknown) {
       const err = error as {
@@ -198,7 +208,7 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handleNotificationSettingsUpdate = async (type: string, settings: any) => {
+  const handleNotificationSettingsUpdate = async (type: string, settings: NotificationTypeSettings) => {
     try {
       await api.post('/notifications/settings', {
         notificationType: type,
@@ -412,10 +422,12 @@ const Settings: React.FC = () => {
             <h2 className="text-xl font-semibold text-white">{t('settings.notificationsHeading')}</h2>
           </div>
           <div className="space-y-6">
+            <WhatsAppNotificationSettings onVerificationChange={setWhatsAppVerified} />
             {['CARD_PAYMENT', 'LOAN_PAYMENT', 'RECURRING_EXPENSE'].map((type) => {
               const settings = notificationSettings[type] || {
                 enabled: true,
                 telegramEnabled: false,
+                whatsappEnabled: false,
                 daysBefore: [3, 7],
               };
               return (
@@ -456,6 +468,28 @@ const Settings: React.FC = () => {
                           />
                           <div className="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
                         </label>
+                      </div>
+                      <div>
+                        <label className="label">{t('settings.whatsappToggleLabel')}</label>
+                        <label className={`relative inline-flex items-center ${whatsappVerified ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                          <input
+                            type="checkbox"
+                            checked={whatsappVerified ? settings.whatsappEnabled : false}
+                            disabled={!whatsappVerified}
+                            aria-label={t('settings.whatsappToggleLabel')}
+                            onChange={(e) =>
+                              handleNotificationSettingsUpdate(type, {
+                                ...settings,
+                                whatsappEnabled: e.target.checked,
+                              })
+                            }
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-dark-600 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-500 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-dark-700 rounded-full peer peer-disabled:opacity-50 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                        </label>
+                        {!whatsappVerified && (
+                          <p className="text-xs text-dark-400 mt-1.5">{t('settings.whatsappTogglePrerequisite')}</p>
+                        )}
                       </div>
                       <div>
                         <label className="label">{t('settings.daysBeforeLabel')}</label>

@@ -28,6 +28,14 @@ export interface User {
   hasUserSubscriptionRecord?: boolean;
 }
 
+export interface WhatsAppNotificationConfiguration {
+  phone: string | null;
+  consented: boolean;
+  verified: boolean;
+  consentedAt: string | null;
+  verifiedAt: string | null;
+}
+
 export interface CreditCard {
   id: number;
   bankName: string;
