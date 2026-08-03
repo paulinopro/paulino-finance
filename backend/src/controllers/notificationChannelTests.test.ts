@@ -80,6 +80,17 @@ describe('notification channel settings and test routes', () => {
     expect(mockQuery.mock.calls[0][0]).toContain('whatsapp_enabled');
   });
 
+  it.each(['telegramEnabled', 'emailEnabled', 'whatsappEnabled'])(
+    'rejects a non-boolean %s before querying settings',
+    async (channel) => {
+      const { res } = responseDouble();
+
+      await updateNotificationSettings(req({ notificationType: 'PAYMENT_DUE', [channel]: 'true' }), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(mockQuery).not.toHaveBeenCalled();
+    }
+  );
   it('rejects enabling WhatsApp without consent and verification', async () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{ whatsapp_phone: '18095551234', whatsapp_consent_at: null, whatsapp_verified_at: null }],

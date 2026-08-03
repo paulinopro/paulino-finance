@@ -183,6 +183,14 @@ export const updateNotificationSettings = async (req: AuthRequest, res: Response
       return res.status(400).json({ message: 'Notification type is required' });
     }
 
+    if (
+      (telegramEnabled !== undefined && typeof telegramEnabled !== 'boolean') ||
+      (emailEnabled !== undefined && typeof emailEnabled !== 'boolean') ||
+      (whatsappEnabled !== undefined && typeof whatsappEnabled !== 'boolean')
+    ) {
+      return res.status(400).json({ message: 'Notification channel settings must be boolean values' });
+    }
+
     if (whatsappEnabled === true) {
       const whatsappConfiguration = await query(
         `SELECT whatsapp_phone, whatsapp_consent_at, whatsapp_verified_at
