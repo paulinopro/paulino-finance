@@ -13,6 +13,11 @@ import {
   subscribePush,
   unsubscribePush,
 } from '../controllers/notificationController';
+import {
+  getWhatsAppConfiguration,
+  testWhatsAppNotification,
+  updateWhatsAppConfiguration,
+} from '../controllers/whatsappNotificationController';
 import { authenticate } from '../middleware/auth';
 import { requireSubscriptionModule } from '../middleware/requireSubscriptionModule';
 
@@ -26,6 +31,9 @@ router.get('/push/vapid-public-key', getPushVapidPublicKey);
 router.post('/push/subscribe', subscribePush);
 router.post('/push/unsubscribe', unsubscribePush);
 router.post('/push/test', testPushNotification);
+router.get('/whatsapp', getWhatsAppConfiguration);
+router.put('/whatsapp', updateWhatsAppConfiguration);
+router.post('/test/whatsapp', testWhatsAppNotification);
 router.put('/:id/read', markAsRead);
 router.put('/read-all', markAllAsRead);
 router.delete('/:id', deleteNotification);
